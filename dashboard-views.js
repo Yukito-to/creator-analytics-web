@@ -4,9 +4,6 @@
    ============================================================ */
 'use strict';
 
-/* 导出 PNG 的 blob URL 缓存 */
-let _lastBlobUrl = null;
-
 /* ==================== 表格行渲染辅助 ==================== */
 function diffHTML(cur, prev, metric) {
   if (cur == null || prev == null || !isFinite(cur) || !isFinite(prev)) return '<span class="na">—</span>';
@@ -183,7 +180,6 @@ function refreshAll() {
   renderAHT2();
   renderSLA();
   renderAttendance();
-  refreshExportOptions();
   renderReport();
   /* 时段预测若当前可见，也刷新（函数在 dashboard-forecast.js） */
   const fcView = document.getElementById('view-forecast');
@@ -1130,186 +1126,6 @@ function renderAttendance() {
       refreshAll();
     });
   });
-}
-
-/* ==================== 导出图片 ==================== */
-function refreshExportOptions() {
-  const em = ensureChipContainer('exMetric');
-  if (em) {
-    const selectedMetrics = new Set(getCheckedValues('#exMetric'));
-    if (selectedMetrics.size === 0 && METRICS.length > 0) selectedMetrics.add(METRICS[0].key);
-    em.innerHTML = METRICS.map(m =>
-      '<span class="chip' + (selectedMetrics.has(m.key) ? ' on' : '') + '" data-val="' + esc(m.key) + '">' + esc(metricLabel(m)) + '</span>'
-    ).join('');
-  }
-  const fillChips = (id, values, sortFn) => {
-    const sel = ensureChipContainer(id);
-    if (!sel) return;
-    const current = new Set(getCheckedValues('#' + id));
-    const uniq = Array.from(new Set(values)).filter(Boolean);
-    if (sortFn) uniq.sort(sortFn); else uniq.sort();
-    sel.innerHTML = uniq.map(v =>
-      '<span class="chip' + (current.has(v) ? ' on' : '') + '" data-val="' + esc(v) + '">' + esc(v) + '</span>'
-    ).join('');
-  };
-  const bizEl = $('#exBiz');
-  const biz = (bizEl && bizEl.value) || '买手合作';
-  const src = bizToSrc(biz);
-  const srcEmps = srcEmployeeSet(src);
-  const empsForChips = S.roster.filter(e => srcEmps.has(e.name));
-  fillChips('exGroup', empsForChips.map(e => e.group || '—'));
-  fillChips('exBatch', empsForChips.map(e => e.batch || '—'));
-  fillChips('exCategory', empsForChips.map(e => categoryOf(e, S.month) || '—'), (a, b) => catSortKey(a) - catSortKey(b));
-  for (const id of ['exMetric','exGroup','exBatch','exCategory']) {
-    const sel = document.getElementById(id);
-    if (!sel) continue;
-    sel.querySelectorAll('.chip').forEach(ch => { ch.addEventListener('click', () => ch.classList.toggle('on')); });
-  }
-}
-
-function buildExportCanvas() {
-  const bizEl = $('#exBiz');
-  const biz = (bizEl && bizEl.value) || '买手合作';
-  const src = bizToSrc(biz);
-  const metricKeys = getCheckedValues('#exMetric');
-  const groups = getCheckedValues('#exGroup');
-  const batches = getCheckedValues('#exBatch');
-  const cats = getCheckedValues('#exCategory');
-  if (!metricKeys.length) { alert('请至少选择一个指标'); return null; }
-  const srcEmps = srcEmployeeSet(src);
-  const allEmps = S.roster.filter(e => employeeVisible(e) && srcEmps.has(e.name));
-  const groupRows = [];
-  if (groups.length || batches.length || cats.length) {
-    for (const g of groups) {
-      const names = allEmps.filter(e => (e.group || '—') === g).map(e => e.name);
-      if (names.length) groupRows.push({ label: '组别 · ' + g, names });
-    }
-    for (const b of batches) {
-      const names = allEmps.filter(e => (e.batch || '—') === b).map(e => e.name);
-      if (names.length) groupRows.push({ label: '批次 · ' + b, names });
-    }
-    for (const c of cats) {
-      const names = allEmps.filter(e => (categoryOf(e, S.month) || '—') === c).map(e => e.name);
-      if (names.length) groupRows.push({ label: '分类 · ' + c, names });
-    }
-  } else {
-    for (const e of allEmps) groupRows.push({ label: e.name, names: [e.name] });
-  }
-  const cols = timeCols();
-  const header = ['指标', cols.monthLabel];
-  for (const w of cols.wks) header.push('WK' + w);
-  header.push('WK' + cols.wks[1] + '−WK' + cols.wks[0]);
-  header.push('WK' + cols.wks[2] + '−WK' + cols.wks[1]);
-  for (const d of cols.last7) header.push(d.slice(5));
-
-  const rows = [{ cells: header, bg: '#E8EDF3' }];
-  for (const mk of metricKeys) {
-    const metric = METRIC_MAP[mk];
-    const bg = METRIC_BG[mk] || '#ffffff';
-    const m = calcBySrc(src, { monthSet: new Set([S.month]) });
-    const wkA = cols.wks.map(w => calcBySrc(src, { wkSet: new Set([w]) }));
-    const dayA = cols.last7.map(d => calcBySrc(src, { dateSet: new Set([d]) }));
-    const row = ['整体 · ' + metricLabel(metric), fmtVal(m[mk], metric)];
-    for (const w of wkA) row.push(fmtVal(w[mk], metric));
-    row.push(diffText(wkA[1][mk], wkA[0][mk], metric));
-    row.push(diffText(wkA[2][mk], wkA[1][mk], metric));
-    for (const d of dayA) row.push(fmtVal(d[mk], metric));
-    rows.push({ cells: row, bg });
-  }
-  rows.push({ cells: new Array(header.length).fill(''), bg: '#ffffff' });
-  for (const mk of metricKeys) {
-    const metric = METRIC_MAP[mk];
-    const bg = METRIC_BG[mk] || '#ffffff';
-    for (const gr of groupRows) {
-      const nameSet = new Set(gr.names);
-      const m = calcBySrc(src, { nameSet, monthSet: new Set([S.month]) });
-      const wkA = cols.wks.map(w => calcBySrc(src, { nameSet, wkSet: new Set([w]) }));
-      const dayA = cols.last7.map(d => calcBySrc(src, { nameSet, dateSet: new Set([d]) }));
-      const row = [gr.label + ' · ' + metricLabel(metric), fmtVal(m[mk], metric)];
-      for (const w of wkA) row.push(fmtVal(w[mk], metric));
-      row.push(diffText(wkA[1][mk], wkA[0][mk], metric));
-      row.push(diffText(wkA[2][mk], wkA[1][mk], metric));
-      for (const d of dayA) row.push(fmtVal(d[mk], metric));
-      rows.push({ cells: row, bg });
-    }
-    rows.push({ cells: new Array(header.length).fill(''), bg: '#ffffff' });
-  }
-
-  const scale = 2, pad = 24, titleH = 50, cellH = 30, firstW = 220, cellW = 115;
-  const totalW = pad * 2 + firstW + (header.length - 1) * cellW;
-  const totalH = pad * 2 + titleH + rows.length * cellH;
-  const cv = document.createElement('canvas');
-  cv.width = totalW * scale;
-  cv.height = totalH * scale;
-  const ctx = cv.getContext('2d');
-  ctx.scale(scale, scale);
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(0, 0, totalW, totalH);
-  ctx.fillStyle = '#7B8FBF';
-  ctx.font = 'bold 16px sans-serif';
-  ctx.textBaseline = 'middle';
-  ctx.textAlign = 'left';
-  ctx.fillText('创作者数据分析 · ' + biz + ' · ' + S.month, pad, pad + 18);
-  const y0 = pad + titleH;
-  ctx.font = 'bold 12px sans-serif';
-  ctx.textAlign = 'center';
-  for (let c = 0; c < header.length; c++) {
-    const x = pad + (c === 0 ? 0 : firstW + (c-1) * cellW);
-    const w = c === 0 ? firstW : cellW;
-    ctx.fillStyle = '#F5F4F0';
-    ctx.fillRect(x, y0, w, cellH);
-    ctx.strokeStyle = '#E5E1DA';
-    ctx.strokeRect(x, y0, w, cellH);
-    ctx.fillStyle = '#7A7A87';
-    ctx.fillText(String(header[c]), x + w / 2, y0 + cellH / 2);
-  }
-  ctx.font = '12px sans-serif';
-  for (let r = 1; r < rows.length; r++) {
-    const rowObj = rows[r];
-    const row = rowObj.cells;
-    const rowBg = rowObj.bg || '#ffffff';
-    const y = y0 + r * cellH;
-    for (let c = 0; c < header.length; c++) {
-      const x = pad + (c === 0 ? 0 : firstW + (c-1) * cellW);
-      const w = c === 0 ? firstW : cellW;
-      ctx.fillStyle = rowBg;
-      ctx.fillRect(x, y, w, cellH);
-      ctx.strokeStyle = '#EBE8E1';
-      ctx.strokeRect(x, y, w, cellH);
-      const txt = row[c] == null ? '' : String(row[c]);
-      ctx.fillStyle = '#3A3A44';
-      ctx.textAlign = 'center';
-      if (txt.startsWith('↑')) ctx.fillStyle = '#7CAE8B';
-      else if (txt.startsWith('↓')) ctx.fillStyle = '#D48A8A';
-      ctx.fillText(txt, x + w / 2, y + cellH / 2);
-    }
-  }
-  return cv;
-}
-function previewExport() {
-  const cv = buildExportCanvas();
-  if (!cv) return;
-  const box = $('#exPreview');
-  if (!box) return;
-  box.innerHTML = '';
-  if (_lastBlobUrl) { URL.revokeObjectURL(_lastBlobUrl); _lastBlobUrl = null; }
-  cv.toBlob(blob => {
-    _lastBlobUrl = URL.createObjectURL(blob);
-    const img = document.createElement('img');
-    img.src = _lastBlobUrl;
-    box.appendChild(img);
-    const btn = $('#btnExport');
-    if (btn) btn.disabled = false;
-  }, 'image/png');
-}
-function downloadExport() {
-  if (!_lastBlobUrl) { alert('请先生成预览'); return; }
-  const bizEl = $('#exBiz');
-  const biz = (bizEl && bizEl.value) || '买手合作';
-  const a = document.createElement('a');
-  a.href = _lastBlobUrl;
-  a.download = 'creator-analytics-' + biz + '-' + S.month + '.png';
-  a.click();
 }
 
 /* ============================================================

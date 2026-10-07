@@ -37,7 +37,6 @@
   <button data-view="sla">🎯 达成SLA</button>
   <button data-view="attendance">🗓 出勤</button>
   <button data-view="forecast">🔮 时段预测</button>
-  <button data-view="export">🖼 导出</button>
   <button data-view="schedule">🧠 排班</button>
   <button data-view="report">📄 周报</button>
   <button data-view="aisetting">🤖 AI 设置</button>
@@ -235,26 +234,6 @@
       <div id="fcNotes" class="muted" style="margin-top:10px"></div>
 
       <div id="fcAiOut" class="ai-out" style="margin-top:14px;display:none"></div>
-    </div>
-  </section>
-
-  <section id="view-export" class="view">
-    <div class="card">
-      <div class="card-head">
-        <h2>导出图表 <span class="help" data-tip="生成 PNG 图片。">?</span></h2>
-        <div class="head-controls">
-          <button id="btnPreview" class="btn primary">生成预览</button>
-          <button id="btnExport" class="btn ghost2" disabled>下载图片</button>
-        </div>
-      </div>
-      <div class="export-filters">
-        <div class="dim-row"><span class="dim-label">业务线</span><select id="exBiz" class="dim-select"></select></div>
-        <div class="dim-row"><span class="dim-label">指标</span><div id="exMetric" class="chips" style="margin:0"></div></div>
-        <div class="dim-row"><span class="dim-label">组别</span><div id="exGroup" class="chips" style="margin:0"></div></div>
-        <div class="dim-row"><span class="dim-label">批次</span><div id="exBatch" class="chips" style="margin:0"></div></div>
-        <div class="dim-row"><span class="dim-label">分类</span><div id="exCategory" class="chips" style="margin:0"></div></div>
-      </div>
-      <div id="exPreview" class="preview-box"><div class="muted">选择条件后点击「生成预览」。</div></div>
     </div>
   </section>
 

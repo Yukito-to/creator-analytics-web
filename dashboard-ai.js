@@ -1217,7 +1217,7 @@ function initAiPanel() {
 
 /* ==================== 全局初始化引导 ==================== */
 function initSelects() {
-  for (const s of ['#ovBiz','#peBiz','#tmBiz','#s30Biz','#a2Biz','#slaBiz','#exBiz','#rpBiz','#fcBiz']) {
+  for (const s of ['#ovBiz','#peBiz','#tmBiz','#s30Biz','#a2Biz','#slaBiz','#rpBiz','#fcBiz']) {
     const el = $(s);
     if (!el) continue;
     const cur = el.value;
@@ -1242,7 +1242,6 @@ function initSelects() {
   }
   refreshPersonOptions();
   refreshTeamOptions();
-  refreshExportOptions();
   renderTargetConfig();
 
   const fcStart = $('#fcStartDate');
@@ -1306,8 +1305,6 @@ function bindEvents() {
     const fn = $('#fcNotes'); if (fn) fn.innerHTML = '';
     const fa = $('#fcAiOut'); if (fa) { fa.style.display = 'none'; fa.innerHTML = ''; }
     const ftip = $('#fcAutoTip'); if (ftip) { ftip.style.display = 'none'; ftip.innerHTML = ''; }
-    const ex = $('#exPreview'); if (ex) ex.innerHTML = '<div class="muted">选择条件后点击「生成预览」。</div>';
-    const be = $('#btnExport'); if (be) be.disabled = true;
     const rb = $('#rpBody'); if (rb) rb.innerHTML = '';
     const rc = $('#btnRpCopy'); if (rc) rc.disabled = true;
     const rm = $('#btnRpMd'); if (rm) rm.disabled = true;
@@ -1345,11 +1342,8 @@ function bindEvents() {
   });
   on('#a2Biz', 'change', renderAHT2);
   on('#slaBiz', 'change', renderSLA);
-  on('#exBiz', 'change', refreshExportOptions);
   on('#s30Biz', 'change', renderS30);
   on('#attName', 'change', renderAttendance);
-  on('#btnPreview', 'click', previewExport);
-  on('#btnExport', 'click', downloadExport);
   on('#rpBiz', 'change', () => { renderTargetConfig(); renderReport(); });
   on('#rpWK', 'change', renderReport);
   on('#btnRpCopy', 'click', copyReport);
@@ -1366,7 +1360,7 @@ function bindEvents() {
 }
 
 function init() {
-  ['peMetric', 'tmMetric', 'exMetric', 'exGroup', 'exBatch', 'exCategory'].forEach(ensureChipContainer);
+  ['peMetric', 'tmMetric'].forEach(ensureChipContainer);
   bindEvents();
   initAiPanel();
   renderTargetConfig();

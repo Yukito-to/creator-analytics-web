@@ -863,3 +863,10 @@ tbody tr:active td:first-child { background: #FAFAF7; }
   .rp-wrap { box-shadow: none; border: none; padding: 0; }
   body { background: #fff; }
 }
+
+/* ==================== 智能排班 ==================== */
+.sc-work  { background:#EEF1F7; }
+.sc-late  { background:#EDE7F5; color:#7B5FA5; font-weight:600; }
+.sc-rest  { background:#F5F4F0; color:#A0A0AE; }
+.sc-leave { background:#FDF6E3; color:#B36A00; }
+.sc-short { background:#FBE9E7; color:#C75C5C; font-weight:600; }

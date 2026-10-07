@@ -1375,6 +1375,87 @@ function init() {
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
 else init();
 
+/* ==================== 智能排班 · 诉求 AI 解析 ==================== */
+const SC_REQ_SYSTEM_PROMPT = [
+  '你是排班诉求解析助手。请把员工自然语言诉求转成结构化 JSON 数组。',
+  '输出格式（严格 JSON，不要 Markdown 包裹）：',
+  '[{',
+  '  "name": "员工姓名",',
+  '  "items": [',
+  '    { "type": "same_as", "target_person": "张三", "raw": "跟张三一样", "confidence": 0.95 },',
+  '    { "type": "only",    "target_shift": "E1", "raw": "只上E1", "confidence": 0.9 },',
+  '    { "type": "not",     "target_shifts": ["R","D","E1","E2","R（短）","D（短）","E（短）"], "raw": "不上晚班", "confidence": 0.9 },',
+  '    { "type": "prefer",  "target_shifts": ["B1","B2","K1","K2"], "raw": "希望上早班", "confidence": 0.8 }',
+  '  ]',
+  '}]',
+  '规则：',
+  '- "跟/和 XXX 一样" → type: same_as, target_person: XXX',
+  '- "只上 X" → type: only, target_shift: X',
+  '- "不上 X / 不上晚班 / 不上早班" → type: not',
+  '- "希望 / 想 / 尽量上 X" → type: prefer',
+  '- 晚班 = [R, D, E1, E2, R（短）, D（短）, E（短）]',
+  '- 早班 = [B1, B2, K1, K2, B（短）, K（短）]',
+  '- 中班 = [S, C, C（短）]',
+  '仅输出 JSON。'
+].join('\n');
+
+/* 宽松 JSON 解析：剥掉 Markdown 代码围栏后尝试解析，失败再截取首个 [...] 片段 */
+function scParseJsonLoose(s) {
+  if (!s) return null;
+  let t = String(s).trim();
+  t = t.replace(/^```(?:json)?/i, '').replace(/```\s*$/, '').trim();
+  try { return JSON.parse(t); } catch (_) {}
+  const m = /\[[\s\S]*\]/.exec(t);
+  if (m) { try { return JSON.parse(m[0]); } catch (_) {} }
+  return null;
+}
+
+/* 把员工自然语言诉求按 10 人/批交给 AI 解析（复用智谱 SSE 通道），
+   结果合并到 S.parsedRequests；单批失败仅标记 error，不阻断流程 */
+async function parseScheduleRequests() {
+  const emps = [];
+  const seen = new Set();
+  for (const d of S.scheduleDraft) {
+    if (!d.requestText || seen.has(d.name)) continue;
+    seen.add(d.name);
+    emps.push({ name: d.name, raw: d.requestText });
+  }
+  if (!emps.length) { toast('未检测到员工诉求'); return; }
+  const status = document.getElementById('scReqStatus');
+  const setSt = t => { if (status) status.textContent = t; };
+  S.parsedRequests = S.parsedRequests || {};
+  const cfg = loadAiConfig();
+  if (!cfg.key) {
+    for (const e of emps) if (!S.parsedRequests[e.name]) S.parsedRequests[e.name] = { items: [], error: '未配置 AI Key' };
+    setSt('⚠ 未配置 AI Key（请到「🤖 AI 设置」页填写），暂用原始文本占位');
+    return;
+  }
+  if (typeof _aiStreaming !== 'undefined' && _aiStreaming) { toast('AI 正在执行其他任务，请稍后再试'); return; }
+  for (let i = 0; i < emps.length; i += 10) {
+    const batch = emps.slice(i, i + 10);
+    setSt('解析中… ' + Math.min(i + 10, emps.length) + '/' + emps.length);
+    const userMsg = '请解析以下员工排班诉求：\n' + batch.map(e => e.name + '：' + e.raw).join('\n');
+    let acc = '';
+    try {
+      await callZhipuAI(cfg.key, cfg.model, [
+        { role: 'system', content: SC_REQ_SYSTEM_PROMPT },
+        { role: 'user', content: userMsg }
+      ], chunk => { acc += chunk; }, null, null);
+      const json = scParseJsonLoose(acc);
+      const arr = Array.isArray(json) ? json : ((json && json.employees) || []);
+      for (const item of arr) {
+        if (!item || !item.name) continue;
+        S.parsedRequests[item.name] = { items: Array.isArray(item.items) ? item.items : [], error: null };
+      }
+      for (const e of batch) if (!S.parsedRequests[e.name]) S.parsedRequests[e.name] = { items: [], error: '未识别' };
+    } catch (e) {
+      console.warn('[parseScheduleRequests]', e);
+      for (const emp of batch) S.parsedRequests[emp.name] = { items: [], error: '解析失败：' + e.message };
+    }
+  }
+  setSt('✓ 已解析 ' + emps.length + ' 人');
+}
+
 /* ============================================================
    END OF dashboard-ai.js
    ============================================================ */

@@ -164,6 +164,8 @@ function switchView(name) {
   const el = document.getElementById('view-' + name);
   if (el) el.classList.add('active');
   $$('#tabs button').forEach(b => b.classList.toggle('active', b.dataset.view === name));
+  /* 智能排班：切到该页时渲染面板（函数在 dashboard-schedule.js） */
+  if (name === 'schedule' && typeof renderSchedulePanel === 'function') renderSchedulePanel();
 }
 function afterLoad() {
   renderImportSummary();
@@ -188,6 +190,11 @@ function refreshAll() {
   if (fcView && fcView.classList.contains('active') && typeof renderForecastConfig === 'function') {
     renderForecastConfig();
     if (typeof renderForecastResult === 'function') renderForecastResult();
+  }
+  /* 智能排班若当前可见，也刷新（函数在 dashboard-schedule.js） */
+  const scView = document.getElementById('view-schedule');
+  if (scView && scView.classList.contains('active') && typeof renderSchedulePanel === 'function') {
+    renderSchedulePanel();
   }
 }
 

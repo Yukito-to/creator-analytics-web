@@ -62,6 +62,9 @@ const MAP_DEF = {
   business2: { l1:'一级打点', l2:'二级打点', biz:'业务线' },
   buyerSla:   {},
   bloggerSla: {},
+  /* 智能排班：两张特殊 sheet，结构特殊，不走通用字段映射，由专用函数手工解析 */
+  scheduleDraft: {},
+  shiftPeriods:  {},
 };
 const FIELD_LABEL = { name:'姓名', date:'日期', period:'时段', l1:'一级打点', l2:'二级打点', volume:'CASE处理量（人工服务量）', s30Num:'30S接起率-分子', s30Den:'30S接起率-分母', aht:'CASE处理时长（分钟）', solved:'已解决量', solveEval:'解决评价量', satisfy:'满意量', satisfyEval:'满意评价量', escalate:'升级二线工单数', repeat72:'全渠道72H重复进线量（T-3）', fcrDen:'全渠道72HFCR分母（T-3）', online:'在线时长', after:'后处理时长', official:'公务时长', train:'培训时长', mentor:'带教时长', rest:'小休时长（含busy）', meal:'就餐时长', total:'总登录时长（不含就餐）', biz:'业务线', id:'质检对象id', pass:'是否合格' };
 const MAP_TITLE = { buyer:'买手员工数据', blogger:'博主员工数据', inspectionBuyer:'买手员工质检', inspectionBlogger:'博主员工质检', worktime:'工时', business:'业务线映射', business2:'二级打点映射', buyerSla:'买手员工SLA', bloggerSla:'博主员工SLA' };
@@ -531,7 +534,19 @@ const S = {
   volumeForecast:{},
   forecastInputs:{},
   forecastHolidays:new Set(),
-  forecastWorkdays:new Set()
+  forecastWorkdays:new Set(),
+  /* ==================== 智能排班 ==================== */
+  scheduleDraft:  [],   // [{name, date, shift, requestText}]
+  shiftPeriods:   {},   // {shift: {'9':60, '10':0, ...}}   只在分钟数>0 时写入，缺省=0
+  shiftMeta:      {},   // {shift: {totalMin, restDays, startTime, endTime, mealTime}}
+  scheduleCycle:  { start:'', end:'', reqStart:'', reqEnd:'' },
+  shiftPool:      [],   // 用户勾选的可用班次
+  shiftReqs:      {},   // {biz: {shift: {weekday:N, weekend:N}}}   N=null 表示无限制
+  employeeCPH:    {},   // {name: {'9':cph, '10':cph, ...}}
+  parsedRequests: {},   // {name: {items:[{type, target_shift, target_shifts, target_person, raw, confidence}], error}}
+  holidayQuota:   {},   // {name: {base, tripleDays, used, remain, total}}
+  scheduleResult: [],   // [{date, name, shift, biz}]
+  scheduleDiag:   {}    // 算法诊断信息
 };
 
 /* ==================== 格式化工具 ==================== */
@@ -603,6 +618,9 @@ function toast(msg) {
 /* ==================== 工作表识别 ==================== */
 function identify(name) {
   const n = String(name);
+  /* 智能排班：必须放在通用规则之前——否则「班次时段」会被 /班次/ 截胡、「排班草稿」会被 /班表|排班/ 截胡 */
+  if (/排班草稿|排班诉求|草稿.*诉求/.test(n))   return 'scheduleDraft';
+  if (/班次时段|班次.*分钟|时段表/.test(n))     return 'shiftPeriods';
   if (/^预测量$|预测总量|日度总量表|volumeForecast/i.test(n)) return 'volumeForecast';
   if (/花名册|名单|员工表|人员表|人员信息/.test(n)) return 'roster';
   if (/班次/.test(n)) return 'shift';
@@ -884,6 +902,201 @@ function parseDateFlexible(v, refYear, refMonth) {
   return parseDate(s);
 }
 
+/* ==================== 智能排班 · sheet 解析 ==================== */
+/* 「排班草稿及诉求」：第 1 行 B 列起为日期；第 2 行起每行一个员工，
+   A 列 = 姓名，日期列 = 当日班次，含「诉求」的列 = 诉求文本（只在首条挂载一次） */
+function parseScheduleDraftSheet() {
+  S.scheduleDraft = [];
+  const sheet = S.sheets.scheduleDraft;
+  if (!sheet) return;
+  const rows = sheet.rows || [];
+  if (rows.length < 2) return;
+  const refYear  = S.latestDate ? parseInt(S.latestDate.slice(0, 4), 10) : new Date().getFullYear();
+  const refMonth = S.latestDate ? parseInt(S.latestDate.slice(5, 7), 10) : (new Date().getMonth() + 1);
+
+  /* 第 1 行：从 B 列起扫描日期 */
+  const head = rows[0] || [];
+  const dateCols = [];
+  for (let c = 1; c < head.length; c++) {
+    const d = parseDateFlexible(head[c], refYear, refMonth);
+    if (d) dateCols.push({ idx: c, date: d });
+  }
+  if (!dateCols.length) return;
+
+  /* 诉求列：优先取表头含「诉求」的最后一列，否则取最后一个有内容的非日期列兜底 */
+  let reqCol = -1;
+  const isDateCol = c => dateCols.some(dc => dc.idx === c);
+  for (let c = head.length - 1; c > 0; c--) {
+    if (isDateCol(c)) continue;
+    if (/诉求/.test(String(head[c] || ''))) { reqCol = c; break; }
+  }
+  if (reqCol < 0) {
+    for (let c = head.length - 1; c > 0; c--) {
+      if (isDateCol(c)) continue;
+      const hasText = rows.slice(1, Math.min(rows.length, 6)).some(r => String((r || [])[c] || '').trim());
+      if (hasText) { reqCol = c; break; }
+    }
+  }
+
+  const reqByName = {};
+  for (let r = 1; r < rows.length; r++) {
+    const row = rows[r] || [];
+    const name = String(row[0] || '').trim();
+    if (!name) continue;
+    if (reqCol >= 0) {
+      const t = String(row[reqCol] || '').trim();
+      if (t && reqByName[name] == null) reqByName[name] = t;
+    }
+    for (const dc of dateCols) {
+      const shift = String(row[dc.idx] || '').trim();
+      if (!shift) continue;
+      S.scheduleDraft.push({ name, date: dc.date, shift, requestText: '' });
+    }
+  }
+  /* 诉求文本只在每位员工的首条记录上挂载一次 */
+  for (const rec of S.scheduleDraft) {
+    if (reqByName[rec.name]) { rec.requestText = reqByName[rec.name]; delete reqByName[rec.name]; }
+  }
+}
+
+/* 「班次时段」：A 列 = 班次名（保留全角括号原样）；B–P 列(idx1-15) = 9–23 时对应的分钟数；
+   Q 列(idx16) = totalMin；R 列(idx17) = restDays；S–U 列(idx18-20) = 开始/结束/就餐 元信息。
+   A 列为空的行视为「班次组标题」跳过 */
+function parseShiftPeriodsSheet() {
+  S.shiftPeriods = {};
+  S.shiftMeta = {};
+  const sheet = S.sheets.shiftPeriods;
+  if (!sheet) return;
+  const rows = sheet.rows || [];
+  for (let r = 0; r < rows.length; r++) {
+    const row = rows[r] || [];
+    const shift = String(row[0] || '').trim();
+    if (!shift) continue;
+    const periods = {};
+    let sumMin = 0;
+    for (let i = 1; i <= 15; i++) {
+      const m = num(row[i]);
+      if (m > 0) { periods[String(i + 8)] = m; sumMin += m; }   // idx1→9时 … idx15→23时
+    }
+    S.shiftPeriods[shift] = periods;
+    const totalMin = num(row[16]);
+    const restDays = num(row[17]);
+    S.shiftMeta[shift] = {
+      totalMin: totalMin > 0 ? totalMin : sumMin,
+      restDays: restDays > 0 ? restDays : 0,
+      startTime: String(row[18] || '').trim(),
+      endTime:   String(row[19] || '').trim(),
+      mealTime:  String(row[20] || '').trim(),
+    };
+  }
+}
+
+/* ==================== 智能排班 · CPH 计算 ==================== */
+/* CPH = 每在岗小时服务量（Cases Per Hour）。
+   从 S.records 聚合该员工 (date, hour) 服务量，从 S.scheduleDraft + S.shiftPeriods
+   反推 (date, hour) 在岗小时；仅统计「在岗小时>0」的日期样本：
+   样本 ≥10 取 P80；5~9 取 P75；1~4 取均值×1.08；无样本用全时段均值，仍无则用同组均值兜底 */
+function calcEmployeeCPH(name, alpha) {
+  alpha = alpha || 1.0;
+  const out = {};
+  const REST_LEAVE = ['放休', '放休0.5', '事假', '病假', '丧假', '婚假'];
+
+  /* 1. 聚合该员工每个 (date, hour) 的服务量 */
+  const volMap = new Map();   // key: date|hour → volume
+  for (const r of S.records) {
+    if (r.name !== name) continue;
+    const p = normPeriod(r.period);
+    if (!p) continue;
+    const key = r.date + '|' + p;
+    volMap.set(key, (volMap.get(key) || 0) + (r.volume || 0));
+  }
+
+  /* 2. 从排班草稿 + 班次时段反推每个 (date, hour) 的在岗小时 */
+  const onDutyMap = new Map();   // key: date|hour → 在岗小时
+  for (const d of S.scheduleDraft) {
+    if (d.name !== name) continue;
+    const shift = d.shift;
+    if (!shift || REST_LEAVE.indexOf(shift) >= 0) continue;
+    const mins = S.shiftPeriods[shift] || {};
+    for (const h in mins) {
+      if (mins[h] > 0) {
+        const key = d.date + '|' + h;
+        onDutyMap.set(key, (onDutyMap.get(key) || 0) + mins[h] / 60);
+      }
+    }
+  }
+
+  /* 3. 收集逐时段 CPH 样本（仅在岗时段有效） */
+  const samples = {};   // {hour: [cph, ...]}
+  for (const [key, vol] of volMap) {
+    const hoursOn = onDutyMap.get(key) || 0;
+    if (hoursOn <= 0) continue;
+    const period = key.split('|')[1];
+    if (!samples[period]) samples[period] = [];
+    samples[period].push(vol / hoursOn);
+  }
+
+  const quantile = (arr, q) => {
+    if (!arr.length) return 0;
+    const s = arr.slice().sort((a, b) => a - b);
+    const pos = (s.length - 1) * q;
+    const lo = Math.floor(pos), hi = Math.ceil(pos);
+    return lo === hi ? s[lo] : s[lo] + (s[hi] - s[lo]) * (pos - lo);
+  };
+
+  /* 4. 全时段整体均值（样本不足时兜底） */
+  let gSum = 0, gCnt = 0;
+  for (const h in samples) for (const v of samples[h]) { gSum += v; gCnt++; }
+  const globalAvg = gCnt ? gSum / gCnt : 0;
+  const peerAvg = gCnt ? 0 : calcPeerAvgCPH(name);
+
+  /* 5. 分时段产出 CPH，最后乘激进系数 alpha */
+  for (const h of PREDICT_PERIODS) {
+    const arr = samples[h] || [];
+    let cph;
+    if (arr.length >= 10)     cph = quantile(arr, 0.80);
+    else if (arr.length >= 5) cph = quantile(arr, 0.75);
+    else if (arr.length >= 1) cph = arr.reduce((s, x) => s + x, 0) / arr.length * 1.08;
+    else                      cph = globalAvg || peerAvg || 0;
+    out[h] = Math.max(0, cph * alpha);
+  }
+  return out;
+}
+
+/* 同组（同业务线 + 同分类）员工整体 CPH 均值 = Σ服务量 / Σ在岗小时，用于完全无数据员工的兜底 */
+function calcPeerAvgCPH(name) {
+  const me = getEmp(name);
+  const sameGroup = n => {
+    if (!me) return true;
+    const e = getEmp(n);
+    return !!e && e.biz === me.biz && categoryOf(e, S.month) === categoryOf(me, S.month);
+  };
+  const REST_LEAVE = ['放休', '放休0.5', '事假', '病假', '丧假', '婚假'];
+  let vol = 0, hrs = 0;
+  for (const r of S.records) {
+    if (!r.name || r.name === name || !sameGroup(r.name)) continue;
+    vol += r.volume || 0;
+  }
+  for (const d of S.scheduleDraft) {
+    if (d.name === name || !sameGroup(d.name)) continue;
+    const shift = d.shift;
+    if (!shift || REST_LEAVE.indexOf(shift) >= 0) continue;
+    const mins = S.shiftPeriods[shift] || {};
+    for (const h in mins) if (mins[h] > 0) hrs += mins[h] / 60;
+  }
+  return hrs > 0 ? vol / hrs : 0;
+}
+
+/* 遍历所有参与员工，产出全员 CPH 表（生成后可在 UI 手动覆盖单个值） */
+function calcAllEmployeeCPH() {
+  const el = document.getElementById('scCphAlpha');
+  const alpha = parseFloat((el && el.value) || '1.00') || 1.0;
+  S.employeeCPH = {};
+  for (const e of scActiveEmployees()) {
+    S.employeeCPH[e.name] = calcEmployeeCPH(e.name, alpha);
+  }
+}
+
 /* ==================== SLA 表解析 ==================== */
 function normPctVal(v) { const n = num(v); if (!isFinite(n)) return null; return n > 1 ? n / 100 : n; }
 function parseSlaSheet(kind) {
@@ -1057,6 +1270,14 @@ function buildAll() {
     } else {
       for (let i = 0; i < 3; i++) { const d = dateAdd(S.latestDate, -i); if (d) S.s30Dates.add(d); }
     }
+  }
+
+  /* 智能排班：解析「排班草稿及诉求」与「班次时段」两张 sheet（依赖 latestDate 推断年份） */
+  if (S.sheets.scheduleDraft) {
+    try { parseScheduleDraftSheet(); } catch (e) { console.warn('[scheduleDraft] 解析失败：', e); }
+  }
+  if (S.sheets.shiftPeriods) {
+    try { parseShiftPeriodsSheet(); } catch (e) { console.warn('[shiftPeriods] 解析失败：', e); }
   }
 }
 

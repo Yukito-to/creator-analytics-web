@@ -3,6 +3,223 @@
    ============================================================ */
 'use strict';
 
+/* ==================== XLSX 生成工具（无第三方依赖） ==================== */
+function _colLetter(n) {
+  let s = '';
+  n = Number(n) || 0;
+  while (n > 0) {
+    const r = (n - 1) % 26;
+    s = String.fromCharCode(65 + r) + s;
+    n = Math.floor((n - 1) / 26);
+  }
+  return s || 'A';
+}
+function _escXml(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+function _crc32(bytes) {
+  if (!_crc32._table) {
+    const t = new Uint32Array(256);
+    for (let i = 0; i < 256; i++) {
+      let c = i;
+      for (let j = 0; j < 8; j++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+      t[i] = c;
+    }
+    _crc32._table = t;
+  }
+  const table = _crc32._table;
+  let crc = 0xFFFFFFFF;
+  for (let i = 0; i < bytes.length; i++) crc = (crc >>> 8) ^ table[(crc ^ bytes[i]) & 0xFF];
+  return (crc ^ 0xFFFFFFFF) >>> 0;
+}
+function _zipBuild(files) {
+  const enc = new TextEncoder();
+  const parts = [];
+  const cd = [];
+  let offset = 0;
+  for (const f of files) {
+    const nameBytes = enc.encode(f.name);
+    const data = f.data instanceof Uint8Array ? f.data : enc.encode(String(f.data));
+    const crc = _crc32(data);
+    const size = data.length;
+
+    const lh = new Uint8Array(30 + nameBytes.length);
+    const lv = new DataView(lh.buffer);
+    lv.setUint32(0, 0x04034b50, true);
+    lv.setUint16(4, 20, true);
+    lv.setUint16(6, 0, true);
+    lv.setUint16(8, 0, true);
+    lv.setUint16(10, 0, true);
+    lv.setUint16(12, 0x21, true);
+    lv.setUint32(14, crc, true);
+    lv.setUint32(18, size, true);
+    lv.setUint32(22, size, true);
+    lv.setUint16(26, nameBytes.length, true);
+    lv.setUint16(28, 0, true);
+    lh.set(nameBytes, 30);
+    parts.push(lh, data);
+
+    const ch = new Uint8Array(46 + nameBytes.length);
+    const cv = new DataView(ch.buffer);
+    cv.setUint32(0, 0x02014b50, true);
+    cv.setUint16(4, 20, true);
+    cv.setUint16(6, 20, true);
+    cv.setUint16(8, 0, true);
+    cv.setUint16(10, 0, true);
+    cv.setUint16(12, 0, true);
+    cv.setUint16(14, 0x21, true);
+    cv.setUint32(16, crc, true);
+    cv.setUint32(20, size, true);
+    cv.setUint32(24, size, true);
+    cv.setUint16(28, nameBytes.length, true);
+    cv.setUint16(30, 0, true);
+    cv.setUint16(32, 0, true);
+    cv.setUint16(34, 0, true);
+    cv.setUint16(36, 0, true);
+    cv.setUint32(38, 0, true);
+    cv.setUint32(42, offset, true);
+    ch.set(nameBytes, 46);
+    cd.push(ch);
+
+    offset += lh.length + size;
+  }
+  let cdSize = 0;
+  for (const c of cd) cdSize += c.length;
+  const eocd = new Uint8Array(22);
+  const ev = new DataView(eocd.buffer);
+  ev.setUint32(0, 0x06054b50, true);
+  ev.setUint16(4, 0, true);
+  ev.setUint16(6, 0, true);
+  ev.setUint16(8, cd.length, true);
+  ev.setUint16(10, cd.length, true);
+  ev.setUint32(12, cdSize, true);
+  ev.setUint32(16, offset, true);
+  ev.setUint16(20, 0, true);
+  return new Blob([...parts, ...cd, eocd], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  });
+}
+
+const _XLSX_STYLES_XML =
+  '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+  '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+    '<fonts count="2">' +
+      '<font><sz val="11"/><name val="Calibri"/></font>' +
+      '<font><b/><sz val="11"/><name val="Calibri"/></font>' +
+    '</fonts>' +
+    '<fills count="2">' +
+      '<fill><patternFill patternType="none"/></fill>' +
+      '<fill><patternFill patternType="gray125"/></fill>' +
+    '</fills>' +
+    '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>' +
+    '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
+    '<cellXfs count="2">' +
+      '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>' +
+      '<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/>' +
+    '</cellXfs>' +
+    '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>' +
+  '</styleSheet>';
+
+function _buildSheetXml(rows, opts) {
+  opts = opts || {};
+  const parts = [
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+    '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+  ];
+  if (opts.cols && opts.cols.length) {
+    parts.push('<cols>');
+    for (const c of opts.cols) {
+      parts.push('<col min="' + c.min + '" max="' + c.max + '" width="' + c.width + '" customWidth="1"/>');
+    }
+    parts.push('</cols>');
+  }
+  parts.push('<sheetData>');
+  for (let ri = 0; ri < rows.length; ri++) {
+    const row = rows[ri];
+    if (!row) continue;
+    parts.push('<row r="' + (ri + 1) + '">');
+    for (let ci = 0; ci < row.length; ci++) {
+      const cell = row[ci];
+      if (cell == null) continue;
+      const ref = _colLetter(ci + 1) + (ri + 1);
+      const s = cell.s != null ? cell.s : 0;
+      if (cell.t === 'n' && cell.v !== '' && cell.v != null && isFinite(cell.v)) {
+        parts.push('<c r="' + ref + '" s="' + s + '"><v>' + cell.v + '</v></c>');
+      } else {
+        const txt = cell.v == null ? '' : String(cell.v);
+        if (txt === '') continue;
+        parts.push('<c r="' + ref + '" s="' + s + '" t="inlineStr"><is><t xml:space="preserve">' + _escXml(txt) + '</t></is></c>');
+      }
+    }
+    parts.push('</row>');
+  }
+  parts.push('</sheetData>');
+  if (opts.merges && opts.merges.length) {
+    parts.push('<mergeCells count="' + opts.merges.length + '">');
+    for (const m of opts.merges) parts.push('<mergeCell ref="' + m + '"/>');
+    parts.push('</mergeCells>');
+  }
+  parts.push('</worksheet>');
+  return parts.join('');
+}
+
+function buildXlsxBlob(sheetName, rows, opts) {
+  opts = opts || {};
+  const enc = new TextEncoder();
+  const files = [];
+
+  files.push({
+    name: '[Content_Types].xml',
+    data: enc.encode(
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+        '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+        '<Default Extension="xml" ContentType="application/xml"/>' +
+        '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>' +
+        '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>' +
+        '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>' +
+      '</Types>'
+    )
+  });
+  files.push({
+    name: '_rels/.rels',
+    data: enc.encode(
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>' +
+      '</Relationships>'
+    )
+  });
+  files.push({
+    name: 'xl/workbook.xml',
+    data: enc.encode(
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" ' +
+        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
+        '<sheets><sheet name="' + _escXml(sheetName) + '" sheetId="1" r:id="rId1"/></sheets>' +
+      '</workbook>'
+    )
+  });
+  files.push({
+    name: 'xl/_rels/workbook.xml.rels',
+    data: enc.encode(
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>' +
+        '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>' +
+      '</Relationships>'
+    )
+  });
+  files.push({ name: 'xl/styles.xml', data: enc.encode(_XLSX_STYLES_XML) });
+  files.push({ name: 'xl/worksheets/sheet1.xml', data: enc.encode(_buildSheetXml(rows, opts)) });
+  return _zipBuild(files);
+}
+
 /* ==================== 时段预测视图配置 ==================== */
 function renderForecastConfig() {
   const grid = $('#fcDailyGrid');
@@ -12,7 +229,14 @@ function renderForecastConfig() {
   const biz = (bizEl && bizEl.value) || '买手合作';
   const startEl = $('#fcStartDate');
   const daysEl = $('#fcDays');
-  const startDate = startEl ? startEl.value : (S.latestDate ? dateAdd(S.latestDate, 1) : new Date().toISOString().slice(0, 10));
+  const startDate = startEl ? startEl.value : (
+    S.latestDate
+      ? dateAdd(S.latestDate, 1)
+      : (function () {
+          const d = new Date();
+          return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
+        })()
+  );
   const days = daysEl ? parseInt(daysEl.value, 10) : 7;
 
   if (!S.forecastInputs) S.forecastInputs = {};
@@ -26,7 +250,7 @@ function renderForecastConfig() {
   /* 计算回归预测值，用于占位提示 */
   let regrPreview = null;
   try {
-    const stats = calcPeriodStats(biz, 'caseVolume', parseInt((($('#fcSampleWeeks') || {}).value) || '4', 10));
+    const stats = calcPeriodStatsCached(biz, 'caseVolume', parseInt((($('#fcSampleWeeks') || {}).value) || '4', 10));
     if (stats && stats.totalRegression) regrPreview = stats;
   } catch (_) {}
 
@@ -224,7 +448,11 @@ function renderForecastResult() {
                 : label.indexOf('博主') === 0 ? '#C75C5C'
                 : label.indexOf('自定义') === 0 ? '#7B8FBF'
                 : '#77778A';
-    const srcTag = r.totalSource === 'regression' ? '回归' : (r.totalSource === 'user' ? '手动' : '—');
+    const srcTag = r.totalSource === 'regression' ? '回归'
+                 : r.totalSource === 'history'    ? '中位'
+                 : r.totalSource === 'special'    ? '特殊日'
+                 : r.totalSource === 'user'       ? '手动'
+                 : '—';
     thead += '<th style="text-align:center;vertical-align:middle;color:' + color + ';font-weight:500;font-size:11px;padding-top:4px;padding-bottom:5px">' + label +
       '<br><span style="font-size:9px;color:#A0A0AE;font-weight:400">' + srcTag + '</span></th>';
   }
@@ -266,8 +494,9 @@ function renderForecastResult() {
       const color = tr.slope > 0.5 ? '#C75C5C' : (tr.slope < -0.5 ? '#6EA980' : '#77778A');
       noteHtml += '<div style="color:' + color + ';margin-top:4px">📈 <b>日度总量趋势：</b>斜率 ' + tr.slope.toFixed(2) + ' 单/天，R² = ' + tr.r2.toFixed(3) + '（' + dir + '）；<b>时段占比：</b>线性回归预测</div>';
     } else {
-      noteHtml += '<div style="color:#77778A;margin-top:4px">📈 <b>算法：</b>时段占比线性回归（样本不足，回退中位数）</div>';
+      noteHtml += '<div style="color:#77778A;margin-top:4px">📈 <b>算法：</b>时段占比线性回归（样本不足，回退中位数）；总量 R² 加权混合回归 + 历史中位数</div>';
     }
+    noteHtml += '<div style="color:#77778A;font-size:11.5px;margin-top:2px">🧮 <b>总量算法：</b>R² 加权混合回归 + 历史中位数（R²&lt;0.3 时纯用中位数），clamp 至历史同类型 [P10×0.7, P90×1.3]；外推超 7 天后回归权重衰减；博主 25/28 日走特殊日模板。</div>';
     noteHtml += '<div style="color:#77778A;font-size:11.5px;margin-top:2px">🗓 节假日识别：' + _cnHolidayVersion + '；时段仅统计 9-23；勾选/取消「按休日算」可手动覆盖。</div>';
 
     if (biz === '博主合作' && stats.specialDays) {

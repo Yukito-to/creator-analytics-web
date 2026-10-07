@@ -906,7 +906,8 @@ function reportHTML(d) {
   const { biz, wk, prevWk, monthLabel, week, s30, byCat, schedule, aht2, targets, range, dayRows, groups, emps, att } = d;
   const cur = week.cur, prev = week.prev, mCur = d.month.cur;
   const tgt = targets || {};
-  const reasons = JSON.parse(localStorage.getItem('creator_aht2_reason') || '{}');
+  let reasons = {};
+  try { reasons = JSON.parse(localStorage.getItem('creator_aht2_reason') || '{}'); } catch (_) { reasons = {}; }
   const src = d.src;
   const P = [];
 
@@ -1201,7 +1202,8 @@ function reportToText(d) {
   const { biz, wk, prevWk, monthLabel, week, s30, byCat, schedule, aht2, targets, range, dayRows, groups, emps, att } = d;
   const cur = week.cur, prev = week.prev, mCur = d.month.cur;
   const tgt = targets || {};
-  const reasons = JSON.parse(localStorage.getItem('creator_aht2_reason') || '{}');
+  let reasons = {};
+  try { reasons = JSON.parse(localStorage.getItem('creator_aht2_reason') || '{}'); } catch (_) { reasons = {}; }
   const src = d.src;
   const L = [];
 
@@ -1495,7 +1497,8 @@ function bindReportInputs() {
   if (!el) return;
   el.querySelectorAll('.rpt-input').forEach(inp => {
     inp.addEventListener('input', () => {
-      const all = JSON.parse(localStorage.getItem('creator_aht2_reason') || '{}');
+      let all = {};
+      try { all = JSON.parse(localStorage.getItem('creator_aht2_reason') || '{}'); } catch (_) { all = {}; }
       all[inp.dataset.key] = inp.value;
       localStorage.setItem('creator_aht2_reason', JSON.stringify(all));
     });

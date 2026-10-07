@@ -129,6 +129,94 @@ function _predictShare(regrObj, baseDate, targetDate, fallbackShare) {
   return out;
 }
 
+/* 统计工具：均值 / 中位数 / 分位数（用于总量锚点与区间约束） */
+function _statOf(arr) {
+  if (!arr || !arr.length) return null;
+  const s = arr.slice().sort((a, b) => a - b);
+  const n = s.length;
+  const mean = s.reduce((x, y) => x + y, 0) / n;
+  const median = n % 2 ? s[(n - 1) / 2] : (s[n / 2 - 1] + s[n / 2]) / 2;
+  const q = p => s[Math.min(n - 1, Math.max(0, Math.round((n - 1) * p)))];
+  return { mean, median, min: s[0], max: s[n - 1], p10: q(0.1), p90: q(0.9), n };
+}
+
+/**
+ * 日总量预测（R² 加权混合 + 历史锚点 + 区间约束 + 外推衰减）
+ * - 特殊日（博主 25/28）：直接用历史中位数
+ * - 普通日：regrPred 与历史同类型中位数按 R² 混合
+ * - R² 权重：>=0.70 → 70%；0.50~0.70 → 50%；0.30~0.50 → 30%；<0.30 → 0%（纯中位数）
+ * - 外推超过样本末 7 天后，回归权重线性衰减（最低 20%）
+ * - 结果 clamp 到历史同类型 [p10*0.7, p90*1.3]
+ */
+function _predictDailyTotal(stats, date, useWeekend, specialKind, biz) {
+  if (!stats) return null;
+
+  /* ① 特殊日优先 */
+  if (specialKind != null && stats.specialTotals) {
+    const st = stats.specialTotals[String(specialKind)];
+    if (st && st.n >= 1) {
+      return { value: Math.round(st.median), source: 'special' };
+    }
+  }
+
+  /* ② 取历史同类型统计；样本不足回退到 all */
+  const ts = stats.totalStats || {};
+  const typeStat = useWeekend ? ts.weekend : ts.weekday;
+  const fallbackStat = ts.all;
+  let hist = null;
+  if (typeStat && typeStat.n >= 3) hist = typeStat;
+  else if (fallbackStat && fallbackStat.n >= 2) hist = fallbackStat;
+  else hist = typeStat || fallbackStat;
+  if (!hist || hist.n < 1) return null;
+
+  /* ③ 回归选择（工作日 / 周末，样本不足回退到 all） */
+  const regrW = stats.totalRegression && stats.totalRegression.weekend;
+  const regrD = stats.totalRegression && stats.totalRegression.weekday;
+  const regrAll = stats.totalRegression && stats.totalRegression.all;
+  const primary = useWeekend ? regrW : regrD;
+  const useRegr = (primary && primary.n >= 3 && isFinite(primary.slope) && isFinite(primary.intercept))
+    ? primary
+    : ((regrAll && regrAll.n >= 3 && isFinite(regrAll.slope) && isFinite(regrAll.intercept)) ? regrAll : null);
+
+  let pred = hist.median;
+  let source = 'history';
+
+  if (useRegr) {
+    const x = _dateDiffDays(stats.sampleRange.start, date);
+    const regrPred = useRegr.slope * x + useRegr.intercept;
+    const r2 = Number(useRegr.r2) || 0;
+
+    let wRegr;
+    if      (r2 >= 0.70) wRegr = 0.70;
+    else if (r2 >= 0.50) wRegr = 0.50;
+    else if (r2 >= 0.30) wRegr = 0.30;
+    else                 wRegr = 0.00;
+
+    const lastX = _dateDiffDays(stats.sampleRange.start, stats.sampleRange.end);
+    const horizon = x - lastX;
+    if (horizon > 7) {
+      const decay = Math.max(0.2, 1 - (horizon - 7) / 30);
+      wRegr *= decay;
+    }
+
+    if (wRegr > 0 && isFinite(regrPred) && regrPred > 0) {
+      pred = wRegr * regrPred + (1 - wRegr) * hist.median;
+      source = 'regression';
+    } else {
+      pred = hist.median;
+      source = 'history';
+    }
+  }
+
+  /* ④ 合理性约束：clamp 到历史同类型区间 */
+  const lo = Math.max(0, (hist.p10 != null ? hist.p10 : hist.min) * 0.7);
+  const hi = (hist.p90 != null ? hist.p90 : hist.max) * 1.3;
+  if (isFinite(lo) && pred < lo) pred = lo;
+  if (isFinite(hi) && pred > hi) pred = hi;
+
+  return { value: Math.round(pred), source };
+}
+
 const BUYER_AHT2_ORDER = [['买手带货','业务介绍'],['买手带货','准入门槛'],['买手带货','买手撮合'],['买手带货','商家分销'],['买手带货','买手选品'],['买手带货','笔记带货'],['买手带货','橱窗带货'],['买手带货','蓝链带货'],['买手带货','直播带货'],['买手带货','营销运营'],['买手带货','直播间审核'],['买手带货','笔记审核'],['买手带货','账号违规'],['买手带货','买手拿样'],['买手带货','买手成长'],['买手带货','商家分销结算'],['买手带货','经营数据'],['买手带货','买手活动'],['买手带货','合作纠纷'],['买手带货','买手财务'],['买手合作','其他']];
 const BLOGGER_AHT2_ORDER = [['博主合作','蒲公英准入/准出'],['博主合作','蒲公英合作产品'],['博主合作','财务管理'],['博主合作','蒲公英审核'],['博主合作','健康等级'],['博主合作','蒲公英数据'],['博主合作','蒲公英合作纠纷'],['博主合作','蒲公英基础功能'],['蒲公英代理商','代理商入驻/审核'],['蒲公英代理商','蒲公英代理商保证金'],['蒲公英代理商','核实/解绑蒲公英代理商'],['蒲公英代理商','蒲公英代理商登录'],['蒲公英代理商','蒲公英代理商功能操作'],['蒲公英代理商','蒲公英代理商管理规范咨询'],['蒲公英代理商','蒲公英代理商策略'],['MCN机构（新）','MCN商业入驻'],['MCN机构（新）','MCN机构保证金'],['MCN机构（新）','MCN生态'],['博主合作','其他'],['博主合作','博主其他']];
 
@@ -285,6 +373,8 @@ const S = {
   attOverride:{}, personSel:new Set(),
   teamSel:{ group:new Set(), batch:new Set(), category:new Set() },
   s30Dates:new Set(), s30ShowSummary:true, s30MonthOpen:new Set(),
+  s30MonthInitialized:false,
+  unknownShifts:new Set(),
   expandedRows:new Set(),
   forecastBuyer:{}, forecastBlogger:{},
   volumeForecast:{},
@@ -322,7 +412,14 @@ function parseDate(v) {
 }
 const monthOf = d => d ? d.slice(0,7) : '';
 const wkOf = d => { if (!d) return 0; const t = Date.parse(d + 'T00:00:00Z'); if (isNaN(t)) return 0; return WK_BASE_NUM + Math.floor(Math.floor((t - WK_BASE_UTC) / 86400000) / 7); };
-const dateAdd = (d, delta) => { const t = Date.parse(d + 'T00:00:00Z') + delta * 86400000; if (isNaN(t)) return ''; const x = new Date(t); return x.getUTCFullYear()+'-'+pad2(x.getUTCMonth()+1)+'-'+pad2(x.getUTCDate()); };
+const dateAdd = (d, delta) => {
+  const dd = Number(delta);
+  if (!isFinite(dd)) return '';
+  const t = Date.parse(d + 'T00:00:00Z') + dd * 86400000;
+  if (isNaN(t)) return '';
+  const x = new Date(t);
+  return x.getUTCFullYear()+'-'+pad2(x.getUTCMonth()+1)+'-'+pad2(x.getUTCDate());
+};
 const wkStartDate = wk => dateAdd(WK_BASE_DATE, (wk - WK_BASE_NUM) * 7);
 const wkEndDate   = wk => dateAdd(wkStartDate(wk), 6);
 const weekdayOf   = d => d ? WEEKDAY_CN[new Date(d + 'T00:00:00Z').getUTCDay()] : '';
@@ -778,13 +875,7 @@ function buildAll() {
   S.forecastBuyer   = parseForecastSheet('forecastBuyer');
   S.forecastBlogger = parseForecastSheet('forecastBlogger');
 
-  try {
-    if (S.sheets.volumeForecast) {
-      const vf = parseVolumeSheet();
-      if (vf) S.volumeForecast = vf;
-    }
-  } catch (e) { console.warn('[volumeForecast] 解析失败：', e); }
-
+  /* 先算出 latestDate / latestWK / month（供 parseVolumeSheet 使用） */
   const dates = [];
   for (const r of S.records) dates.push(r.date);
   for (const r of S.wtRecords) dates.push(r.date);
@@ -793,8 +884,27 @@ function buildAll() {
   S.latestDate = dates[dates.length-1] || '';
   S.latestWK = wkOf(S.latestDate);
   S.month = monthOf(S.latestDate);
+
+  /* 再解析 volumeForecast（依赖 latestDate 推断年份/月份） */
+  try {
+    if (S.sheets.volumeForecast) {
+      const vf = parseVolumeSheet();
+      if (vf) S.volumeForecast = vf;
+    }
+  } catch (e) { console.warn('[volumeForecast] 解析失败：', e); }
+
+  /* 默认选中最近 3 个「有 30S 数据」的日期 */
   if (S.s30Dates.size === 0 && S.latestDate) {
-    for (let i = 0; i < 3; i++) { const d = dateAdd(S.latestDate, -i); if (d) S.s30Dates.add(d); }
+    const s30Days = new Set();
+    for (const r of S.records) {
+      if (r.date && (r.s30Num > 0 || r.s30Den > 0)) s30Days.add(r.date);
+    }
+    const sorted = Array.from(s30Days).sort().reverse().slice(0, 3);
+    if (sorted.length) {
+      for (const d of sorted) S.s30Dates.add(d);
+    } else {
+      for (let i = 0; i < 3; i++) { const d = dateAdd(S.latestDate, -i); if (d) S.s30Dates.add(d); }
+    }
   }
 }
 
@@ -805,7 +915,11 @@ function attOf(name, date) {
   if (!sched) return 0;
   const shift = sched[date];
   if (!shift) return 0;
-  return S.shiftMap[shift] != null ? S.shiftMap[shift] : 0;
+  if (S.shiftMap[shift] == null) {
+    if (S.unknownShifts) S.unknownShifts.add(shift);
+    return 0;
+  }
+  return S.shiftMap[shift];
 }
 
 /* ==================== 聚合与过滤 ==================== */
@@ -1224,6 +1338,8 @@ function calcPeriodStats(biz, metricKey, sampleWeeks, refDate) {
     sampleRange: { start: startDate, end: latest },
     dailyStats: [], abnormalDays: [], periods: [], diagnostic,
     specialDays: { '25': null, '28': null },
+    specialTotals: { '25': null, '28': null },
+    totalStats: { weekday: null, weekend: null, all: null },
     regressions: { weekday: {}, weekend: {}, special25: {}, special28: {} },
     totalRegression: { all: null, weekday: null, weekend: null },
   });
@@ -1327,6 +1443,32 @@ function calcPeriodStats(biz, metricKey, sampleWeeks, refDate) {
     return emptyReturn();
   }
 
+  /* ---- 总量统计（用于日总量预测锚点与区间约束） ---- */
+  const weekdayTotals = [];
+  const weekendTotals = [];
+  for (const d of dailyStats) {
+    if (d.isWeekend) weekendTotals.push(d.total);
+    else             weekdayTotals.push(d.total);
+  }
+  const totalStats = {
+    weekday: _statOf(weekdayTotals),
+    weekend: _statOf(weekendTotals),
+    all:     _statOf(dailyStats.map(d => d.total)),
+  };
+
+  /* ---- 博主 25/28 日：单独统计历史日总量 ---- */
+  const specialTotals = { '25': null, '28': null };
+  if (biz === '博主合作') {
+    for (const k of ['25', '28']) {
+      const sg = specialDayGroups[k];
+      if (!sg || !sg.count) continue;
+      const dateSet = new Set(sg.dates);
+      const arr = [];
+      for (const d of dailyStats) if (dateSet.has(d.date)) arr.push(d.total);
+      specialTotals[k] = _statOf(arr);
+    }
+  }
+
   const median = (group) => {
     const out = {};
     for (const p in group) {
@@ -1400,13 +1542,31 @@ function calcPeriodStats(biz, metricKey, sampleWeeks, refDate) {
     diagnostic,
     usedRowCount: useRowCount,
     specialDays,
+    specialTotals,
+    totalStats,
     regressions,
     totalRegression,
   };
 }
 
+/* 缓存层：避免 renderForecastConfig / renderForecastResult 重复聚合 */
+let _calcPeriodStatsCache = { key: '', data: null };
+function calcPeriodStatsCached(biz, metricKey, sampleWeeks, refDate) {
+  const key = [
+    biz, metricKey, sampleWeeks,
+    refDate || S.latestDate || '',
+    S.records.length,
+    S.wtRecords.length,
+  ].join('|');
+  if (_calcPeriodStatsCache.key === key) return _calcPeriodStatsCache.data;
+  const data = calcPeriodStats(biz, metricKey, sampleWeeks, refDate);
+  _calcPeriodStatsCache.key = key;
+  _calcPeriodStatsCache.data = data;
+  return data;
+}
+
 function generateForecast(biz, metricKey, sampleWeeks, startDate, days, dailyTotals, holidays) {
-  const stats = calcPeriodStats(biz, metricKey, sampleWeeks);
+  const stats = calcPeriodStatsCached(biz, metricKey, sampleWeeks);
   if (!stats) return null;
   const periods = (stats.periods && stats.periods.length) ? stats.periods : PREDICT_PERIODS;
   const results = [];
@@ -1448,17 +1608,11 @@ function generateForecast(biz, metricKey, sampleWeeks, startDate, days, dailyTot
 
     let total = num(dailyTotals[date]);
     let totalSource = total > 0 ? 'user' : null;
-    if (total <= 0 && stats.totalRegression) {
-      const regr = useWeekend ? stats.totalRegression.weekend : stats.totalRegression.weekday;
-      const fallbackRegr = stats.totalRegression.all;
-      const useRegr = (regr && regr.n >= 3) ? regr : ((fallbackRegr && fallbackRegr.n >= 3) ? fallbackRegr : null);
-      if (useRegr) {
-        const x = _dateDiffDays(stats.sampleRange.start, date);
-        const pred = useRegr.slope * x + useRegr.intercept;
-        if (pred > 0 && isFinite(pred)) {
-          total = Math.round(pred);
-          totalSource = 'regression';
-        }
+    if (total <= 0) {
+      const pr = _predictDailyTotal(stats, date, useWeekend, specialKind, biz);
+      if (pr && pr.value > 0) {
+        total = pr.value;
+        totalSource = pr.source;
       }
     }
 
@@ -1480,7 +1634,8 @@ function forecastToMarkdown(biz, metricKey, sampleWeeks, forecast) {
   lines.push('- 样本周期：' + stats.sampleRange.start + ' ~ ' + stats.sampleRange.end + '（近 ' + sampleWeeks + ' 周）');
   lines.push('- 计算维度：CASE 总量');
   lines.push('- 样本天数：工作日 ' + stats.weekdayCount + ' 天 / 周末 ' + stats.weekendCount + ' 天');
-  lines.push('- 算法：**时段占比使用线性回归**（R² ≥ 0.5 完全用回归，否则与中位数各 50%）');
+  lines.push('- 时段占比算法：**线性回归**（R² ≥ 0.5 完全用回归，否则与中位数各 50%）');
+  lines.push('- 日总量算法：**回归 + 历史中位数按 R² 加权混合**（R² ≥ 0.7 回归 70%，0.5~0.7 用 50%，0.3~0.5 用 30%，< 0.3 纯用中位数），结果 clamp 到历史同类型 P10~P90 区间；外推超过 7 天后回归权重线性衰减；博主 25/28 日直接使用特殊日历史中位数');
   const tr = stats.totalRegression && stats.totalRegression.all;
   if (tr && tr.n >= 3) {
     const dir = tr.slope > 0.5 ? '上升' : (tr.slope < -0.5 ? '下降' : '平稳');

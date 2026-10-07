@@ -33,33 +33,62 @@ function renderAiMarkdown(md) {
   s = s.replace(/^#\s+(.+)$/gm, '<h2>$1</h2>');
   s = s.replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>');
   s = s.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<i>$2</i>');
-  s = s.replace(/^[\-\*\+]\s+(.+)$/gm, '\u0001LI\u0001$1');
-  s = s.replace(/(?:\u0001LI\u0001[^\n]*(?:\n|$))+/g, (m) => {
-    const items = m.trim().split('\n').map(x => '<li>' + x.replace(/\u0001LI\u0001/, '') + '</li>').join('');
+  /* 列表：使用 Unicode 私用区占位符，避免与正文冲突 */
+  const UL_MARK = '\uE001LI\uE001';
+  const OL_MARK = '\uE002LI\uE002';
+  s = s.replace(/^[\-\*\+]\s+(.+)$/gm, UL_MARK + '$1');
+  s = s.replace(new RegExp('(?:' + UL_MARK + '[^\\n]*(?:\\n|$))+', 'g'), (m) => {
+    const items = m.trim().split('\n').map(x => '<li>' + x.replace(UL_MARK, '') + '</li>').join('');
     return '<ul>' + items + '</ul>';
   });
-  s = s.replace(/^\d+\.\s+(.+)$/gm, '\u0002LI\u0002$1');
-  s = s.replace(/(?:\u0002LI\u0002[^\n]*(?:\n|$))+/g, (m) => {
-    const items = m.trim().split('\n').map(x => '<li>' + x.replace(/\u0002LI\u0002/, '') + '</li>').join('');
+  s = s.replace(/^\d+\.\s+(.+)$/gm, OL_MARK + '$1');
+  s = s.replace(new RegExp('(?:' + OL_MARK + '[^\\n]*(?:\\n|$))+', 'g'), (m) => {
+    const items = m.trim().split('\n').map(x => '<li>' + x.replace(OL_MARK, '') + '</li>').join('');
     return '<ol>' + items + '</ol>';
   });
-  s = s.replace(/(^\|.+\|$\n?)+/gm, (m) => {
-    const lines = m.trim().split('\n');
-    if (lines.length < 2) return m;
-    const header = lines[0].split('|').slice(1, -1).map(x => x.trim());
-    if (!/^\|[\s\-:|]+\|$/.test(lines[1].trim())) return m;
-    const body = lines.slice(2).map(l => l.split('|').slice(1, -1).map(x => x.trim()));
-    let html = '<table class="rp-table"><thead><tr>' + header.map(h => '<th>' + h + '</th>').join('') + '</tr></thead><tbody>';
-    html += body.map(r => '<tr>' + r.map(c => '<td>' + c + '</td>').join('') + '</tr>').join('');
-    html += '</tbody></table>';
-    return html;
-  });
+
+  /* 表格：逐行扫描（修复行尾漏匹配 & 表格与其他内容相邻的边界问题） */
+  const tables = [];
+  const lines = s.split('\n');
+  const outLines = [];
+  let i = 0;
+  while (i < lines.length) {
+    const cur = lines[i].trim();
+    const nxt = (i + 1 < lines.length) ? lines[i + 1].trim() : '';
+    const isTbl = /^\|.+\|$/.test(cur);
+    const isSep = /^\|[\s\-:|]+\|$/.test(nxt) && nxt.indexOf('-') >= 0;
+    if (isTbl && isSep) {
+      const tblLines = [cur, nxt];
+      i += 2;
+      while (i < lines.length && /^\|.+\|$/.test(lines[i].trim())) {
+        tblLines.push(lines[i].trim());
+        i++;
+      }
+      const header = tblLines[0].split('|').slice(1, -1).map(x => x.trim());
+      const body = tblLines.slice(2).map(l => l.split('|').slice(1, -1).map(x => x.trim()));
+      let html = '<table class="rp-table"><thead><tr>' + header.map(h => '<th>' + h + '</th>').join('') + '</tr></thead><tbody>';
+      html += body.map(r => '<tr>' + r.map(c => '<td>' + c + '</td>').join('') + '</tr>').join('');
+      html += '</tbody></table>';
+      const key = '\uE003TBL' + tables.length + '\uE003';
+      tables.push(html);
+      outLines.push(key);
+    } else {
+      outLines.push(lines[i]);
+      i++;
+    }
+  }
+  s = outLines.join('\n');
+
   s = s.split(/\n{2,}/).map(p => {
     const t = p.trim();
     if (!t) return '';
+    if (/^\uE003TBL\d+\uE003$/.test(t)) return t;
     if (/^<(h\d|ul|ol|pre|table|blockquote)/.test(t)) return t;
     return '<p>' + t.replace(/\n/g, '<br>') + '</p>';
   }).join('');
+
+  /* 还原表格 */
+  s = s.replace(/\uE003TBL(\d+)\uE003/g, (_, k) => tables[+k]);
   return s;
 }
 
@@ -1218,7 +1247,12 @@ function initSelects() {
 
   const fcStart = $('#fcStartDate');
   if (fcStart && !fcStart.value) {
-    fcStart.value = S.latestDate ? dateAdd(S.latestDate, 1) : new Date().toISOString().slice(0, 10);
+    if (S.latestDate) {
+      fcStart.value = dateAdd(S.latestDate, 1);
+    } else {
+      const d = new Date();
+      fcStart.value = d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
+    }
   }
   if (typeof renderForecastConfig === 'function') renderForecastConfig();
 }

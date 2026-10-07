@@ -1010,7 +1010,7 @@ async function runAiAnalysis() {
   let ctx = null;
   try {
     ctx = buildAiContextData(biz, wk, focus);
-    ctx._reportMd = reportToText(buildReport(biz, wk));
+    /* 已删除：ctx._reportMd 从未被使用，避免每次 AI 分析都白跑一遍全量周报聚合 */
   } catch (e) {
     outEl.innerHTML = '<div class="ai-err">❌ 生成上下文失败：' + esc(e.message) + '</div>';
     return;

@@ -271,7 +271,12 @@ function renderForecastConfig() {
     let regrVal = '';
     if (regrPreview && regrPreview.dailyStats && regrPreview.dailyStats.length) {
       const useWeekend = shouldUseWeekendPattern(date);
-      const pr = _predictDailyTotal(regrPreview, date, useWeekend, null, biz);
+      let pr = null;
+      try {
+        pr = _predictDailyTotal(regrPreview, date, useWeekend, null, biz);
+      } catch (e) {
+        console.warn('[renderForecastConfig] _predictDailyTotal 失败：', e);
+      }
       if (pr && pr.value > 0) {
         const srcTag = pr.source === 'regression' ? '回归'
                      : pr.source === 'special'    ? '特殊日'
@@ -352,7 +357,7 @@ function renderForecastConfig() {
     });
   });
 
-  renderForecastResult();
+  try { renderForecastResult(); } catch (e) { console.warn('[renderForecastResult]', e); }
 }
 
 /* ==================== 收集每日总量 ==================== */

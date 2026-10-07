@@ -4,6 +4,21 @@
    ============================================================ */
 'use strict';
 
+/* ---- 工具函数兜底：防止脚本被缓存成旧版导致未定义 ---- */
+if (typeof window._avg !== 'function') {
+  window._avg = function (arr) {
+    if (!arr || !arr.length) return 0;
+    return arr.reduce(function (s, x) { return s + x; }, 0) / arr.length;
+  };
+}
+if (typeof window._med !== 'function') {
+  window._med = function (arr) {
+    if (!arr || !arr.length) return 0;
+    var n = arr.length;
+    return n % 2 ? arr[(n - 1) / 2] : (arr[n / 2 - 1] + arr[n / 2]) / 2;
+  };
+}
+
 /* ==================== 基础工具 ==================== */
 const $  = s => document.querySelector(s);
 const $$ = s => Array.from(document.querySelectorAll(s));
@@ -672,8 +687,9 @@ async function handleFile(file) {
     }
   } catch (err) {
     console.error(err);
-    setProgress(0, '❌ ' + err.message);
-    alert('解析失败：' + err.message);
+    const stage = (S.records.length === 0 && S.roster.length === 0) ? '解析' : '渲染';
+    setProgress(0, '❌ ' + stage + '失败：' + err.message);
+    alert(stage + '失败：' + err.message + '\n\n（如为渲染失败，数据其实已导入成功，可强制刷新页面 Cmd/Ctrl+Shift+R 重试）');
   }
 }
 function parseCSV(text) {

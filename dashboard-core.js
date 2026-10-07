@@ -140,6 +140,40 @@ function _statOf(arr) {
   return { mean, median, min: s[0], max: s[n - 1], p10: q(0.1), p90: q(0.9), n };
 }
 
+/* 从 dailyStats 里筛出同星期几、非异常日的总量数组 */
+function _sameDowTotals(dailyStats, weekday, outlierDates) {
+  const out = [];
+  for (const d of dailyStats) {
+    if (outlierDates && outlierDates.has(d.date)) continue;
+    const wd = new Date(d.date + 'T00:00:00Z').getUTCDay();
+    if (wd === weekday) out.push(d.total);
+  }
+  return out.sort((a, b) => a - b);
+}
+
+/* 从 dailyStats 里筛出同类型（工作日/周末）、非异常日的总量数组 */
+function _sameTypeTotals(dailyStats, isWeekend, outlierDates) {
+  const out = [];
+  for (const d of dailyStats) {
+    if (outlierDates && outlierDates.has(d.date)) continue;
+    if (d.isWeekend === isWeekend) out.push(d.total);
+  }
+  return out.sort((a, b) => a - b);
+}
+
+/* 中位数 */
+function _med(arr) {
+  if (!arr || !arr.length) return 0;
+  const n = arr.length;
+  return n % 2 ? arr[(n - 1) / 2] : (arr[n / 2 - 1] + arr[n / 2]) / 2;
+}
+
+/* 均值 */
+function _avg(arr) {
+  if (!arr || !arr.length) return 0;
+  return arr.reduce((s, x) => s + x, 0) / arr.length;
+}
+
 /**
  * 日总量预测（排班安全版）
  *

@@ -780,7 +780,7 @@ function renderS30Body(biz) {
     };
   };
 
-  const showSum = S.s30ShowSummary !== false;
+  const showSum = S.s30ShowSummary === true;
   const bodyParts = [];
   for (const g of groups) {
     const bg = bgMap[g.date] || '#fff';

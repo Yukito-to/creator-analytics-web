@@ -372,7 +372,7 @@ const S = {
   month:'', latestDate:'', latestWK:0, hidden:false,
   attOverride:{}, personSel:new Set(),
   teamSel:{ group:new Set(), batch:new Set(), category:new Set() },
-  s30Dates:new Set(), s30ShowSummary:true, s30MonthOpen:new Set(),
+  s30Dates:new Set(), s30ShowSummary:false, s30MonthOpen:new Set(),
   s30MonthInitialized:false,
   unknownShifts:new Set(),
   expandedRows:new Set(),

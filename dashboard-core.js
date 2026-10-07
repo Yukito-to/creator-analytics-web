@@ -887,8 +887,12 @@ function parseVolumeSheet() {
 }
 function parseDateFlexible(v, refYear, refMonth) {
   if (v === '' || v == null) return '';
+  /* ★ 关键修复：Excel 序列号（数字）直接交给 parseDate 处理 */
+  if (typeof v === 'number') return parseDate(v);
   const s = String(v).trim();
   if (!s) return '';
+  /* 纯数字字符串也视为序列号 */
+  if (/^\d{5}(\.\d+)?$/.test(s)) return parseDate(parseFloat(s));
   let m = /^(\d{4})[\/\-年.](\d{1,2})[\/\-月.](\d{1,2})/.exec(s);
   if (m) return m[1]+'-'+pad2(m[2])+'-'+pad2(m[3]);
   m = /^(\d{1,2})[\/\-月.](\d{1,2})/.exec(s);
@@ -1105,15 +1109,49 @@ function parseSlaSheet(kind) {
   const headers = S.headers[kind] || [];
   const cMetric   = headers.findIndex(h => /指标/.test(h));
   const cCategory = headers.findIndex(h => /分类/.test(h));
-  if (cMetric < 0 || cCategory < 0) return [];
+  if (cMetric < 0 || cCategory < 0) {
+    console.warn('[parseSlaSheet] ' + kind + ' 缺少「指标」或「分类」列，跳过。');
+    return [];
+  }
+
+  /* ★ 统一清洗表头：去掉零宽字符 / BOM / 非断行空格 / 全角空格 / 空白 */
+  const clean = h => String(h == null ? '' : h)
+    .replace(/[\u200B-\u200D\uFEFF\u00A0\u3000]/g, '')
+    .replace(/\s+/g, '')
+    .trim();
+
   const monthCols = {};
   headers.forEach((h, i) => {
-    const hh = String(h||'').trim();
+    const hh = clean(h);
+    if (!hh) return;
     let m;
-    if ((m = /^(\d{1,2})\s*月\s*权重$/.exec(hh))) { (monthCols[parseInt(m[1], 10)] = monthCols[parseInt(m[1], 10)] || {}).weight = i; }
-    else if ((m = /^(\d{1,2})\s*月\s*目标$/.exec(hh))) { (monthCols[parseInt(m[1], 10)] = monthCols[parseInt(m[1], 10)] || {}).target = i; }
-    else if ((m = /^(\d{1,2})\s*月\s*得分$/.exec(hh))) { (monthCols[parseInt(m[1], 10)] = monthCols[parseInt(m[1], 10)] || {}).points = i; }
+
+    /* 优先精确匹配：X月权重 / X月目标 / X月得分（允许尾部多余文本） */
+    m = /^(\d{1,2})月(权重|weight)/i.exec(hh);
+    if (m) { (monthCols[parseInt(m[1], 10)] = monthCols[parseInt(m[1], 10)] || {}).weight = i; return; }
+
+    m = /^(\d{1,2})月(目标|target)/i.exec(hh);
+    if (m) { (monthCols[parseInt(m[1], 10)] = monthCols[parseInt(m[1], 10)] || {}).target = i; return; }
+
+    m = /^(\d{1,2})月(得分|points|score)/i.exec(hh);
+    if (m) { (monthCols[parseInt(m[1], 10)] = monthCols[parseInt(m[1], 10)] || {}).points = i; return; }
+
+    /* 兜底：只写了「X月」→ 按 权重+1 / 目标+2 / 得分+3 推断（兼容合并单元格排版） */
+    m = /^(\d{1,2})月$/.exec(hh);
+    if (m) {
+      const mo = parseInt(m[1], 10);
+      if (!monthCols[mo]) monthCols[mo] = {};
+      if (monthCols[mo].weight == null) monthCols[mo].weight = i + 1;
+      if (monthCols[mo].target == null) monthCols[mo].target = i + 2;
+      if (monthCols[mo].points == null) monthCols[mo].points = i + 3;
+    }
   });
+
+  /* ★ 调试日志：导入一次后看 Console 就能定位问题 */
+  console.log('[parseSlaSheet] ' + kind + ' 原始表头:', headers);
+  console.log('[parseSlaSheet] ' + kind + ' 清洗后表头:', headers.map(clean));
+  console.log('[parseSlaSheet] ' + kind + ' 识别到的月份列:', monthCols);
+
   const groups = new Map();
   for (let r = 1; r < sheet.rows.length; r++) {
     const row = sheet.rows[r] || [];

@@ -306,35 +306,56 @@ function scCoverageOK(ctx, date, shift, emp) {
   return SC_HOURS.some(h => mins[h] > 0 && short.some(x => x.hour === h && (cph[h] || 0) > 0));
 }
 
-/* H6 征调：从本池/弹性池/另一池未排者中挑「覆盖缺口增益最大」的人补位 */
+/* H6 征调：优先本池 + 弹性池；本池无人且对方当日无缺口时，才考虑借调 */
 function scFillShortage(ctx, date, biz) {
-  const own = (biz === '买手合作') ? ctx.buyerOnly : ctx.bloggerOnly;
-  const other = (biz === '买手合作') ? ctx.bloggerOnly : ctx.buyerOnly;
+  const own      = (biz === '买手合作') ? ctx.buyerOnly    : ctx.bloggerOnly;
+  const otherBiz = (biz === '买手合作') ? '博主合作'        : '买手合作';
+  const other    = (biz === '买手合作') ? ctx.bloggerOnly  : ctx.buyerOnly;
+
   for (let round = 0; round < 6; round++) {
     const short = scCoverageShortage(ctx, date, biz);
     if (!short.length) break;
     short.sort((a, b) => b.short - a.short);
-    const cands = own.concat(ctx.flex, other).filter(e => !ctx.assigned[date][e.name]);
-    let best = null;
-    for (const e of cands) {
-      for (const shift of S.shiftPool) {
-        if (!scCanAssign(ctx, e, date, shift)) continue;
-        if (!scShiftHasCapacity(ctx, date, biz, shift)) continue;
-        const mins = (S.shiftPeriods || {})[shift] || {};
-        const cph = ctx.cph[e.name] || {};
-        let gain = 0;
-        for (const sp of short) {
-          if (mins[sp.hour] > 0) gain += Math.min(sp.short, cph[sp.hour] || 0);
-        }
-        if (!best || gain > best.gain) best = { e, shift, gain };
+
+    /* ① 先只从本池 + 弹性池挑 */
+    const ownCands = own.concat(ctx.flex).filter(e => !ctx.assigned[date][e.name]);
+    let best = scPickBestCandidate(ctx, date, biz, ownCands, short);
+
+    /* ② 本池无人可用时，只有对方当日无缺口才允许借调 */
+    if (!best || best.gain <= 0) {
+      const otherShort = scCoverageShortage(ctx, date, otherBiz);
+      if (otherShort.length === 0) {
+        const borrowCands = other.filter(e => !ctx.assigned[date][e.name]);
+        const best2 = scPickBestCandidate(ctx, date, biz, borrowCands, short);
+        if (best2 && best2.gain > 0) best = best2;
       }
     }
+
     if (!best || best.gain <= 0) {
       ctx.warnings.push(date + ' ' + biz + ' 存在时段缺口且无可征调人力');
       break;
     }
     scDoAssign(ctx, date, best.e, best.shift, biz);
   }
+}
+
+/* 抽出的选人逻辑：从候选池中挑「覆盖缺口增益最大」的人 */
+function scPickBestCandidate(ctx, date, biz, cands, short) {
+  let best = null;
+  for (const e of cands) {
+    for (const shift of S.shiftPool) {
+      if (!scCanAssign(ctx, e, date, shift)) continue;
+      if (!scShiftHasCapacity(ctx, date, biz, shift)) continue;
+      const mins = (S.shiftPeriods || {})[shift] || {};
+      const cph  = ctx.cph[e.name] || {};
+      let gain = 0;
+      for (const sp of short) {
+        if (mins[sp.hour] > 0) gain += Math.min(sp.short, cph[sp.hour] || 0);
+      }
+      if (!best || gain > best.gain) best = { e, shift, gain };
+    }
+  }
+  return best;
 }
 
 /* 未排到的人 → 放休 */
@@ -480,13 +501,26 @@ let scReqBizState = '买手合作';   // 需求表当前业务线
 
 function renderSchedulePanel() {
   const c = scGetCycle();
+  /* ★ 首次进入若无周期，用最新日期自动填充并写回状态，避免生成排班时报「请先设置排班周期」 */
+  if (!c.start && S.latestDate) {
+    c.start    = S.latestDate;
+    c.end      = dateAdd(S.latestDate, 13);
+    c.reqStart = c.start;
+    c.reqEnd   = c.end;
+    scSetCycle(c);
+  } else if (c.start && !c.reqStart) {
+    c.reqStart = c.start;
+    c.reqEnd   = c.end || '';
+    scSetCycle(c);
+  }
   const set = (id, v) => { const el = document.getElementById(id); if (el && v) el.value = v; };
-  set('scCycleStart', c.start || S.latestDate || '');
-  set('scCycleEnd',   c.end   || dateAdd(S.latestDate || '', 13) || '');
-  set('scReqStart',   c.reqStart || c.start || '');
-  set('scReqEnd',     c.reqEnd   || c.end || '');
+  set('scCycleStart', c.start);
+  set('scCycleEnd',   c.end);
+  set('scReqStart',   c.reqStart);
+  set('scReqEnd',     c.reqEnd);
 
-  ['scCycleStart','scCycleEnd','scReqStart','scReqEnd','scCphAlpha'].forEach(id => {
+  /* 周期字段：只更新 cycle，不重算 CPH */
+  ['scCycleStart','scCycleEnd','scReqStart','scReqEnd'].forEach(id => {
     const el = document.getElementById(id);
     if (el && !el._scBound) {
       el._scBound = true;
@@ -501,6 +535,25 @@ function renderSchedulePanel() {
       });
     }
   });
+
+  /* ★ CPH 激进系数：改动后必须重算 CPH 并刷新网格 */
+  const alphaEl = document.getElementById('scCphAlpha');
+  if (alphaEl && !alphaEl._scBound) {
+    alphaEl._scBound = true;
+    alphaEl.addEventListener('change', () => {
+      let alpha = parseFloat(alphaEl.value);
+      if (!isFinite(alpha) || alpha <= 0) { alpha = 1.0; alphaEl.value = '1.00'; }
+      if (!(S.records || []).length) { toast('尚无数据，无法重算 CPH'); return; }
+      try {
+        calcAllEmployeeCPH();
+        renderScCphGrid();
+        toast('✓ 已按 α=' + alpha.toFixed(2) + ' 重算 CPH');
+      } catch (e) {
+        console.warn('[scCphAlpha]', e);
+        toast('重算 CPH 失败：' + e.message);
+      }
+    });
+  }
 
   /* CPH 尚未计算时先算一遍，便于预览与手动覆盖 */
   if ((!S.employeeCPH || !Object.keys(S.employeeCPH).length) && (S.records || []).length) {

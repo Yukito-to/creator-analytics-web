@@ -130,8 +130,9 @@ function renderExpandRows(src, opts, metricKey, parentKey) {
     }
   } else {
     const metric = METRIC_MAP[metricKey];
-    rows.push(rowHTMLByL1('　└ 买手合作 CASE', src, '买手合作', metric, opts, '#E8EDF3'));
-    rows.push(rowHTMLByL1('　└ 博主合作 CASE', src, '博主合作', metric, opts, '#F3EFE2'));
+    const label = metricLabel(metric);
+    rows.push(rowHTMLByL1('　└ 买手合作 · ' + label, src, '买手合作', metric, opts, '#E8EDF3'));
+    rows.push(rowHTMLByL1('　└ 博主合作 · ' + label, src, '博主合作', metric, opts, '#F3EFE2'));
   }
   return rows;
 }
@@ -220,6 +221,9 @@ function renderImportSummary() {
     ['最新日期', S.latestDate || '—'],
     ['最新 WK', 'WK' + (S.latestWK || '—')],
   ];
+  if (S.unknownShifts && S.unknownShifts.size) {
+    items.push(['⚠ 未知班次（未在班次表中）', Array.from(S.unknownShifts).join('、')]);
+  }
   el.innerHTML = items.map(([k,v]) =>
     '<div class="sum-item"><div class="k">' + esc(k) + '</div><div class="v">' + esc(String(v)) + '</div></div>'
   ).join('');
@@ -386,6 +390,11 @@ function renderPerson() {
   const srcEmps = srcEmployeeSet(src);
   let emps = S.roster.filter(e => employeeVisible(e) && srcEmps.has(e.name) && /一线/.test(e.attr || ''));
   if (!emps.length) emps = S.roster.filter(e => employeeVisible(e) && srcEmps.has(e.name));
+
+  /* 同步「全选一线」复选框状态 */
+  const allChk = $('#peAll');
+  if (allChk) allChk.checked = emps.length > 0 && emps.every(e => S.personSel.has(e.name));
+
   names.innerHTML = emps.map(e =>
     '<span class="chip' + (S.personSel.has(e.name) ? ' on' : '') + '" data-name="' + esc(e.name) + '">' + esc(e.name) + '</span>'
   ).join('');
@@ -609,7 +618,12 @@ function renderS30DateSelector(container, allDates, biz) {
   const months = Array.from(byMonth.keys()).sort().reverse();
 
   for (const m of Array.from(S.s30MonthOpen)) if (!byMonth.has(m)) S.s30MonthOpen.delete(m);
-  if (S.s30MonthOpen.size === 0 && months.length) S.s30MonthOpen.add(months[0]);
+
+  /* 只在首次渲染时自动展开最新月份，之后尊重用户手动折叠 */
+  if (!S.s30MonthInitialized) {
+    S.s30MonthInitialized = true;
+    if (months.length) S.s30MonthOpen.add(months[0]);
+  }
 
   const headBase = 'display:flex;align-items:center;gap:8px;padding:6px 10px;background:#F4F3EF;border-radius:8px;cursor:pointer;user-select:none;margin-bottom:6px;font-size:12.5px;';
   const btnBase  = 'font-size:11px;padding:1px 8px;border:1px solid #E5E1DA;background:#FFFFFF;border-radius:6px;cursor:pointer;color:#77778A;font-family:inherit;line-height:1.6;';

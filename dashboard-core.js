@@ -285,6 +285,8 @@ const S = {
   attOverride:{}, personSel:new Set(),
   teamSel:{ group:new Set(), batch:new Set(), category:new Set() },
   s30Dates:new Set(), s30ShowSummary:true, s30MonthOpen:new Set(),
+  s30MonthInitialized:false,
+  unknownShifts:new Set(),
   expandedRows:new Set(),
   forecastBuyer:{}, forecastBlogger:{},
   volumeForecast:{},
@@ -322,7 +324,14 @@ function parseDate(v) {
 }
 const monthOf = d => d ? d.slice(0,7) : '';
 const wkOf = d => { if (!d) return 0; const t = Date.parse(d + 'T00:00:00Z'); if (isNaN(t)) return 0; return WK_BASE_NUM + Math.floor(Math.floor((t - WK_BASE_UTC) / 86400000) / 7); };
-const dateAdd = (d, delta) => { const t = Date.parse(d + 'T00:00:00Z') + delta * 86400000; if (isNaN(t)) return ''; const x = new Date(t); return x.getUTCFullYear()+'-'+pad2(x.getUTCMonth()+1)+'-'+pad2(x.getUTCDate()); };
+const dateAdd = (d, delta) => {
+  const dd = Number(delta);
+  if (!isFinite(dd)) return '';
+  const t = Date.parse(d + 'T00:00:00Z') + dd * 86400000;
+  if (isNaN(t)) return '';
+  const x = new Date(t);
+  return x.getUTCFullYear()+'-'+pad2(x.getUTCMonth()+1)+'-'+pad2(x.getUTCDate());
+};
 const wkStartDate = wk => dateAdd(WK_BASE_DATE, (wk - WK_BASE_NUM) * 7);
 const wkEndDate   = wk => dateAdd(wkStartDate(wk), 6);
 const weekdayOf   = d => d ? WEEKDAY_CN[new Date(d + 'T00:00:00Z').getUTCDay()] : '';
@@ -778,13 +787,7 @@ function buildAll() {
   S.forecastBuyer   = parseForecastSheet('forecastBuyer');
   S.forecastBlogger = parseForecastSheet('forecastBlogger');
 
-  try {
-    if (S.sheets.volumeForecast) {
-      const vf = parseVolumeSheet();
-      if (vf) S.volumeForecast = vf;
-    }
-  } catch (e) { console.warn('[volumeForecast] 解析失败：', e); }
-
+  /* 先算出 latestDate / latestWK / month（供 parseVolumeSheet 使用） */
   const dates = [];
   for (const r of S.records) dates.push(r.date);
   for (const r of S.wtRecords) dates.push(r.date);
@@ -793,8 +796,27 @@ function buildAll() {
   S.latestDate = dates[dates.length-1] || '';
   S.latestWK = wkOf(S.latestDate);
   S.month = monthOf(S.latestDate);
+
+  /* 再解析 volumeForecast（依赖 latestDate 推断年份/月份） */
+  try {
+    if (S.sheets.volumeForecast) {
+      const vf = parseVolumeSheet();
+      if (vf) S.volumeForecast = vf;
+    }
+  } catch (e) { console.warn('[volumeForecast] 解析失败：', e); }
+
+  /* 默认选中最近 3 个「有 30S 数据」的日期 */
   if (S.s30Dates.size === 0 && S.latestDate) {
-    for (let i = 0; i < 3; i++) { const d = dateAdd(S.latestDate, -i); if (d) S.s30Dates.add(d); }
+    const s30Days = new Set();
+    for (const r of S.records) {
+      if (r.date && (r.s30Num > 0 || r.s30Den > 0)) s30Days.add(r.date);
+    }
+    const sorted = Array.from(s30Days).sort().reverse().slice(0, 3);
+    if (sorted.length) {
+      for (const d of sorted) S.s30Dates.add(d);
+    } else {
+      for (let i = 0; i < 3; i++) { const d = dateAdd(S.latestDate, -i); if (d) S.s30Dates.add(d); }
+    }
   }
 }
 
@@ -805,7 +827,11 @@ function attOf(name, date) {
   if (!sched) return 0;
   const shift = sched[date];
   if (!shift) return 0;
-  return S.shiftMap[shift] != null ? S.shiftMap[shift] : 0;
+  if (S.shiftMap[shift] == null) {
+    if (S.unknownShifts) S.unknownShifts.add(shift);
+    return 0;
+  }
+  return S.shiftMap[shift];
 }
 
 /* ==================== 聚合与过滤 ==================== */
@@ -1405,8 +1431,24 @@ function calcPeriodStats(biz, metricKey, sampleWeeks, refDate) {
   };
 }
 
+/* 缓存层：避免 renderForecastConfig / renderForecastResult 重复聚合 */
+let _calcPeriodStatsCache = { key: '', data: null };
+function calcPeriodStatsCached(biz, metricKey, sampleWeeks, refDate) {
+  const key = [
+    biz, metricKey, sampleWeeks,
+    refDate || S.latestDate || '',
+    S.records.length,
+    S.wtRecords.length,
+  ].join('|');
+  if (_calcPeriodStatsCache.key === key) return _calcPeriodStatsCache.data;
+  const data = calcPeriodStats(biz, metricKey, sampleWeeks, refDate);
+  _calcPeriodStatsCache.key = key;
+  _calcPeriodStatsCache.data = data;
+  return data;
+}
+
 function generateForecast(biz, metricKey, sampleWeeks, startDate, days, dailyTotals, holidays) {
-  const stats = calcPeriodStats(biz, metricKey, sampleWeeks);
+  const stats = calcPeriodStatsCached(biz, metricKey, sampleWeeks);
   if (!stats) return null;
   const periods = (stats.periods && stats.periods.length) ? stats.periods : PREDICT_PERIODS;
   const results = [];

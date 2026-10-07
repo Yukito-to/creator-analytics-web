@@ -141,17 +141,28 @@ function _statOf(arr) {
 }
 
 /**
- * 日总量预测（R² 加权混合 + 历史锚点 + 区间约束 + 外推衰减）
- * - 特殊日（博主 25/28）：直接用历史中位数
- * - 普通日：regrPred 与历史同类型中位数按 R² 混合
- * - R² 权重：>=0.70 → 70%；0.50~0.70 → 50%；0.30~0.50 → 30%；<0.30 → 0%（纯中位数）
- * - 外推超过样本末 7 天后，回归权重线性衰减（最低 20%）
- * - 结果 clamp 到历史同类型 [p10*0.7, p90*1.3]
+ * 日总量预测（同星期几加权均值 + 双窗口趋势 + 回归叠加 + 宽松 clamp）
+ *
+ * 决策链：
+ *  ① 博主特殊日（25/28）→ 特殊日历史中位数
+ *  ② 锚点：同星期几加权均值（最近 1 周权重 5，第 2 周 3，第 3 周 2，第 4 周 1）
+ *     - 样本 ≥ 2 → 用同星期几加权均值
+ *     - 否则 → 同类型（工作日/周末）加权均值
+ *     - 再否则 → 全样本加权均值
+ *  ③ 趋势修正：7 天窗口 + 14 天窗口的趋势取加权平均（0.6/0.4），限制 ±30%
+ *     外推越远修正越弱（horizon=0 → 100%；horizon=7 → 30%；horizon≥14 → 0）
+ *  ④ 回归叠加：R² ≥ 0.5 → 40% 权重；≥ 0.6 → 50%；≥ 0.7 → 60%
+ *     回归结果硬约束到锚点 0.6~1.5 倍
+ *  ⑤ 硬 clamp：同类型历史 [min×0.75, max×1.25]
  */
 function _predictDailyTotal(stats, date, useWeekend, specialKind, biz) {
-  if (!stats) return null;
+  if (!stats || !stats.dailyStats || !stats.dailyStats.length) return null;
 
-  /* ① 特殊日优先 */
+  const outlierDates = new Set(
+    (stats.diagnostic && stats.diagnostic.outlierDates) || []
+  );
+
+  /* ① 博主特殊日 */
   if (specialKind != null && stats.specialTotals) {
     const st = stats.specialTotals[String(specialKind)];
     if (st && st.n >= 1) {
@@ -159,60 +170,139 @@ function _predictDailyTotal(stats, date, useWeekend, specialKind, biz) {
     }
   }
 
-  /* ② 取历史同类型统计；样本不足回退到 all */
-  const ts = stats.totalStats || {};
-  const typeStat = useWeekend ? ts.weekend : ts.weekday;
-  const fallbackStat = ts.all;
-  let hist = null;
-  if (typeStat && typeStat.n >= 3) hist = typeStat;
-  else if (fallbackStat && fallbackStat.n >= 2) hist = fallbackStat;
-  else hist = typeStat || fallbackStat;
-  if (!hist || hist.n < 1) return null;
+  const latest = stats.sampleRange.end;
+  const horizon = Math.max(0, _dateDiffDays(latest, date));
 
-  /* ③ 回归选择（工作日 / 周末，样本不足回退到 all） */
-  const regrW = stats.totalRegression && stats.totalRegression.weekend;
-  const regrD = stats.totalRegression && stats.totalRegression.weekday;
-  const regrAll = stats.totalRegression && stats.totalRegression.all;
-  const primary = useWeekend ? regrW : regrD;
-  const useRegr = (primary && primary.n >= 3 && isFinite(primary.slope) && isFinite(primary.intercept))
-    ? primary
-    : ((regrAll && regrAll.n >= 3 && isFinite(regrAll.slope) && isFinite(regrAll.intercept)) ? regrAll : null);
+  /* ② 锚点：同星期几 → 同类型 → 全样本，全部用「时间加权均值」 */
+  const dow = new Date(date + 'T00:00:00Z').getUTCDay();
+  const dowRows = stats.dailyStats
+    .filter(d => !outlierDates.has(d.date))
+    .filter(d => new Date(d.date + 'T00:00:00Z').getUTCDay() === dow)
+    .sort((a, b) => b.date.localeCompare(a.date));   /* 最近优先 */
 
-  let pred = hist.median;
+  const typeRows = stats.dailyStats
+    .filter(d => !outlierDates.has(d.date))
+    .filter(d => d.isWeekend === useWeekend)
+    .sort((a, b) => b.date.localeCompare(a.date));
+
+  const allRows = stats.dailyStats
+    .filter(d => !outlierDates.has(d.date))
+    .sort((a, b) => b.date.localeCompare(a.date));
+
+  /* 时间加权均值：最近权重高，第 5 个之后权重 1 */
+  const WEIGHTS = [5, 3, 2, 1.5, 1, 1, 1, 1, 1, 1];
+  const wAvg = (rows, cap) => {
+    if (!rows.length) return 0;
+    const limit = Math.min(rows.length, cap || 10);
+    let wSum = 0, vSum = 0;
+    for (let i = 0; i < limit; i++) {
+      const w = WEIGHTS[i] || 1;
+      wSum += w;
+      vSum += rows[i].total * w;
+    }
+    return wSum > 0 ? vSum / wSum : 0;
+  };
+
+  let anchor = 0, anchorSrc = 'all';
+  if (dowRows.length >= 2) {
+    anchor = wAvg(dowRows, 6);
+    anchorSrc = 'dow';
+  } else if (typeRows.length >= 3) {
+    anchor = wAvg(typeRows, 10);
+    anchorSrc = 'type';
+  } else if (allRows.length >= 1) {
+    anchor = wAvg(allRows, 10);
+  }
+  if (!(anchor > 0)) return null;
+
+  /* ③ 双窗口趋势修正 */
+  const c1 = dateAdd(latest, -6);   /* 近 7 天起点 */
+  const c2 = dateAdd(latest, -13);  /* 前 7 天起点 */
+  const c3 = dateAdd(latest, -27);  /* 近 14 天之前 */
+
+  const recent7  = stats.dailyStats.filter(d => d.date >= c1  && !outlierDates.has(d.date)).map(d => d.total);
+  const prev7    = stats.dailyStats.filter(d => d.date >= c2 && d.date < c1 && !outlierDates.has(d.date)).map(d => d.total);
+  const recent14 = stats.dailyStats.filter(d => d.date >= c2  && !outlierDates.has(d.date)).map(d => d.total);
+  const prev14   = stats.dailyStats.filter(d => d.date >= c3 && d.date < c2 && !outlierDates.has(d.date)).map(d => d.total);
+
+  const clampTrend = t => {
+    if (t >  0.30) return  0.30;
+    if (t < -0.30) return -0.30;
+    return t;
+  };
+
+  let trend = 0;
+  let trendParts = 0;
+  if (recent7.length >= 3 && prev7.length >= 3) {
+    const p7 = _avg(prev7);
+    if (p7 > 0) { trend += clampTrend((_avg(recent7) - p7) / p7) * 0.6; trendParts += 0.6; }
+  }
+  if (recent14.length >= 5 && prev14.length >= 5) {
+    const p14 = _avg(prev14);
+    if (p14 > 0) { trend += clampTrend((_avg(recent14) - p14) / p14) * 0.4; trendParts += 0.4; }
+  }
+  if (trendParts > 0) trend = trend / trendParts;
+  else trend = 0;
+
+  /* 外推衰减：horizon=0 → 100%；horizon=7 → 30%；horizon≥14 → 0% */
+  const trendWeight = horizon <= 7
+    ? (1 - horizon * 0.10)
+    : Math.max(0, 0.30 * (1 - (horizon - 7) / 7));
+  const trendFactor = 1 + trend * trendWeight;
+
+  let pred = anchor * trendFactor;
   let source = 'history';
 
-  if (useRegr) {
-    const x = _dateDiffDays(stats.sampleRange.start, date);
-    const regrPred = useRegr.slope * x + useRegr.intercept;
-    const r2 = Number(useRegr.r2) || 0;
+  /* ④ 回归叠加（权重提高，短期才用） */
+  if (horizon <= 14) {
+    const regrW   = stats.totalRegression && stats.totalRegression.weekend;
+    const regrD   = stats.totalRegression && stats.totalRegression.weekday;
+    const regrAll = stats.totalRegression && stats.totalRegression.all;
+    const primary = useWeekend ? regrW : regrD;
+    const useRegr = (primary && primary.n >= 5 && isFinite(primary.slope) && isFinite(primary.intercept))
+      ? primary
+      : ((regrAll && regrAll.n >= 5 && isFinite(regrAll.slope) && isFinite(regrAll.intercept)) ? regrAll : null);
 
-    let wRegr;
-    if      (r2 >= 0.70) wRegr = 0.70;
-    else if (r2 >= 0.50) wRegr = 0.50;
-    else if (r2 >= 0.30) wRegr = 0.30;
-    else                 wRegr = 0.00;
+    if (useRegr) {
+      const r2 = Number(useRegr.r2) || 0;
+      let wRegr = 0;
+      if      (r2 >= 0.70) wRegr = 0.60;
+      else if (r2 >= 0.60) wRegr = 0.50;
+      else if (r2 >= 0.50) wRegr = 0.40;
+      else if (r2 >= 0.40) wRegr = 0.25;
+      else                 wRegr = 0.00;
 
-    const lastX = _dateDiffDays(stats.sampleRange.start, stats.sampleRange.end);
-    const horizon = x - lastX;
-    if (horizon > 7) {
-      const decay = Math.max(0.2, 1 - (horizon - 7) / 30);
-      wRegr *= decay;
-    }
+      /* 外推衰减：horizon > 7 时权重减半 */
+      if (horizon > 7) wRegr *= 0.6;
 
-    if (wRegr > 0 && isFinite(regrPred) && regrPred > 0) {
-      pred = wRegr * regrPred + (1 - wRegr) * hist.median;
-      source = 'regression';
-    } else {
-      pred = hist.median;
-      source = 'history';
+      if (wRegr > 0) {
+        const x = _dateDiffDays(stats.sampleRange.start, date);
+        const regrPred = useRegr.slope * x + useRegr.intercept;
+        if (isFinite(regrPred) && regrPred > 0) {
+          /* 硬约束到锚点 0.6~1.5 倍 */
+          const hardLo = pred * 0.6;
+          const hardHi = pred * 1.5;
+          let capped = regrPred;
+          if (capped < hardLo) capped = hardLo;
+          if (capped > hardHi) capped = hardHi;
+          pred = (1 - wRegr) * pred + wRegr * capped;
+          source = 'regression';
+        }
+      }
     }
   }
 
-  /* ④ 合理性约束：clamp 到历史同类型区间 */
-  const lo = Math.max(0, (hist.p10 != null ? hist.p10 : hist.min) * 0.7);
-  const hi = (hist.p90 != null ? hist.p90 : hist.max) * 1.3;
-  if (isFinite(lo) && pred < lo) pred = lo;
-  if (isFinite(hi) && pred > hi) pred = hi;
+  /* ⑤ 硬 clamp：同类型历史 [min×0.75, max×1.25] */
+  const clampSource = (typeRows.length >= 3) ? typeRows
+                    : (allRows.length >= 3) ? allRows
+                    : null;
+  if (clampSource) {
+    const vals = clampSource.map(d => d.total).sort((a, b) => a - b);
+    const lo = vals[0] * 0.75;
+    const hi = vals[vals.length - 1] * 1.25;
+    if (pred < lo) pred = lo;
+    if (pred > hi) pred = hi;
+  }
 
   return { value: Math.round(pred), source };
 }

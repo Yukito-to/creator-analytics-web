@@ -268,17 +268,15 @@ function renderForecastConfig() {
       else { val = ''; }
     }
 
-    /* 回归参考值 */
     let regrVal = '';
-    if (regrPreview && regrPreview.totalRegression) {
+    if (regrPreview && regrPreview.dailyStats && regrPreview.dailyStats.length) {
       const useWeekend = shouldUseWeekendPattern(date);
-      const regr = useWeekend ? regrPreview.totalRegression.weekend : regrPreview.totalRegression.weekday;
-      const fallback = regrPreview.totalRegression.all;
-      const useRegr = (regr && regr.n >= 3) ? regr : ((fallback && fallback.n >= 3) ? fallback : null);
-      if (useRegr) {
-        const x = _dateDiffDays(regrPreview.sampleRange.start, date);
-        const pred = useRegr.slope * x + useRegr.intercept;
-        if (pred > 0 && isFinite(pred)) regrVal = '📈 回归 ' + Math.round(pred);
+      const pr = _predictDailyTotal(regrPreview, date, useWeekend, null, biz);
+      if (pr && pr.value > 0) {
+        const srcTag = pr.source === 'regression' ? '回归'
+                     : pr.source === 'special'    ? '特殊日'
+                     : '中位';
+        regrVal = '📈 ' + srcTag + ' ' + pr.value;
       }
     }
 
@@ -494,9 +492,9 @@ function renderForecastResult() {
       const color = tr.slope > 0.5 ? '#C75C5C' : (tr.slope < -0.5 ? '#6EA980' : '#77778A');
       noteHtml += '<div style="color:' + color + ';margin-top:4px">📈 <b>日度总量趋势：</b>斜率 ' + tr.slope.toFixed(2) + ' 单/天，R² = ' + tr.r2.toFixed(3) + '（' + dir + '）；<b>时段占比：</b>线性回归预测</div>';
     } else {
-      noteHtml += '<div style="color:#77778A;margin-top:4px">📈 <b>算法：</b>时段占比线性回归（样本不足，回退中位数）；总量 R² 加权混合回归 + 历史中位数</div>';
+      noteHtml += '<div style="color:#77778A;margin-top:4px">📈 <b>算法：</b>时段占比线性回归；日总量 = max(同周加权均值, P60分位) × 趋势修正 × 1.10 排班 buffer，回归仅做微调</div>';
     }
-    noteHtml += '<div style="color:#77778A;font-size:11.5px;margin-top:2px">🧮 <b>总量算法：</b>R² 加权混合回归 + 历史中位数（R²&lt;0.3 时纯用中位数），clamp 至历史同类型 [P10×0.7, P90×1.3]；外推超 7 天后回归权重衰减；博主 25/28 日走特殊日模板。</div>';
+    noteHtml += '<div style="color:#77778A;font-size:11.5px;margin-top:2px">🧮 <b>总量算法：</b>锚点 = max(同周加权均值, P60分位)，趋势修正 ±35%（负趋势减半），回归权重 0.7→50%/0.6→40%/0.5→30%/0.4→15%，最终值 × 1.10 排班 buffer，clamp 至 [P10×0.85, max×1.30]；博主 25/28 日走特殊日模板 × 1.10。</div>';
     noteHtml += '<div style="color:#77778A;font-size:11.5px;margin-top:2px">🗓 节假日识别：' + _cnHolidayVersion + '；时段仅统计 9-23；勾选/取消「按休日算」可手动覆盖。</div>';
 
     if (biz === '博主合作' && stats.specialDays) {

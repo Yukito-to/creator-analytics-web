@@ -141,19 +141,23 @@ function _statOf(arr) {
 }
 
 /**
- * 日总量预测（同星期几加权均值 + 双窗口趋势 + 回归叠加 + 宽松 clamp）
+ * 日总量预测（排班安全版）
+ *
+ * 设计原则：宁可高估不可低估 —— 排班少人会导致接起率暴跌，多人只是成本略增。
  *
  * 决策链：
- *  ① 博主特殊日（25/28）→ 特殊日历史中位数
- *  ② 锚点：同星期几加权均值（最近 1 周权重 5，第 2 周 3，第 3 周 2，第 4 周 1）
- *     - 样本 ≥ 2 → 用同星期几加权均值
- *     - 否则 → 同类型（工作日/周末）加权均值
- *     - 再否则 → 全样本加权均值
- *  ③ 趋势修正：7 天窗口 + 14 天窗口的趋势取加权平均（0.6/0.4），限制 ±30%
- *     外推越远修正越弱（horizon=0 → 100%；horizon=7 → 30%；horizon≥14 → 0）
- *  ④ 回归叠加：R² ≥ 0.5 → 40% 权重；≥ 0.6 → 50%；≥ 0.7 → 60%
- *     回归结果硬约束到锚点 0.6~1.5 倍
- *  ⑤ 硬 clamp：同类型历史 [min×0.75, max×1.25]
+ *  ① 博主特殊日（25/28）→ 特殊日历史中位数 × 1.10
+ *  ② 锚点 = max(同星期几加权均值, 同星期几 P60 分位数)
+ *     - 同星期几样本 ≥ 2 → 用同星期几
+ *     - 否则 → 同类型（工作日/周末）
+ *     - 再否则 → 全样本
+ *  ③ 趋势修正：7 天 + 14 天双窗口，上限 ±35%；
+ *     负趋势只吃 50%（防误判下滑导致排班不足）；
+ *     外推越远修正越弱（horizon=0 → 100%，horizon=14 → 0%）
+ *  ④ 回归叠加：R² ≥ 0.5 才给权重（0.5/0.4/0.3/0.15/0），
+ *     结果硬约束到锚点 0.7~1.3 倍
+ *  ⑤ 排班 buffer：最终值 × 1.10
+ *  ⑥ 硬 clamp：同类型历史 [P10×0.85, max×1.30]
  */
 function _predictDailyTotal(stats, date, useWeekend, specialKind, biz) {
   if (!stats || !stats.dailyStats || !stats.dailyStats.length) return null;
@@ -166,19 +170,19 @@ function _predictDailyTotal(stats, date, useWeekend, specialKind, biz) {
   if (specialKind != null && stats.specialTotals) {
     const st = stats.specialTotals[String(specialKind)];
     if (st && st.n >= 1) {
-      return { value: Math.round(st.median), source: 'special' };
+      return { value: Math.round(st.median * 1.10), source: 'special' };
     }
   }
 
   const latest = stats.sampleRange.end;
   const horizon = Math.max(0, _dateDiffDays(latest, date));
 
-  /* ② 锚点：同星期几 → 同类型 → 全样本，全部用「时间加权均值」 */
+  /* ② 锚点 */
   const dow = new Date(date + 'T00:00:00Z').getUTCDay();
   const dowRows = stats.dailyStats
     .filter(d => !outlierDates.has(d.date))
     .filter(d => new Date(d.date + 'T00:00:00Z').getUTCDay() === dow)
-    .sort((a, b) => b.date.localeCompare(a.date));   /* 最近优先 */
+    .sort((a, b) => b.date.localeCompare(a.date));
 
   const typeRows = stats.dailyStats
     .filter(d => !outlierDates.has(d.date))
@@ -189,7 +193,16 @@ function _predictDailyTotal(stats, date, useWeekend, specialKind, biz) {
     .filter(d => !outlierDates.has(d.date))
     .sort((a, b) => b.date.localeCompare(a.date));
 
-  /* 时间加权均值：最近权重高，第 5 个之后权重 1 */
+  const quantile = (rows, q) => {
+    if (!rows.length) return 0;
+    const vals = rows.map(d => d.total).sort((a, b) => a - b);
+    const n = vals.length;
+    const pos = (n - 1) * q;
+    const lo = Math.floor(pos), hi = Math.ceil(pos);
+    if (lo === hi) return vals[lo];
+    return vals[lo] + (vals[hi] - vals[lo]) * (pos - lo);
+  };
+
   const WEIGHTS = [5, 3, 2, 1.5, 1, 1, 1, 1, 1, 1];
   const wAvg = (rows, cap) => {
     if (!rows.length) return 0;
@@ -203,36 +216,33 @@ function _predictDailyTotal(stats, date, useWeekend, specialKind, biz) {
     return wSum > 0 ? vSum / wSum : 0;
   };
 
-  let anchor = 0, anchorSrc = 'all';
+  let anchor = 0;
   if (dowRows.length >= 2) {
-    anchor = wAvg(dowRows, 6);
-    anchorSrc = 'dow';
+    anchor = Math.max(wAvg(dowRows, 6), quantile(dowRows, 0.60));
   } else if (typeRows.length >= 3) {
-    anchor = wAvg(typeRows, 10);
-    anchorSrc = 'type';
+    anchor = Math.max(wAvg(typeRows, 10), quantile(typeRows, 0.60));
   } else if (allRows.length >= 1) {
-    anchor = wAvg(allRows, 10);
+    anchor = Math.max(wAvg(allRows, 10), quantile(allRows, 0.60));
   }
   if (!(anchor > 0)) return null;
 
-  /* ③ 双窗口趋势修正 */
-  const c1 = dateAdd(latest, -6);   /* 近 7 天起点 */
-  const c2 = dateAdd(latest, -13);  /* 前 7 天起点 */
-  const c3 = dateAdd(latest, -27);  /* 近 14 天之前 */
+  /* ③ 趋势 */
+  const c1 = dateAdd(latest, -6);
+  const c2 = dateAdd(latest, -13);
+  const c3 = dateAdd(latest, -27);
 
-  const recent7  = stats.dailyStats.filter(d => d.date >= c1  && !outlierDates.has(d.date)).map(d => d.total);
+  const recent7  = stats.dailyStats.filter(d => d.date >= c1 && !outlierDates.has(d.date)).map(d => d.total);
   const prev7    = stats.dailyStats.filter(d => d.date >= c2 && d.date < c1 && !outlierDates.has(d.date)).map(d => d.total);
-  const recent14 = stats.dailyStats.filter(d => d.date >= c2  && !outlierDates.has(d.date)).map(d => d.total);
+  const recent14 = stats.dailyStats.filter(d => d.date >= c2 && !outlierDates.has(d.date)).map(d => d.total);
   const prev14   = stats.dailyStats.filter(d => d.date >= c3 && d.date < c2 && !outlierDates.has(d.date)).map(d => d.total);
 
   const clampTrend = t => {
-    if (t >  0.30) return  0.30;
-    if (t < -0.30) return -0.30;
+    if (t >  0.35) return  0.35;
+    if (t < -0.35) return -0.35;
     return t;
   };
 
-  let trend = 0;
-  let trendParts = 0;
+  let trend = 0, trendParts = 0;
   if (recent7.length >= 3 && prev7.length >= 3) {
     const p7 = _avg(prev7);
     if (p7 > 0) { trend += clampTrend((_avg(recent7) - p7) / p7) * 0.6; trendParts += 0.6; }
@@ -244,16 +254,18 @@ function _predictDailyTotal(stats, date, useWeekend, specialKind, biz) {
   if (trendParts > 0) trend = trend / trendParts;
   else trend = 0;
 
-  /* 外推衰减：horizon=0 → 100%；horizon=7 → 30%；horizon≥14 → 0% */
+  /* 负趋势只吃 50%，防排班不足 */
+  if (trend < 0) trend *= 0.5;
+
   const trendWeight = horizon <= 7
-    ? (1 - horizon * 0.10)
-    : Math.max(0, 0.30 * (1 - (horizon - 7) / 7));
+    ? (1 - horizon * 0.08)
+    : Math.max(0, 0.44 * (1 - (horizon - 7) / 14));
   const trendFactor = 1 + trend * trendWeight;
 
   let pred = anchor * trendFactor;
   let source = 'history';
 
-  /* ④ 回归叠加（权重提高，短期才用） */
+  /* ④ 回归叠加 */
   if (horizon <= 14) {
     const regrW   = stats.totalRegression && stats.totalRegression.weekend;
     const regrD   = stats.totalRegression && stats.totalRegression.weekday;
@@ -266,22 +278,20 @@ function _predictDailyTotal(stats, date, useWeekend, specialKind, biz) {
     if (useRegr) {
       const r2 = Number(useRegr.r2) || 0;
       let wRegr = 0;
-      if      (r2 >= 0.70) wRegr = 0.60;
-      else if (r2 >= 0.60) wRegr = 0.50;
-      else if (r2 >= 0.50) wRegr = 0.40;
-      else if (r2 >= 0.40) wRegr = 0.25;
+      if      (r2 >= 0.70) wRegr = 0.50;
+      else if (r2 >= 0.60) wRegr = 0.40;
+      else if (r2 >= 0.50) wRegr = 0.30;
+      else if (r2 >= 0.40) wRegr = 0.15;
       else                 wRegr = 0.00;
 
-      /* 外推衰减：horizon > 7 时权重减半 */
-      if (horizon > 7) wRegr *= 0.6;
+      if (horizon > 7) wRegr *= 0.5;
 
       if (wRegr > 0) {
         const x = _dateDiffDays(stats.sampleRange.start, date);
         const regrPred = useRegr.slope * x + useRegr.intercept;
         if (isFinite(regrPred) && regrPred > 0) {
-          /* 硬约束到锚点 0.6~1.5 倍 */
-          const hardLo = pred * 0.6;
-          const hardHi = pred * 1.5;
+          const hardLo = pred * 0.7;
+          const hardHi = pred * 1.3;
           let capped = regrPred;
           if (capped < hardLo) capped = hardLo;
           if (capped > hardHi) capped = hardHi;
@@ -292,14 +302,16 @@ function _predictDailyTotal(stats, date, useWeekend, specialKind, biz) {
     }
   }
 
-  /* ⑤ 硬 clamp：同类型历史 [min×0.75, max×1.25] */
-  const clampSource = (typeRows.length >= 3) ? typeRows
-                    : (allRows.length >= 3) ? allRows
-                    : null;
+  /* ⑤ 排班安全 buffer */
+  pred = pred * 1.10;
+
+  /* ⑥ 硬 clamp */
+  const clampSource = (typeRows.length >= 3) ? typeRows : (allRows.length >= 3) ? allRows : null;
   if (clampSource) {
     const vals = clampSource.map(d => d.total).sort((a, b) => a - b);
-    const lo = vals[0] * 0.75;
-    const hi = vals[vals.length - 1] * 1.25;
+    const p10 = vals[Math.floor((vals.length - 1) * 0.1)];
+    const lo = p10 * 0.85;
+    const hi = vals[vals.length - 1] * 1.30;
     if (pred < lo) pred = lo;
     if (pred > hi) pred = hi;
   }

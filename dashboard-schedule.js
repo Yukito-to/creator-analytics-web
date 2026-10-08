@@ -91,35 +91,57 @@ function scSameAsTarget(ctx, name) {
 }
 
 /* ==================== 可休天数 ==================== */
-function calcHolidayQuota(name) {
-  const c = scGetCycle();
-  const dates = scDatesBetween(c.start, c.end);
-  const holidays = getHolidayMap();
-  let tripleDays = 0;   // 本周期内法定节假日出勤天数（3 倍工资）
-  let used = 0;         // 已休天数：只统计「班次时段」sheet 的「休」列
+/* 三倍日判定：只认用户勾选的节假日 */
+function scIsTripleDay(date) {
+  return S.scTripleDates.has(date);
+}
+
+/* 单员工休假统计：
+   tripleDays = 在 S.scTripleDates 里、且排了工作班次的天数
+   used       = sheet「休」列（shiftMeta.restDays）求和
+   total      = 按 S.scHolidayRules 精确匹配 tripleDays 得到的应休天数
+   remain     = max(0, total - used)；未匹配规则时 total/remain 为 null */
+function scHolidayStat(name) {
+  const tripleSet = S.scTripleDates;
+  let tripleDays = 0;
+  let used = 0;
 
   for (const d of S.scheduleDraft) {
     if (d.name !== name) continue;
-    if (dates.length && dates.indexOf(d.date) < 0) continue;
     const shift = d.shift;
     if (!shift) continue;
 
-    if (holidays[d.date] === 'holiday' && scIsWorkingShift(shift)) tripleDays++;
+    /* 三倍天数：在勾选的节假日内，排了工作班次 */
+    if (tripleSet.has(d.date) && scIsWorkingShift(shift)) tripleDays++;
 
-    /* ★ 已休天数：直接读 sheet 的「休」列
-       短班 B（短）休=0.5 → +0.5
-       全班长 B1 休=0 → +0
-       放休/事假/病假/丧假/婚假 休=0 → +0（不计入）
-       纯休「休」休=1 → +1 */
+    /* 已休：只读 sheet 的「休」列
+       短班（短）休=0.5 → +0.5；全班长 休=0 → +0；
+       放休/事假/病假/丧假/婚假 休=0 → +0；纯休 休=1 → +1 */
     const meta = S.shiftMeta[shift];
     if (meta && meta.restDays > 0) used += meta.restDays;
   }
 
-  const baseEl = document.getElementById('scBaseHoliday');
-  const base = baseEl ? (parseFloat(baseEl.value) || SC_BASE_HOLIDAY) : SC_BASE_HOLIDAY;
-  const total = Math.round((base + tripleDays * SC_TRIPLE_BONUS) * 100) / 100;
-  used = Math.round(used * 100) / 100;
-  return { base, tripleDays, used, remain: Math.max(0, total - used), total };
+  /* 按规则匹配可休天数：勾选且 triple 精确匹配 */
+  let total = null;
+  for (const r of S.scHolidayRules) {
+    if (!r.enabled) continue;
+    if (Number(r.triple) === tripleDays) { total = Number(r.rest); break; }
+  }
+
+  const remain = (total == null) ? null : Math.max(0, total - used);
+  return { tripleDays, used, total, remain };
+}
+
+/* 兼容旧调用：把统计口径统一为 S.scTripleDates + S.scHolidayRules */
+function calcHolidayQuota(name) {
+  const st = scHolidayStat(name);
+  return {
+    base: null,                          /* 新口径无「基础可休」概念 */
+    tripleDays: st.tripleDays,
+    used: st.used,
+    remain: st.remain == null ? 0 : st.remain,
+    total: st.total == null ? 0 : st.total,
+  };
 }
 function calcAllHolidayQuota() {
   S.holidayQuota = {};
@@ -502,7 +524,8 @@ function scValidateQuota(ctx) {
       if (s && scIsWorkingShift(s)) work++;
     }
     const q = S.holidayQuota[e.name] || {};
-    const quota = (q.total != null) ? q.total : SC_BASE_HOLIDAY;
+    /* total=0 表示未匹配到任何休假规则 → 退回默认基础可休，避免误报 */
+    const quota = (q.total != null && q.total > 0) ? q.total : SC_BASE_HOLIDAY;
     const need = Math.max(0, total - quota);
     if (work < need) {
       ctx.warnings.push(e.name + ' 实际工作 ' + work + ' 天 < 期望 ' + need + ' 天（周期 ' + total + ' 天 / 可休 ' + quota + '）');
@@ -588,35 +611,41 @@ function renderSchedulePanel() {
     });
   })();
 
-  /* ★ 基础可休天数绑定 */
-  (function bindBaseHoliday() {
-    const el = document.getElementById('scBaseHoliday');
-    if (!el || el._scBound) return;
-    el._scBound = true;
-    el.addEventListener('change', () => {
-      let v = parseFloat(el.value);
-      if (!isFinite(v) || v < 0) v = 6;
-      if (v > 30) v = 30;
-      el.value = v;
-      try { calcAllHolidayQuota(); renderScHolidayGrid(); } catch (e) { console.warn(e); }
-    });
+  /* ★ 排班表工具栏（隐藏统计列 / 折叠历史列） */
+  (function bindGridTools() {
+    const hideBtn = document.getElementById('scToggleStats');
+    const histBtn = document.getElementById('scToggleHistory');
+    if (hideBtn && !hideBtn._bound) {
+      hideBtn._bound = true;
+      hideBtn.addEventListener('click', () => {
+        S.scShowStats = !S.scShowStats;
+        hideBtn.textContent = S.scShowStats ? '👁 隐藏统计列' : '👁 显示统计列';
+        renderScGrid();
+      });
+      hideBtn.textContent = S.scShowStats ? '👁 隐藏统计列' : '👁 显示统计列';
+    }
+    if (histBtn && !histBtn._bound) {
+      histBtn._bound = true;
+      histBtn.addEventListener('click', () => {
+        S.scCollapseHist = !S.scCollapseHist;
+        histBtn.textContent = S.scCollapseHist ? '📦 展开历史列' : '📦 折叠历史列';
+        renderScGrid();
+      });
+      histBtn.textContent = S.scCollapseHist ? '📦 展开历史列' : '📦 折叠历史列';
+    }
   })();
 
   renderScShiftPool();
   renderScReqGrid();
   renderScCphGrid();
   renderScReqList();
-  renderScHolidayGrid();
-  renderScResult();
   renderScCoverage();
   renderScDiag();
   if (typeof renderScCoverageDaily === 'function') renderScCoverageDaily();
 
-  /* 前置排班若已展开，同步刷新 */
-  (function () {
-    const body = document.getElementById('scPreSchedule');
-    if (body && body.style.display !== 'none') renderScPreSchedule();
-  })();
+  renderScTripleGrid();
+  renderScRulesTable();
+  renderScGrid();
 }
 
 function renderScShiftPool() {
@@ -724,16 +753,250 @@ function renderScReqList() {
   }
 }
 
-function renderScHolidayGrid() {
-  const el = document.getElementById('scHolidayGrid');
-  if (!el) return;
+/* ==================== 排班表（前置 + 新排 + 统计） ==================== */
+/* 渲染前置+新排的统一表格 */
+function renderScGrid() {
+  const tbl = document.getElementById('scGridTable');
+  if (!tbl) return;
+
+  /* 日期范围：默认 = S.scheduleCycle；可选折叠历史（周期起始日前不显示） */
+  const c = scGetCycle();
+  let dates = scDatesBetween(c.start, c.end);
+  if (!dates.length && S.scheduleDraft.length) {
+    /* 兜底：用草稿里所有日期 */
+    const set = new Set(S.scheduleDraft.map(d => d.date));
+    dates = Array.from(set).sort();
+  }
+
+  /* 折叠历史：只显示起点之后的日期 */
+  if (S.scCollapseHist) {
+    const start = c.start || dates[0];
+    dates = dates.filter(d => d >= start);
+  }
+
+  /* 员工列表（参与排班的） */
   const emps = scActiveEmployees();
-  if (!emps.length) { el.innerHTML = '<p class="muted">无可用员工。</p>'; return; }
-  const rows = emps.map(e => {
-    const q = (S.holidayQuota || {})[e.name] || calcHolidayQuota(e.name);
-    return '<tr><td>' + esc(e.name) + '</td><td>' + q.base + '</td><td>' + q.tripleDays + '</td><td>' + q.used.toFixed(2) + '</td><td>' + q.remain.toFixed(2) + '</td></tr>';
+  if (!emps.length) {
+    tbl.innerHTML = '<tbody><tr><td class="muted">无可排班员工</td></tr></tbody>';
+    return;
+  }
+
+  /* 前置排班 map：name → date → shift */
+  const draftMap = {};
+  for (const d of S.scheduleDraft) {
+    if (!draftMap[d.name]) draftMap[d.name] = {};
+    draftMap[d.name][d.date] = d.shift;
+  }
+  /* 前置集合：用于加左侧竖条 */
+  const preSet = new Set(S.scheduleDraft.filter(d => d.shift).map(d => d.name + '|' + d.date));
+
+  /* 当前状态是否有排班结果（生成后用这个覆盖前置） */
+  const resultMap = {};
+  for (const r of (S.scheduleResult || [])) {
+    if (!resultMap[r.name]) resultMap[r.name] = {};
+    resultMap[r.name][r.date] = r.shift;
+  }
+
+  /* ===== 表头 ===== */
+  const statCols = ['可休', '已休', '未休'];
+  /* 每个班次的列（只列工作班次） */
+  const workingShifts = Object.keys(S.shiftMeta || {}).filter(s => scIsWorkingShift(s));
+
+  let headTop = '<tr>' +
+    '<th>员工</th>' +
+    statCols.map(s => '<th class="sc-stat">' + s + '</th>').join('') +
+    workingShifts.map(s => '<th class="sc-stat">' + esc(s) + '</th>').join('');
+  for (const d of dates) {
+    const wd = new Date(d + 'T00:00:00Z').getUTCDay();
+    const cls = classifyDate(d);
+    const clsCss = cls === 'holiday' ? 'is-holiday' : (cls === 'workday' ? 'is-workday' : '');
+    const isTriple = S.scTripleDates.has(d);
+    const tag = isTriple ? '三倍' : (cls === 'holiday' ? '节' : (cls === 'workday' ? '班' : ''));
+    headTop += '<th class="sc-date-h ' + clsCss + '">' +
+      '<span class="d">' + esc(d.slice(5)) + '</span>' +
+      '<span class="w">周' + WEEKDAY_CN[wd] + '</span>' +
+      (tag ? '<span class="tag">' + tag + '</span>' : '') +
+    '</th>';
+  }
+  headTop += '</tr>';
+
+  /* ===== 表身 ===== */
+  const bodyRows = emps.map((e, ri) => {
+    const st = scHolidayStat(e.name);
+    const statTds = [
+      '<td class="sc-stat">' + (st.total == null ? '—' : st.total) + '</td>',
+      '<td class="sc-stat">' + st.used.toFixed(2).replace(/\.00$/, '') + '</td>',
+      '<td class="sc-stat">' + (st.remain == null ? '—' : st.remain.toFixed(2).replace(/\.00$/, '')) + '</td>',
+    ].join('');
+    /* 各工作班次计数 */
+    const shiftCount = {};
+    for (const d of dates) {
+      const s = (resultMap[e.name] && resultMap[e.name][d]) ||
+                (draftMap[e.name]  && draftMap[e.name][d])   || '';
+      if (s) shiftCount[s] = (shiftCount[s] || 0) + 1;
+    }
+    const shiftTds = workingShifts.map(s =>
+      '<td class="sc-stat">' + (shiftCount[s] || '') + '</td>'
+    ).join('');
+
+    const dayTds = dates.map((d, ci) => {
+      const s = (resultMap[e.name] && resultMap[e.name][d]) ||
+                (draftMap[e.name]  && draftMap[e.name][d])   || '';
+      const meta = s ? S.shiftMeta[s] : null;
+      const isLeaveReq = s && isLeaveRequest(e.name, d);
+      const bg = isLeaveReq ? SC_COLOR_LEAVE_REQ : ((meta && meta.color) || '');
+      const isPre = preSet.has(e.name + '|' + d);
+      const style = bg ? ' style="background:' + bg + '"' : '';
+      const cls = 'sc-grid-cell' + (isPre ? ' pre' : '') + (s ? '' : ' empty');
+      return '<td class="' + cls + '"' + style +
+             ' data-r="' + ri + '" data-c="' + ci + '" data-name="' + esc(e.name) + '" data-date="' + d + '">' +
+             (s ? esc(s) : '') + '</td>';
+    }).join('');
+
+    return '<tr><td>' + esc(e.name) + '</td>' + statTds + shiftTds + dayTds + '</tr>';
   }).join('');
-  el.innerHTML = '<table><tr><th>姓名</th><th>基础</th><th>3倍天数</th><th>已休</th><th>剩余</th></tr>' + rows + '</table>';
+
+  tbl.innerHTML = '<thead>' + headTop + '</thead><tbody>' + bodyRows + '</tbody>';
+
+  /* 应用 "隐藏统计列" 状态 */
+  if (!S.scShowStats) {
+    tbl.querySelectorAll('.sc-stat').forEach(el => el.classList.add('hide'));
+  }
+
+  bindScGridEvents(tbl, emps, dates);
+}
+
+/* 拖拽是否移动过（用于抑制拖拽结束后的 click 弹窗） */
+let scDragMoved = false;
+
+function bindScGridEvents(tbl, emps, dates) {
+  /* 清理上一次渲染遗留的监听，避免重复叠加 */
+  if (tbl._scCopy)    document.removeEventListener('copy', tbl._scCopy);
+  if (tbl._scPaste)   document.removeEventListener('paste', tbl._scPaste);
+  if (tbl._scKey)     tbl.removeEventListener('keydown', tbl._scKey);
+  if (tbl._scMouseUp) document.removeEventListener('mouseup', tbl._scMouseUp);
+
+  const cells = tbl.querySelectorAll('.sc-grid-cell');
+  tbl.tabIndex = 0;
+
+  /* 单击 → 弹出班次选择（简版：prompt） */
+  cells.forEach(td => {
+    td.addEventListener('click', () => {
+      if (scDragMoved) { scDragMoved = false; return; }
+      const cur = td.textContent.trim();
+      const next = prompt(
+        '输入班次（留空 = 清空）\n' +
+        '可选：' + Object.keys(S.shiftMeta).join(' / '),
+        cur
+      );
+      if (next == null) return;
+      scSetCell(td.dataset.name, td.dataset.date, next.trim());
+      renderScGrid();
+      const t = document.getElementById('scGridTable');
+      if (t) { try { t.focus({ preventScroll: true }); } catch (_) { t.focus(); } }
+    });
+  });
+
+  /* 拖拽框选 */
+  let dragging = false, startR = -1, startC = -1;
+  cells.forEach(td => {
+    td.addEventListener('mousedown', e => {
+      if (e.shiftKey || e.ctrlKey || e.metaKey) return;
+      dragging = true;
+      scDragMoved = false;
+      startR = +td.dataset.r;
+      startC = +td.dataset.c;
+      clearSel(tbl);
+      td.classList.add('sel');
+      try { tbl.focus({ preventScroll: true }); } catch (_) { tbl.focus(); }
+      e.preventDefault();
+    });
+    td.addEventListener('mouseenter', () => {
+      if (!dragging) return;
+      scDragMoved = true;
+      const r = +td.dataset.r, c = +td.dataset.c;
+      const r1 = Math.min(startR, r), r2 = Math.max(startR, r);
+      const c1 = Math.min(startC, c), c2 = Math.max(startC, c);
+      clearSel(tbl);
+      cells.forEach(x => {
+        const xr = +x.dataset.r, xc = +x.dataset.c;
+        if (xr >= r1 && xr <= r2 && xc >= c1 && xc <= c2) x.classList.add('sel');
+      });
+    });
+  });
+  const up = () => { dragging = false; };
+  document.addEventListener('mouseup', up);
+  tbl._scMouseUp = up;
+
+  /* Ctrl+A / Esc */
+  const keyHandler = e => {
+    if (e.key === 'Escape') clearSel(tbl);
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
+      e.preventDefault();
+      cells.forEach(x => x.classList.add('sel'));
+    }
+  };
+  tbl.addEventListener('keydown', keyHandler);
+  tbl._scKey = keyHandler;
+
+  /* Ctrl+C / Ctrl+V —— 用 clipboard 事件挂在 document 上，只在表格聚焦时生效 */
+  const copyHandler = e => {
+    const sel = tbl.querySelectorAll('.sc-grid-cell.sel');
+    if (!sel.length || !tbl.contains(document.activeElement)) return;
+    const txt = Array.from(sel).map(td => td.textContent.trim()).join('\t');
+    e.clipboardData.setData('text/plain', txt);
+    e.preventDefault();
+  };
+  const pasteHandler = e => {
+    const sel = tbl.querySelectorAll('.sc-grid-cell.sel');
+    if (!sel.length || !tbl.contains(document.activeElement)) return;
+    const txt = e.clipboardData.getData('text/plain');
+    if (!txt) return;
+    const lines = txt.split(/\r?\n/).filter(x => x);
+    /* 单值 → 填满选区；多值 → 按行列铺 */
+    if (lines.length === 1 && lines[0].indexOf('\t') < 0) {
+      const v = lines[0].trim();
+      sel.forEach(td => scSetCell(td.dataset.name, td.dataset.date, v));
+    } else {
+      const grid = lines.map(l => l.split('\t').map(x => x.trim()));
+      const rows = {}, cols = {};
+      sel.forEach(td => { rows[td.dataset.r] = 1; cols[td.dataset.c] = 1; });
+      const rs = Object.keys(rows).map(Number).sort((a, b) => a - b);
+      const cs = Object.keys(cols).map(Number).sort((a, b) => a - b);
+      for (let i = 0; i < rs.length && i < grid.length; i++) {
+        for (let j = 0; j < cs.length && j < grid[i].length; j++) {
+          const td = tbl.querySelector('.sc-grid-cell[data-r="' + rs[i] + '"][data-c="' + cs[j] + '"]');
+          if (td) scSetCell(td.dataset.name, td.dataset.date, grid[i][j]);
+        }
+      }
+    }
+    e.preventDefault();
+    renderScGrid();
+  };
+  document.addEventListener('copy',  copyHandler);
+  document.addEventListener('paste', pasteHandler);
+  tbl._scCopy = copyHandler;
+  tbl._scPaste = pasteHandler;
+}
+
+function clearSel(tbl) {
+  tbl.querySelectorAll('.sc-grid-cell.sel').forEach(x => x.classList.remove('sel'));
+}
+
+/* 写入某员工某天的班次（同时更新 S.scheduleDraft / S.scheduleResult） */
+function scSetCell(name, date, shift) {
+  let rec = S.scheduleDraft.find(x => x.name === name && x.date === date);
+  if (!rec) {
+    if (!shift) return;
+    S.scheduleDraft.push({ name, date, shift, requestText: '' });
+  } else {
+    if (!shift) { S.scheduleDraft = S.scheduleDraft.filter(x => x !== rec); return; }
+    rec.shift = shift;
+  }
+  /* 同时更新 scheduleResult（若已生成） */
+  let rr = (S.scheduleResult || []).find(x => x.name === name && x.date === date);
+  if (rr) rr.shift = shift;
+  else if (shift) (S.scheduleResult = S.scheduleResult || []).push({ date, name, shift, biz: '' });
 }
 
 /* 该员工在 date 是否有明确日期的休假诉求（leave_on） */
@@ -746,89 +1009,173 @@ function isLeaveRequest(name, date) {
   return false;
 }
 
-/* 前置排班预览（只读） */
-function renderScPreSchedule() {
-  const el = document.getElementById('scPreSchedule');
+/* ==================== 三倍日网格 ==================== */
+function renderScTripleGrid() {
+  const el = document.getElementById('scTripleDates');
   if (!el) return;
   const c = scGetCycle();
-  const dates = scDatesBetween(c.start, c.end);
-  const emps = scActiveEmployees();
-  if (!S.scheduleDraft.length) { el.innerHTML = '<p class="muted">无前置排班。</p>'; return; }
-
-  const map = {};
-  for (const d of S.scheduleDraft) {
-    if (!map[d.name]) map[d.name] = {};
-    map[d.name][d.date] = d.shift;
+  let dates = scDatesBetween(c.start, c.end);
+  if (!dates.length && S.scheduleDraft.length) {
+    const set = new Set(S.scheduleDraft.map(d => d.date));
+    dates = Array.from(set).sort();
   }
 
-  const head = '<tr><th>姓名</th>' + dates.map(d => '<th>' + esc(d.slice(5)) + '</th>').join('') + '</tr>';
-  const rows = emps.map(e => {
-    const m = map[e.name] || {};
-    return '<tr><td>' + esc(e.name) + '</td>' + dates.map(d => {
-      const s = m[d] || '';
-      if (!s) return '<td></td>';
-      const meta = S.shiftMeta[s];
-      const isLeaveReq = isLeaveRequest(e.name, d);
-      const bg = isLeaveReq ? SC_COLOR_LEAVE_REQ : ((meta && meta.color) || '');
-      const style = bg ? ' style="background:' + bg + ';color:#333"' : '';
-      return '<td' + style + '>' + esc(s) + '</td>';
-    }).join('') + '</tr>';
+  el.innerHTML = dates.map(d => {
+    const wd = new Date(d + 'T00:00:00Z').getUTCDay();
+    const cls = classifyDate(d);
+    const on = S.scTripleDates.has(d);
+    const clsCss = cls === 'holiday' ? 'is-holiday' : (cls === 'workday' ? 'is-workday' : '');
+    const tag = cls === 'holiday' ? '国' : (cls === 'workday' ? '班' : '');
+    return '<button type="button" class="sc-triple-btn ' + clsCss + (on ? ' on' : '') +
+      '" data-date="' + d + '">' +
+      '<span class="d">' + esc(d.slice(5)) + '</span>' +
+      '<span class="w">周' + WEEKDAY_CN[wd] + '</span>' +
+      (tag ? '<span class="t">' + tag + '</span>' : '') +
+    '</button>';
   }).join('');
-  el.innerHTML = '<table>' + head + rows + '</table>';
+
+  const cnt = document.getElementById('scTripleCount');
+  const tot = document.getElementById('scTripleTotal');
+  if (cnt) cnt.textContent = S.scTripleDates.size;
+  if (tot) tot.textContent = dates.length;
+
+  el.querySelectorAll('.sc-triple-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const d = btn.dataset.date;
+      if (S.scTripleDates.has(d)) S.scTripleDates.delete(d);
+      else                         S.scTripleDates.add(d);
+      scSaveRules();
+      renderScTripleGrid();
+      renderScGrid();
+    });
+  });
 }
 
-(function bindPreScheduleToggle() {
+/* 三倍日全选 / 清空 / 自动匹配 */
+(function bindTripleTools() {
   const run = () => {
-    const head = document.getElementById('scPreHead');
-    const body = document.getElementById('scPreSchedule');
-    const arr  = document.getElementById('scPreArrow');
-    if (!head || head._bound) return;
-    head._bound = true;
-    head.addEventListener('click', () => {
-      const open = body.style.display !== 'none';
-      body.style.display = open ? 'none' : 'block';
-      arr.textContent = open ? '▶' : '▼';
-      if (!open) renderScPreSchedule();
+    const tools = document.querySelector('.sc-triple-tools');
+    if (!tools || tools._bound) return;
+    tools._bound = true;
+    tools.addEventListener('click', async (e) => {
+      const btn = e.target.closest('button[data-act]');
+      if (!btn) return;
+      const act = btn.dataset.act;
+      const c = scGetCycle();
+      let dates = scDatesBetween(c.start, c.end);
+      if (!dates.length && S.scheduleDraft.length) {
+        dates = Array.from(new Set(S.scheduleDraft.map(d => d.date))).sort();
+      }
+      if (act === 'all')  dates.forEach(d => S.scTripleDates.add(d));
+      if (act === 'none') dates.forEach(d => S.scTripleDates.delete(d));
+      if (act === 'auto') {
+        if (typeof initHolidayData === 'function') {
+          try { await initHolidayData(); } catch (_) {}
+        }
+        const map = getHolidayMap();
+        let n = 0;
+        dates.forEach(d => {
+          if (map[d] === 'holiday') { S.scTripleDates.add(d); n++; }
+        });
+        toast('🎆 已自动勾选 ' + n + ' 个法定节假日');
+      }
+      scSaveRules();
+      renderScTripleGrid();
+      renderScGrid();
     });
   };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run);
   else run();
 })();
 
-function renderScResult() {
-  const el = document.getElementById('scResult');
-  if (!el) return;
-  if (!(S.scheduleResult || []).length) { el.innerHTML = '<p class="muted">尚未生成排班。</p>'; return; }
-  const c = scGetCycle();
-  const dates = scDatesBetween(c.start, c.end);
-  const emps = scActiveEmployees();
-  const map = {};
-  for (const r of S.scheduleResult) {
-    if (!map[r.name]) map[r.name] = {};
-    map[r.name][r.date] = r.shift;
-  }
-  /* 用于判定某格是否为前置排班 */
-  const preSet = new Set();
-  for (const d of S.scheduleDraft) {
-    if (d.shift) preSet.add(d.name + '|' + d.date);
-  }
+/* ==================== 休假规则表 ==================== */
+function renderScRulesTable() {
+  const tbl = document.getElementById('scRulesTable');
+  if (!tbl) return;
+  const head = '<thead><tr>' +
+    '<th style="width:80px">启用</th>' +
+    '<th>三倍天数 = X</th>' +
+    '<th>本月可休天数 Y</th>' +
+    '<th style="width:100px">操作</th>' +
+  '</tr></thead>';
 
-  const header = '<tr><th>姓名</th>' + dates.map(d => '<th>' + esc(d.slice(5)) + '</th>').join('') + '</tr>';
-  const rows = emps.map(e => {
-    const m = map[e.name] || {};
-    return '<tr><td>' + esc(e.name) + '</td>' + dates.map(d => {
-      const s = m[d] || '';
-      if (!s) return '<td></td>';
-      const meta = S.shiftMeta[s];
-      const isLeaveReq = isLeaveRequest(e.name, d);
-      const bg = isLeaveReq ? SC_COLOR_LEAVE_REQ : ((meta && meta.color) || '');
-      const isPre = preSet.has(e.name + '|' + d);
-      const style = bg ? ' style="background:' + bg + ';color:#333"' : '';
-      const cls = 'sc-cell' + (isPre ? ' sc-cell-locked' : '');
-      return '<td class="' + cls + '"' + style + '>' + esc(s) + '</td>';
-    }).join('') + '</tr>';
-  }).join('');
-  el.innerHTML = '<table>' + header + rows + '</table>';
+  const body = S.scHolidayRules.map((r, i) =>
+    '<tr data-i="' + i + '">' +
+      '<td><input type="checkbox" data-k="enabled"' + (r.enabled ? ' checked' : '') + '></td>' +
+      '<td><input type="number" data-k="triple" min="0" step="1" value="' + (r.triple ?? '') + '"></td>' +
+      '<td><input type="number" data-k="rest"   min="0" step="1" value="' + (r.rest   ?? '') + '"></td>' +
+      '<td><button type="button" class="btn-del">删除</button></td>' +
+    '</tr>'
+  ).join('');
+
+  tbl.innerHTML = head + '<tbody>' + body + '</tbody>';
+
+  tbl.querySelectorAll('input').forEach(inp => {
+    inp.addEventListener('change', () => {
+      const i = +inp.closest('tr').dataset.i;
+      const k = inp.dataset.k;
+      if (k === 'enabled') S.scHolidayRules[i][k] = inp.checked;
+      else S.scHolidayRules[i][k] = inp.value === '' ? null : Number(inp.value);
+      scSaveRules();
+      renderScGrid();   /* 可休天数变化 → 表格跟着更新 */
+    });
+  });
+  tbl.querySelectorAll('.btn-del').forEach(b => {
+    b.addEventListener('click', () => {
+      const i = +b.closest('tr').dataset.i;
+      S.scHolidayRules.splice(i, 1);
+      scSaveRules();
+      renderScRulesTable();
+      renderScGrid();
+    });
+  });
+}
+
+(function bindRulesAdd() {
+  const run = () => {
+    const btn = document.getElementById('scRulesAdd');
+    if (!btn || btn._bound) return;
+    btn._bound = true;
+    btn.addEventListener('click', () => {
+      S.scHolidayRules.push({ enabled: true, triple: 0, rest: 0 });
+      scSaveRules();
+      renderScRulesTable();
+      renderScGrid();
+    });
+  };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run);
+  else run();
+})();
+
+(function bindRulesReset() {
+  const run = () => {
+    const btn = document.getElementById('scRulesReset');
+    if (!btn || btn._bound) return;
+    btn._bound = true;
+    btn.addEventListener('click', () => {
+      if (!confirm('恢复默认休假规则？当前自定义规则将被清空。')) return;
+      S.scHolidayRules = [
+        { enabled: true, triple: 3, rest: 6 },
+        { enabled: true, triple: 2, rest: 6 },
+        { enabled: true, triple: 1, rest: 7 },
+        { enabled: true, triple: 0, rest: 7 },
+      ];
+      scSaveRules();
+      renderScRulesTable();
+      renderScGrid();
+      toast('已恢复默认休假规则');
+    });
+  };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run);
+  else run();
+})();
+
+/* 规则持久化：三倍日勾选 + 休假规则 */
+function scSaveRules() {
+  try {
+    localStorage.setItem('creator_sc_triple', JSON.stringify([...S.scTripleDates]));
+    localStorage.setItem('creator_sc_rules', JSON.stringify(S.scHolidayRules));
+  } catch (_) {}
 }
 
 /* 供需对比：①班次维度 需求 vs 实际；②时段维度 服务能力(Σ CPH×在岗) vs 预测量 */

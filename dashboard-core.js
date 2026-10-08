@@ -544,7 +544,18 @@ const S = {
   shiftReqs:      {},   // {biz: {shift: {weekday:N, weekend:N}}}   N=null 表示无限制
   employeeCPH:    {},   // {name: {'9':cph, '10':cph, ...}}
   parsedRequests: {},   // {name: {items:[{type, target_shift, target_shifts, target_person, raw, confidence}], error}}
-  holidayQuota:   {},   // {name: {base, tripleDays, used, remain, total}}
+  holidayQuota:   {},   // {name: {base:null, tripleDays, used, remain, total|null}}
+  /* 智能排班 · 前置排班表 & 月度休假规则 */
+  scShowStats:    true,          // 是否显示统计列
+  scCollapseHist: false,         // 是否折叠历史列（周期起始日之前）
+  scTripleDates:  new Set(),     // 用户勾选的三倍工资日
+  scHolidayRules: [              // 三倍天数 → 可休天数 规则
+    { enabled: true, triple: 3, rest: 6 },
+    { enabled: true, triple: 2, rest: 6 },
+    { enabled: true, triple: 1, rest: 7 },
+    { enabled: true, triple: 0, rest: 7 },
+  ],
+  scGridSel: { startR: -1, startC: -1, endR: -1, endC: -1 },  // 拖拽选区
   scheduleResult: [],   // [{date, name, shift, biz}]
   scheduleDiag:   {}    // 算法诊断信息
 };
@@ -2278,6 +2289,18 @@ function formatForecastAiContext(ctx) {
   L.push('');
   return L.join('\n');
 }
+
+/* ============================================================
+   智能排班 · 月度休假规则持久化 bootstrap
+   ============================================================ */
+(function initScStorage() {
+  try {
+    const t = JSON.parse(localStorage.getItem('creator_sc_triple') || '[]');
+    if (Array.isArray(t)) t.forEach(d => { if (d) S.scTripleDates.add(d); });
+    const r = JSON.parse(localStorage.getItem('creator_sc_rules') || 'null');
+    if (Array.isArray(r) && r.length) S.scHolidayRules = r;
+  } catch (_) {}
+})();
 
 /* ============================================================
    END OF dashboard-core.js

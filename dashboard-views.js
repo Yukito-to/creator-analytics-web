@@ -993,6 +993,15 @@ function renderSLA() {
     const actual = key ? slaAchieve(src, key, item.category) : null;
     const score = calcSlaScore(key, actual, cfg);
     return { item, key, cfg, actual, score };
+  }).filter(c => {
+    /* ★ 过滤：花名册里没有该分类的员工时，整项不计算、不显示 */
+    const cat = String(c.item.category || '').trim();
+    const isOverall = !cat || /^(整体|全部|合计|总计|平均|总体)$/.test(cat);
+    if (isOverall) return true;                 /* 整体/合计类保留 */
+    if (!S.roster.length) return true;          /* 花名册为空时全保留（让诊断提示能说明原因） */
+    const srcEmps = srcEmployeeSet(src);
+    const matched = S.roster.filter(e => srcEmps.has(e.name) && (categoryOf(e, S.month) || '').includes(cat));
+    return matched.length > 0;                  /* 有匹配员工才保留 */
   });
 
   let totalScore = 0, totalWeight = 0, scored = 0, maxPossible = 0;
@@ -1042,12 +1051,17 @@ function renderSLA() {
     }
   }
   if (diagItems.length) {
-    headInfo += '<div style="padding:12px 16px;background:#FFF7E6;border-radius:10px;border-left:3px solid #E8A33E;font-size:12.5px;line-height:1.9;margin-bottom:12px">' +
-      '<div style="font-weight:700;color:#B36A00;margin-bottom:6px">⚠ 部分指标未显示完整（共 ' + diagItems.length + ' 项）</div>' +
-      diagItems.slice(0, 6).map(s => '<div>· ' + esc(s) + '</div>').join('') +
-      (diagItems.length > 6 ? '<div style="color:#A0A0AE">…等 ' + diagItems.length + ' 项</div>' : '') +
-      '<div style="margin-top:8px;color:#B36A00">目标值已从 SLA 表读出，独立于实际值显示；实际值缺失通常是 <b>花名册未导入</b> 或 <b>花名册分类列未匹配当前月份</b>。</div>' +
-      '</div>';
+    headInfo += '<details style="margin-bottom:12px;padding:10px 16px;background:#FFF7E6;border-radius:10px;border-left:3px solid #E8A33E;font-size:12.5px;line-height:1.9">' +
+      '<summary style="cursor:pointer;font-weight:700;color:#B36A00;user-select:none;outline:none">' +
+        '⚠ 部分指标未显示完整（共 ' + diagItems.length + ' 项）' +
+        '<span style="font-weight:400;color:#A67419;margin-left:8px;font-size:11.5px">点击展开详情</span>' +
+      '</summary>' +
+      '<div style="margin-top:8px">' +
+        diagItems.slice(0, 6).map(s => '<div>· ' + esc(s) + '</div>').join('') +
+        (diagItems.length > 6 ? '<div style="color:#A0A0AE">…等 ' + diagItems.length + ' 项</div>' : '') +
+        '<div style="margin-top:8px;color:#B36A00">目标值已从 SLA 表读出，独立于实际值显示；实际值缺失通常是 <b>花名册未导入</b> 或 <b>花名册分类列未匹配当前月份</b>。</div>' +
+      '</div>' +
+    '</details>';
   }
 
   const rows = computed.map(c => {

@@ -835,6 +835,27 @@ tbody tr:active td:first-child { background: #FAFAF7; }
   .table-scroll-x .rp-table.rp-sticky2 tbody td.c-fix { left: 40px; min-width: 96px; max-width: 110px; }
 }
 
+/* ==================== 智能排班 · 子 Tab ==================== */
+.sub-tabs {
+  display: flex; gap: 4px; padding: 0 0 10px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 14px; flex-wrap: wrap;
+}
+.sub-tab {
+  border: none; background: transparent; color: var(--text-2);
+  padding: 8px 16px; border-radius: 8px;
+  font-size: 13px; font-family: inherit; cursor: pointer;
+  transition: .15s ease; font-weight: 500;
+}
+.sub-tab:hover { background: var(--tap); color: var(--text); }
+.sub-tab.active {
+  background: var(--primary); color: #fff;
+  box-shadow: 0 2px 6px rgba(152,168,206,.3);
+  font-weight: 600;
+}
+.sub-view { display: none; }
+.sub-view.active { display: block; animation: fade .2s ease; }
+
 @media print {
   .topbar, .tabs, .card-head, .help, .target-panel { display: none !important; }
   .rp-wrap { box-shadow: none; border: none; padding: 0; }

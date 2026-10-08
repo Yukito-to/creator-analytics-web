@@ -54,6 +54,8 @@ function scActiveEmployees() {
   return (S.roster || []).filter(e => {
     if (!e.name) return false;
     if (e.resignDate && start && e.resignDate < start) return false;   // H7 已离职不参与
+    /* ★ 仅一线员工进入排班系统 */
+    if (!/一线/.test(e.attr || '')) return false;
     return true;
   });
 }
@@ -105,7 +107,9 @@ function calcHolidayQuota(name) {
     if (holidays[d.date] === 'holiday' && scIsWorkingShift(d.shift)) tripleDays++;
     if (scIsRestShift(d.shift)) used += (S.shiftMeta[d.shift] && S.shiftMeta[d.shift].restDays) || 1;
   }
-  const base = SC_BASE_HOLIDAY;
+  /* ★ 从 UI 输入框读取基础天数；无 UI 时用默认常量 */
+  const baseEl = document.getElementById('scBaseHoliday');
+  const base = baseEl ? (parseFloat(baseEl.value) || SC_BASE_HOLIDAY) : SC_BASE_HOLIDAY;
   const total = Math.round((base + tripleDays * SC_TRIPLE_BONUS) * 100) / 100;
   used = Math.round(used * 100) / 100;
   return { base, tripleDays, used, remain: Math.max(0, total - used), total };
@@ -249,13 +253,19 @@ function scScoreCandidate(ctx, e, date, shift) {
   if (twin && ctx.assigned[date] && ctx.assigned[date][twin]) {
     s += (ctx.assigned[date][twin] === shift) ? 90 : -30;
   }
-  /* S2 班次一致性（与昨日同班次） */
-  if (ctx.lastShift[e.name] === shift) s += 80;
-  /* S3 晚班均衡（晚班计数越多越不倾向再排晚班） */
+  /* S2 班次一致性（与昨日同班次）——★ 提权到 300，高于 prefer(100)/same_as(90)，保证「优先保持统一班次」 */
+  if (ctx.lastShift[e.name] === shift) s += 300;
+  /* S3 晚班均衡（晚班计数越多越不倾向再排晚班）——★ 加权 + E 班专项 */
   if (scIsLateShift(shift)) {
     const st = ctx.stats[e.name] || {};
-    const lateCount = (st.R || 0) + (st.D || 0) + (st.E1 || 0) + (st.E2 || 0);
-    s -= lateCount * 20;
+    const lateCount = (st.R || 0) + (st.D || 0) + (st.E1 || 0) + (st.E2 || 0)
+                    + (st['R（短）'] || 0) + (st['D（短）'] || 0) + (st['E（短）'] || 0);
+    s -= lateCount * 40;
+    /* ★ E 班特别约束：不允许一直排同一员工 */
+    if (/^E/.test(String(shift))) {
+      const eCount = (st.E1 || 0) + (st.E2 || 0) + (st.E || 0) + (st['E（短）'] || 0);
+      s -= eCount * 60;
+    }
   }
   /* S4 剩余可休天数多者优先排班 */
   const q = S.holidayQuota[e.name];
@@ -553,6 +563,37 @@ function renderSchedulePanel() {
     try { calcAllEmployeeCPH(); } catch (_) {}
   }
 
+  /* ★ 子 Tab 切换绑定 */
+  (function bindScSubTabs() {
+    const tabs = document.getElementById('scSubTabs');
+    if (!tabs || tabs._scBound) return;
+    tabs._scBound = true;
+    tabs.addEventListener('click', e => {
+      const btn = e.target.closest('.sub-tab');
+      if (!btn) return;
+      const sub = btn.dataset.sub;
+      document.querySelectorAll('#scSubTabs .sub-tab').forEach(b => b.classList.toggle('active', b === btn));
+      document.querySelectorAll('#view-schedule .sub-view').forEach(v => v.classList.remove('active'));
+      const target = document.getElementById('scSub-' + sub);
+      if (target) target.classList.add('active');
+      if (sub === 'coverage' && typeof renderScCoverageDaily === 'function') renderScCoverageDaily();
+    });
+  })();
+
+  /* ★ 基础可休天数绑定 */
+  (function bindBaseHoliday() {
+    const el = document.getElementById('scBaseHoliday');
+    if (!el || el._scBound) return;
+    el._scBound = true;
+    el.addEventListener('change', () => {
+      let v = parseFloat(el.value);
+      if (!isFinite(v) || v < 0) v = 6;
+      if (v > 30) v = 30;
+      el.value = v;
+      try { calcAllHolidayQuota(); renderScHolidayGrid(); } catch (e) { console.warn(e); }
+    });
+  })();
+
   renderScShiftPool();
   renderScReqGrid();
   renderScCphGrid();
@@ -561,6 +602,7 @@ function renderSchedulePanel() {
   renderScResult();
   renderScCoverage();
   renderScDiag();
+  if (typeof renderScCoverageDaily === 'function') renderScCoverageDaily();
 }
 
 function renderScShiftPool() {
@@ -959,4 +1001,63 @@ function scComputeDemandTable(biz, dates) {
     out[d] = hours;
   }
   return out;
+}
+
+/* ==================== 日度量级匹配 · 每日总览 ==================== */
+function renderScCoverageDaily() {
+  const el = document.getElementById('scCoverageDaily');
+  if (!el) return;
+  if (!(S.scheduleResult || []).length) {
+    el.innerHTML = '<p class="muted">生成排班后显示日度量级匹配。</p>';
+    return;
+  }
+  const c = scGetCycle();
+  const dates = scDatesBetween(c.start, c.end);
+  if (!dates.length) { el.innerHTML = '<p class="muted">排班周期无效。</p>'; return; }
+
+  const rows = [];
+  for (const biz of SC_BIZ_LIST) {
+    const demand = scComputeDemandTable(biz, dates);
+    for (const d of dates) {
+      /* 预测量：Σ 各时段 */
+      let forecast = 0;
+      if (S.volumeForecast && S.volumeForecast[biz] && S.volumeForecast[biz][d] > 0) {
+        forecast = S.volumeForecast[biz][d];
+      } else if (demand[d]) {
+        for (const h of SC_HOURS) forecast += demand[d][h] || 0;
+      }
+
+      /* 可承接量：Σ(员工 CPH × 在岗小时) */
+      let capacity = 0;
+      for (const r of S.scheduleResult) {
+        if (r.date !== d || r.biz !== biz) continue;
+        const mins = (S.shiftPeriods || {})[r.shift] || {};
+        const cph = (S.employeeCPH || {})[r.name] || {};
+        for (const h in mins) {
+          if (mins[h] > 0 && cph[h]) capacity += cph[h] * (mins[h] / 60);
+        }
+      }
+
+      const gap = capacity - forecast;
+      const gapPct = forecast > 0 ? (gap / forecast * 100) : 0;
+      const ok = gap >= -forecast * 0.02;   /* 允许 2% 波动 */
+      const color = ok ? '#6EA980' : '#D9363E';
+
+      rows.push('<tr>' +
+        '<td>' + esc(d) + ' 周' + esc(WEEKDAY_CN[scWeekdayOf(d)]) + '</td>' +
+        '<td>' + esc(biz) + '</td>' +
+        '<td style="text-align:right">' + Math.round(forecast) + '</td>' +
+        '<td style="text-align:right">' + Math.round(capacity) + '</td>' +
+        '<td style="text-align:right;color:' + color + ';font-weight:600">' + (gap >= 0 ? '+' : '') + Math.round(gap) + '</td>' +
+        '<td style="text-align:right;color:' + color + ';font-weight:600">' + (gapPct >= 0 ? '+' : '') + gapPct.toFixed(1) + '%</td>' +
+        '<td style="text-align:center;color:' + color + ';font-weight:600">' + (ok ? '✓ 承接充足' : '⚠ 承接不足') + '</td>' +
+        '</tr>');
+    }
+  }
+
+  el.innerHTML = '<div class="table-scroll-x"><table class="rp-table"><thead><tr>' +
+    '<th>日期</th><th>业务线</th><th style="text-align:right">预测量</th>' +
+    '<th style="text-align:right">可承接量</th><th style="text-align:right">缺口</th>' +
+    '<th style="text-align:right">缺口率</th><th>状态</th>' +
+    '</tr></thead><tbody>' + rows.join('') + '</tbody></table></div>';
 }

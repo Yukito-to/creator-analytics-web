@@ -979,7 +979,7 @@ function renderSLA() {
   const monthLabel = curMonth != null ? curMonth + '月' : '—';
   const list = rawList.filter(it => curMonth != null && it.months[curMonth]);
 
-  const headInfo = '<p class="muted" style="margin-bottom:8px">当前数据月份：<b>' + monthLabel +
+  let headInfo = '<p class="muted" style="margin-bottom:8px">当前数据月份：<b>' + monthLabel +
     '</b>，自动读取对应月份的权重 / 目标 / 得分。未达最低档位时按最低档位保底计算。</p>';
 
   if (!list.length) {
@@ -1017,6 +1017,38 @@ function renderSLA() {
           '<div class="d">' + scored + ' / ' + computed.length + ' 项已计分</div></div>' +
       '</div>'
     : '';
+
+  /* ★ 诊断：目标/实际为何是「—」 */
+  const diagItems = [];
+  const srcEmps = srcEmployeeSet(src);
+  const rosterInSrc = S.roster.filter(e => srcEmps.has(e.name));
+  for (const c of computed) {
+    const cat = String(c.item.category || '').trim();
+    const isOverall = !cat || /^(整体|全部|合计|总计|平均|总体)$/.test(cat);
+    if (c.score.threshold == null) {
+      diagItems.push('【' + c.item.metric + ' / ' + cat + '】目标未读到（tiers 为空）');
+    } else if (c.score.actualDisp == null) {
+      if (!S.roster.length) {
+        diagItems.push('【' + c.item.metric + ' / ' + cat + '】目标已读到，实际值算不出：花名册为空');
+      } else if (!rosterInSrc.length) {
+        diagItems.push('【' + c.item.metric + ' / ' + cat + '】目标已读到，实际值算不出：花名册里没有出现在「' + src + '」数据里的员工');
+      } else if (!isOverall) {
+        const matched = rosterInSrc.filter(e => (categoryOf(e, S.month) || '').includes(cat));
+        if (!matched.length) {
+          const sampleCats = Array.from(new Set(rosterInSrc.map(e => categoryOf(e, S.month) || '（空）'))).slice(0, 5);
+          diagItems.push('【' + c.item.metric + ' / ' + cat + '】目标已读到，实际值算不出：花名册里没有分类含「' + cat + '」的员工（当前花名册出现的分类：' + sampleCats.join('、') + '）');
+        }
+      }
+    }
+  }
+  if (diagItems.length) {
+    headInfo += '<div style="padding:12px 16px;background:#FFF7E6;border-radius:10px;border-left:3px solid #E8A33E;font-size:12.5px;line-height:1.9;margin-bottom:12px">' +
+      '<div style="font-weight:700;color:#B36A00;margin-bottom:6px">⚠ 部分指标未显示完整（共 ' + diagItems.length + ' 项）</div>' +
+      diagItems.slice(0, 6).map(s => '<div>· ' + esc(s) + '</div>').join('') +
+      (diagItems.length > 6 ? '<div style="color:#A0A0AE">…等 ' + diagItems.length + ' 项</div>' : '') +
+      '<div style="margin-top:8px;color:#B36A00">目标值已从 SLA 表读出，独立于实际值显示；实际值缺失通常是 <b>花名册未导入</b> 或 <b>花名册分类列未匹配当前月份</b>。</div>' +
+      '</div>';
+  }
 
   const rows = computed.map(c => {
     const it = c.item;

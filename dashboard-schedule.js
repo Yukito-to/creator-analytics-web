@@ -306,7 +306,6 @@ function scCoverageOK(ctx, date, shift, emp) {
   return SC_HOURS.some(h => mins[h] > 0 && short.some(x => x.hour === h && (cph[h] || 0) > 0));
 }
 
-/* H6 征调：优先本池 + 弹性池；本池无人且对方当日无缺口时，才考虑借调 */
 function scFillShortage(ctx, date, biz) {
   const own      = (biz === '买手合作') ? ctx.buyerOnly    : ctx.bloggerOnly;
   const otherBiz = (biz === '买手合作') ? '博主合作'        : '买手合作';
@@ -317,11 +316,9 @@ function scFillShortage(ctx, date, biz) {
     if (!short.length) break;
     short.sort((a, b) => b.short - a.short);
 
-    /* ① 先只从本池 + 弹性池挑 */
     const ownCands = own.concat(ctx.flex).filter(e => !ctx.assigned[date][e.name]);
     let best = scPickBestCandidate(ctx, date, biz, ownCands, short);
 
-    /* ② 本池无人可用时，只有对方当日无缺口才允许借调 */
     if (!best || best.gain <= 0) {
       const otherShort = scCoverageShortage(ctx, date, otherBiz);
       if (otherShort.length === 0) {
@@ -339,7 +336,6 @@ function scFillShortage(ctx, date, biz) {
   }
 }
 
-/* 抽出的选人逻辑：从候选池中挑「覆盖缺口增益最大」的人 */
 function scPickBestCandidate(ctx, date, biz, cands, short) {
   let best = null;
   for (const e of cands) {
@@ -501,7 +497,6 @@ let scReqBizState = '买手合作';   // 需求表当前业务线
 
 function renderSchedulePanel() {
   const c = scGetCycle();
-  /* ★ 首次进入若无周期，用最新日期自动填充并写回状态，避免生成排班时报「请先设置排班周期」 */
   if (!c.start && S.latestDate) {
     c.start    = S.latestDate;
     c.end      = dateAdd(S.latestDate, 13);
@@ -519,7 +514,6 @@ function renderSchedulePanel() {
   set('scReqStart',   c.reqStart);
   set('scReqEnd',     c.reqEnd);
 
-  /* 周期字段：只更新 cycle，不重算 CPH */
   ['scCycleStart','scCycleEnd','scReqStart','scReqEnd'].forEach(id => {
     const el = document.getElementById(id);
     if (el && !el._scBound) {
@@ -536,7 +530,6 @@ function renderSchedulePanel() {
     }
   });
 
-  /* ★ CPH 激进系数：改动后必须重算 CPH 并刷新网格 */
   const alphaEl = document.getElementById('scCphAlpha');
   if (alphaEl && !alphaEl._scBound) {
     alphaEl._scBound = true;

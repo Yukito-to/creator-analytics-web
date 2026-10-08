@@ -961,81 +961,110 @@ function parseScheduleDraftSheet() {
   }
 }
 
-/* 「班次时段」：A 列 = 班次名（保留全角括号原样）；B–P 列(idx1-15) = 9–23 时对应的分钟数；
-   Q 列(idx16) = totalMin；R 列(idx17) = restDays；S–U 列(idx18-20) = 开始/结束/就餐 元信息。
-   A 列为空的行视为「班次组标题」跳过 */
+/* 「班次时段」sheet：A 列 = 班次名；B–P 列(idx1-15) = 9–23 时分钟数；
+   Q 列 = 总计；R 列 = 休；S/T/U = 上班/下班/就餐时间。
+   ★ 从 sheet 派生 isWorking / isLate / color，代码侧不再硬编码班次名。 */
 function parseShiftPeriodsSheet() {
   S.shiftPeriods = {};
   S.shiftMeta = {};
   const sheet = S.sheets.shiftPeriods;
   if (!sheet) return;
   const rows = sheet.rows || [];
-  for (let r = 0; r < rows.length; r++) {
+  const colors = sheet.cellColors || [];
+  if (!rows.length) return;
+
+  const head = rows[0] || [];
+  const findCol = (re, fallback) => {
+    for (let i = 0; i < head.length; i++) {
+      if (re.test(String(head[i] || '').trim())) return i;
+    }
+    return fallback;
+  };
+  const idxTotal = findCol(/^总计$/, 16);
+  const idxRest  = findCol(/^休$/, 17);
+  const idxStart = findCol(/上班时间/, 18);
+  const idxEnd   = findCol(/下班时间/, 19);
+  const idxMeal  = findCol(/就餐时间/, 20);
+
+  for (let r = 1; r < rows.length; r++) {
     const row = rows[r] || [];
     const shift = String(row[0] || '').trim();
     if (!shift) continue;
+
     const periods = {};
     let sumMin = 0;
     for (let i = 1; i <= 15; i++) {
       const m = num(row[i]);
-      if (m > 0) { periods[String(i + 8)] = m; sumMin += m; }   // idx1→9时 … idx15→23时
+      if (m > 0) { periods[String(i + 8)] = m; sumMin += m; }
     }
     S.shiftPeriods[shift] = periods;
-    const totalMin = num(row[16]);
-    const restDays = num(row[17]);
+
+    /* ★ 色值：优先 A 列，其次该行任意有颜色的单元格 */
+    let color = (colors[r] && colors[r][0]) || null;
+    if (!color && colors[r]) {
+      for (let i = 1; i < colors[r].length; i++) {
+        if (colors[r][i]) { color = colors[r][i]; break; }
+      }
+    }
+
+    const rawTotal = num(row[idxTotal]);
+    const effectiveMin = rawTotal > 0 ? rawTotal : sumMin;
+    const restDays = num(row[idxRest]);
+    const startTime = String(row[idxStart] || '').trim();
+    const endTime   = String(row[idxEnd]   || '').trim();
+    const mealTime  = String(row[idxMeal]  || '').trim();
+
+    const isWorking = effectiveMin > 0;
+
+    let isLate = false;
+    const eM = /^(\d{1,2}):/.exec(endTime);
+    if (eM) {
+      const h = parseInt(eM[1], 10);
+      isLate = (h >= 22) || (h === 0);
+    }
+
+    let startHour = null;
+    const sM = /^(\d{1,2}):/.exec(startTime);
+    if (sM) startHour = parseInt(sM[1], 10);
+
     S.shiftMeta[shift] = {
-      totalMin: totalMin > 0 ? totalMin : sumMin,
+      totalMin: effectiveMin,
       restDays: restDays > 0 ? restDays : 0,
-      startTime: String(row[18] || '').trim(),
-      endTime:   String(row[19] || '').trim(),
-      mealTime:  String(row[20] || '').trim(),
+      startTime, endTime, mealTime,
+      isWorking, isLate, startHour,
+      color: color || null,
     };
   }
 }
 
-/* ==================== 智能排班 · CPH 计算 ==================== */
-/* CPH = 每在岗小时服务量（Cases Per Hour）。
-   从 S.records 聚合该员工 (date, hour) 服务量，从 S.scheduleDraft + S.shiftPeriods
-   反推 (date, hour) 在岗小时；仅统计「在岗小时>0」的日期样本：
-   样本 ≥10 取 P80；5~9 取 P75；1~4 取均值×1.08；无样本用全时段均值，仍无则用同组均值兜底 */
+/* ============================================================
+   员工 CPH（每在岗小时服务量）
+   口径：CPH = 当日 CASE 量 / 8
+   样本：仅取「排班草稿里是工作班次」的日期，按天采样
+   聚合：样本 ≥ 3 → 去最小 / 去最大 → 取剩余样本的 P90
+        样本 1~2 → 均值；无样本 → 同组均值兜底
+   ============================================================ */
 function calcEmployeeCPH(name, alpha) {
   alpha = alpha || 1.0;
   const out = {};
-  const REST_LEAVE = ['放休', '放休0.5', '事假', '病假', '丧假', '婚假'];
 
-  /* 1. 聚合该员工每个 (date, hour) 的服务量 */
-  const volMap = new Map();   // key: date|hour → volume
-  for (const r of S.records) {
-    if (r.name !== name) continue;
-    const p = normPeriod(r.period);
-    if (!p) continue;
-    const key = r.date + '|' + p;
-    volMap.set(key, (volMap.get(key) || 0) + (r.volume || 0));
-  }
-
-  /* 2. 从排班草稿 + 班次时段反推每个 (date, hour) 的在岗小时 */
-  const onDutyMap = new Map();   // key: date|hour → 在岗小时
+  const workDates = new Set();
   for (const d of S.scheduleDraft) {
     if (d.name !== name) continue;
-    const shift = d.shift;
-    if (!shift || REST_LEAVE.indexOf(shift) >= 0) continue;
-    const mins = S.shiftPeriods[shift] || {};
-    for (const h in mins) {
-      if (mins[h] > 0) {
-        const key = d.date + '|' + h;
-        onDutyMap.set(key, (onDutyMap.get(key) || 0) + mins[h] / 60);
-      }
-    }
+    if (!scIsWorkingShift(d.shift)) continue;
+    workDates.add(d.date);
   }
 
-  /* 3. 收集逐时段 CPH 样本（仅在岗时段有效） */
-  const samples = {};   // {hour: [cph, ...]}
-  for (const [key, vol] of volMap) {
-    const hoursOn = onDutyMap.get(key) || 0;
-    if (hoursOn <= 0) continue;
-    const period = key.split('|')[1];
-    if (!samples[period]) samples[period] = [];
-    samples[period].push(vol / hoursOn);
+  const dayVol = new Map();
+  for (const r of S.records) {
+    if (r.name !== name || !r.date) continue;
+    dayVol.set(r.date, (dayVol.get(r.date) || 0) + (r.volume || 0));
+  }
+
+  const samples = [];
+  for (const d of workDates) {
+    const v = dayVol.get(d) || 0;
+    if (v > 0) samples.push(v / 8);
   }
 
   const quantile = (arr, q) => {
@@ -1046,26 +1075,22 @@ function calcEmployeeCPH(name, alpha) {
     return lo === hi ? s[lo] : s[lo] + (s[hi] - s[lo]) * (pos - lo);
   };
 
-  /* 4. 全时段整体均值（样本不足时兜底） */
-  let gSum = 0, gCnt = 0;
-  for (const h in samples) for (const v of samples[h]) { gSum += v; gCnt++; }
-  const globalAvg = gCnt ? gSum / gCnt : 0;
-  const peerAvg = gCnt ? 0 : calcPeerAvgCPH(name);
-
-  /* 5. 分时段产出 CPH，最后乘激进系数 alpha */
-  for (const h of PREDICT_PERIODS) {
-    const arr = samples[h] || [];
-    let cph;
-    if (arr.length >= 10)     cph = quantile(arr, 0.80);
-    else if (arr.length >= 5) cph = quantile(arr, 0.75);
-    else if (arr.length >= 1) cph = arr.reduce((s, x) => s + x, 0) / arr.length * 1.08;
-    else                      cph = globalAvg || peerAvg || 0;
-    out[h] = Math.max(0, cph * alpha);
+  let cph;
+  if (samples.length >= 3) {
+    const sorted = samples.slice().sort((a, b) => a - b);
+    const trimmed = sorted.slice(1, -1);
+    cph = quantile(trimmed, 0.90);
+  } else if (samples.length >= 1) {
+    cph = samples.reduce((s, x) => s + x, 0) / samples.length;
+  } else {
+    cph = calcPeerAvgCPH(name);
   }
+
+  cph = Math.max(0, cph * alpha);
+  for (const h of PREDICT_PERIODS) out[h] = cph;
   return out;
 }
 
-/* 同组（同业务线 + 同分类）员工整体 CPH 均值 = Σ服务量 / Σ在岗小时，用于完全无数据员工的兜底 */
 function calcPeerAvgCPH(name) {
   const me = getEmp(name);
   const sameGroup = n => {
@@ -1073,20 +1098,39 @@ function calcPeerAvgCPH(name) {
     const e = getEmp(n);
     return !!e && e.biz === me.biz && categoryOf(e, S.month) === categoryOf(me, S.month);
   };
-  const REST_LEAVE = ['放休', '放休0.5', '事假', '病假', '丧假', '婚假'];
-  let vol = 0, hrs = 0;
-  for (const r of S.records) {
-    if (!r.name || r.name === name || !sameGroup(r.name)) continue;
-    vol += r.volume || 0;
-  }
+
+  const workDatesByEmp = new Map();
   for (const d of S.scheduleDraft) {
     if (d.name === name || !sameGroup(d.name)) continue;
-    const shift = d.shift;
-    if (!shift || REST_LEAVE.indexOf(shift) >= 0) continue;
-    const mins = S.shiftPeriods[shift] || {};
-    for (const h in mins) if (mins[h] > 0) hrs += mins[h] / 60;
+    if (!scIsWorkingShift(d.shift)) continue;
+    if (!workDatesByEmp.has(d.name)) workDatesByEmp.set(d.name, new Set());
+    workDatesByEmp.get(d.name).add(d.date);
   }
-  return hrs > 0 ? vol / hrs : 0;
+
+  const dayVol = new Map();
+  for (const r of S.records) {
+    if (!r.name || r.name === name || !sameGroup(r.name) || !r.date) continue;
+    const k = r.name + '|' + r.date;
+    dayVol.set(k, (dayVol.get(k) || 0) + (r.volume || 0));
+  }
+
+  const samples = [];
+  for (const [n, dates] of workDatesByEmp) {
+    for (const d of dates) {
+      const v = dayVol.get(n + '|' + d) || 0;
+      if (v > 0) samples.push(v / 8);
+    }
+  }
+  if (samples.length < 3) {
+    return samples.length ? samples.reduce((s, x) => s + x, 0) / samples.length : 0;
+  }
+
+  const sorted = samples.slice().sort((a, b) => a - b);
+  const trimmed = sorted.slice(1, -1);
+  const s = trimmed;
+  const pos = (s.length - 1) * 0.90;
+  const lo = Math.floor(pos), hi = Math.ceil(pos);
+  return lo === hi ? s[lo] : s[lo] + (s[hi] - s[lo]) * (pos - lo);
 }
 
 /* 遍历所有参与员工，产出全员 CPH 表（生成后可在 UI 手动覆盖单个值） */

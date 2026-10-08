@@ -1372,21 +1372,27 @@ else init();
 /* ==================== 智能排班 · 诉求 AI 解析 ==================== */
 const SC_REQ_SYSTEM_PROMPT = [
   '你是排班诉求解析助手。请把员工自然语言诉求转成结构化 JSON 数组。',
+  '【关键】员工诉求里的日期只有"日"或"月/日"，没有年份。请根据用户消息开头提供的「排班周期」补全成 YYYY-MM-DD 格式。',
+  '',
   '输出格式（严格 JSON，不要 Markdown 包裹）：',
   '[{',
   '  "name": "员工姓名",',
   '  "items": [',
+  '    { "type": "leave_on", "dates": ["2026-10-16","2026-10-17","2026-10-18"], "raw": "16、17、18请婚假", "confidence": 0.95 },',
+  '    { "type": "prefer",  "target_shifts": ["E1","E2","E（短）","B1","B2","B（短）"], "raw": "排E班或者B班", "confidence": 0.9 },',
   '    { "type": "same_as", "target_person": "张三", "raw": "跟张三一样", "confidence": 0.95 },',
   '    { "type": "only",    "target_shift": "E1", "raw": "只上E1", "confidence": 0.9 },',
-  '    { "type": "not",     "target_shifts": ["R","D","E1","E2","R（短）","D（短）","E（短）"], "raw": "不上晚班", "confidence": 0.9 },',
-  '    { "type": "prefer",  "target_shifts": ["B1","B2","K1","K2"], "raw": "希望上早班", "confidence": 0.8 }',
+  '    { "type": "not",     "target_shifts": ["R","D","E1","E2","R（短）","D（短）","E（短）"], "raw": "不上晚班", "confidence": 0.9 }',
   '  ]',
   '}]',
+  '',
   '规则：',
+  '- "X号休 / X、Y、Z 休 / X月X号休 / X、Y、Z 请X假" → type: leave_on, dates 补全为 YYYY-MM-DD',
   '- "跟/和 XXX 一样" → type: same_as, target_person: XXX',
   '- "只上 X" → type: only, target_shift: X',
-  '- "不上 X / 不上晚班 / 不上早班" → type: not',
-  '- "希望 / 想 / 尽量上 X" → type: prefer',
+  '- "不上 X / 不上晚班 / 不上早班" → type: not, target_shifts: [...]',
+  '- "希望 / 想 / 尽量上 X" → type: prefer, target_shifts: [...]',
+  '- 补日期时优先匹配排班周期内的月份；若"日"小于周期起始日的号数，考虑跨到下月',
   '- 晚班 = [R, D, E1, E2, R（短）, D（短）, E（短）]',
   '- 早班 = [B1, B2, K1, K2, B（短）, K（短）]',
   '- 中班 = [S, C, C（短）]',
@@ -1428,7 +1434,11 @@ async function parseScheduleRequests() {
   for (let i = 0; i < emps.length; i += 10) {
     const batch = emps.slice(i, i + 10);
     setSt('解析中… ' + Math.min(i + 10, emps.length) + '/' + emps.length);
-    const userMsg = '请解析以下员工排班诉求：\n' + batch.map(e => e.name + '：' + e.raw).join('\n');
+    const c = S.scheduleCycle || {};
+    const userMsg =
+      '排班周期：' + (c.start || '') + ' ~ ' + (c.end || '') + '\n\n' +
+      '请解析以下员工排班诉求：\n' +
+      batch.map(e => e.name + '：' + e.raw).join('\n');
     let acc = '';
     try {
       await callZhipuAI(cfg.key, cfg.model, [

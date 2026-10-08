@@ -868,3 +868,8 @@ tbody tr:active td:first-child { background: #FAFAF7; }
 .sc-rest  { background:#F5F4F0; color:#A0A0AE; }
 .sc-leave { background:#FDF6E3; color:#B36A00; }
 .sc-short { background:#FBE9E7; color:#C75C5C; font-weight:600; }
+
+/* 智能排班：前置排班格子左侧竖条 */
+.sc-cell-locked {
+  box-shadow: inset 3px 0 0 rgba(120, 120, 140, .35);
+}

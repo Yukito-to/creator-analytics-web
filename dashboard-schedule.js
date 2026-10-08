@@ -7,34 +7,30 @@
 'use strict';
 
 /* ==================== 常量 ==================== */
-const SC_LATE_SHIFTS = ['R','D','E1','E2','R（短）','D（短）','E（短）'];
-const SC_EARLY_SHIFTS = ['B1','B2','K1','K2','B（短）','K（短）'];
-const SC_MID_SHIFTS   = ['S','C','C（短）'];
-const SC_REST_SHIFTS  = ['放休','放休0.5'];
-const SC_LEAVE_SHIFTS = ['事假','病假','丧假','婚假'];
+/* ★ 不再硬编码任何班次名。班次属性从 S.shiftMeta 读取。 */
 const SC_BASE_HOLIDAY = 6;
 const SC_TRIPLE_BONUS = 1;
-const SC_HOURS = PREDICT_PERIODS;        // ['9'..'23']
-const SC_MAX_STREAK = 6;                 // H4：连续工作上限（第 7 天必须休）
+const SC_HOURS = PREDICT_PERIODS;   // ['9'..'23']
+const SC_MAX_STREAK = 6;
 const SC_BIZ_LIST = ['买手合作', '博主合作'];
+const SC_COLOR_LEAVE_REQ = '#92D050';   // Excel 标准绿
 
 /* ==================== 班次 / 日期工具 ==================== */
 function scIsLateShift(shift) {
-  if (!shift) return false;
-  if (SC_LATE_SHIFTS.indexOf(shift) >= 0) return true;
   const meta = S.shiftMeta && S.shiftMeta[shift];
-  if (!meta || !meta.endTime) return false;
-  const m = /^(\d{1,2}):/.exec(meta.endTime);
-  if (!m) return false;
-  const h = parseInt(m[1], 10);
-  return h >= 22 || h === 0;
+  return !!(meta && meta.isLate);
 }
-function scIsRestShift(shift)  { return !!shift && SC_REST_SHIFTS.indexOf(shift) >= 0; }
-function scIsLeaveShift(shift) { return !!shift && SC_LEAVE_SHIFTS.indexOf(shift) >= 0; }
+function scIsRestShift(shift) {
+  const meta = S.shiftMeta && S.shiftMeta[shift];
+  return !!(meta && !meta.isWorking && meta.restDays > 0);
+}
+function scIsLeaveShift(shift) {
+  const meta = S.shiftMeta && S.shiftMeta[shift];
+  return !!(meta && !meta.isWorking && meta.restDays === 0);
+}
 function scIsWorkingShift(shift) {
-  if (!shift) return false;
-  if (scIsRestShift(shift) || scIsLeaveShift(shift)) return false;
-  return !!(S.shiftPeriods && S.shiftPeriods[shift]);
+  const meta = S.shiftMeta && S.shiftMeta[shift];
+  return !!(meta && meta.isWorking);
 }
 function scWeekdayOf(date) { return new Date(date + 'T00:00:00Z').getUTCDay(); }
 function scIsWeekend(date) { const wd = scWeekdayOf(date); return wd === 0 || wd === 6; }
@@ -100,14 +96,25 @@ function calcHolidayQuota(name) {
   const dates = scDatesBetween(c.start, c.end);
   const holidays = getHolidayMap();
   let tripleDays = 0;   // 本周期内法定节假日出勤天数（3 倍工资）
-  let used = 0;         // 已休天数（放休按 restDays 折算）
+  let used = 0;         // 已休天数：只统计「班次时段」sheet 的「休」列
+
   for (const d of S.scheduleDraft) {
     if (d.name !== name) continue;
     if (dates.length && dates.indexOf(d.date) < 0) continue;
-    if (holidays[d.date] === 'holiday' && scIsWorkingShift(d.shift)) tripleDays++;
-    if (scIsRestShift(d.shift)) used += (S.shiftMeta[d.shift] && S.shiftMeta[d.shift].restDays) || 1;
+    const shift = d.shift;
+    if (!shift) continue;
+
+    if (holidays[d.date] === 'holiday' && scIsWorkingShift(shift)) tripleDays++;
+
+    /* ★ 已休天数：直接读 sheet 的「休」列
+       短班 B（短）休=0.5 → +0.5
+       全班长 B1 休=0 → +0
+       放休/事假/病假/丧假/婚假 休=0 → +0（不计入）
+       纯休「休」休=1 → +1 */
+    const meta = S.shiftMeta[shift];
+    if (meta && meta.restDays > 0) used += meta.restDays;
   }
-  /* ★ 从 UI 输入框读取基础天数；无 UI 时用默认常量 */
+
   const baseEl = document.getElementById('scBaseHoliday');
   const base = baseEl ? (parseFloat(baseEl.value) || SC_BASE_HOLIDAY) : SC_BASE_HOLIDAY;
   const total = Math.round((base + tripleDays * SC_TRIPLE_BONUS) * 100) / 100;
@@ -132,15 +139,13 @@ function generateSchedule() {
   calcAllEmployeeCPH();
   calcAllHolidayQuota();
 
-  /* ---- H1 硬约束预锁定：草稿里的放休/请假直接锁定 ---- */
+  /* ---- H1 硬约束预锁定：排班草稿里所有非空班次 = 前置排班，一律锁定 ---- */
   const locked = {};
   for (const e of scActiveEmployees()) {
     locked[e.name] = {};
     for (const d of dates) {
       const draft = S.scheduleDraft.find(x => x.name === e.name && x.date === d);
-      if (draft && (scIsRestShift(draft.shift) || scIsLeaveShift(draft.shift))) {
-        locked[e.name][d] = draft.shift;
-      }
+      if (draft && draft.shift) locked[e.name][d] = draft.shift;
     }
   }
 
@@ -364,11 +369,24 @@ function scPickBestCandidate(ctx, date, biz, cands, short) {
   return best;
 }
 
-/* 未排到的人 → 放休 */
+/* 从 sheet 里找一个默认休息班次：
+   优先「不上班且休列最大」（用户 sheet 里的「休」），
+   其次任何「不上班」的班次，最后兜底 '放休'。 */
+function scDefaultRestShift() {
+  let best = null, bestRest = -1;
+  for (const s in S.shiftMeta) {
+    const m = S.shiftMeta[s];
+    if (m.isWorking) continue;
+    if (m.restDays > bestRest) { bestRest = m.restDays; best = s; }
+  }
+  return best || '放休';
+}
+
 function scFillRest(ctx, date) {
+  const def = scDefaultRestShift();
   for (const e of scActiveEmployees()) {
     if (ctx.assigned[date][e.name]) continue;
-    ctx.assigned[date][e.name] = '放休';
+    ctx.assigned[date][e.name] = def;
   }
 }
 
@@ -508,32 +526,22 @@ let scReqBizState = '买手合作';   // 需求表当前业务线
 function renderSchedulePanel() {
   const c = scGetCycle();
   if (!c.start && S.latestDate) {
-    c.start    = S.latestDate;
-    c.end      = dateAdd(S.latestDate, 13);
-    c.reqStart = c.start;
-    c.reqEnd   = c.end;
-    scSetCycle(c);
-  } else if (c.start && !c.reqStart) {
-    c.reqStart = c.start;
-    c.reqEnd   = c.end || '';
+    c.start = S.latestDate;
+    c.end   = dateAdd(S.latestDate, 13);
     scSetCycle(c);
   }
   const set = (id, v) => { const el = document.getElementById(id); if (el && v) el.value = v; };
   set('scCycleStart', c.start);
   set('scCycleEnd',   c.end);
-  set('scReqStart',   c.reqStart);
-  set('scReqEnd',     c.reqEnd);
 
-  ['scCycleStart','scCycleEnd','scReqStart','scReqEnd'].forEach(id => {
+  ['scCycleStart','scCycleEnd'].forEach(id => {
     const el = document.getElementById(id);
     if (el && !el._scBound) {
       el._scBound = true;
       el.addEventListener('change', () => {
         scSetCycle({
-          start:    (document.getElementById('scCycleStart') || {}).value || '',
-          end:      (document.getElementById('scCycleEnd')   || {}).value || '',
-          reqStart: (document.getElementById('scReqStart')   || {}).value || '',
-          reqEnd:   (document.getElementById('scReqEnd')     || {}).value || '',
+          start: (document.getElementById('scCycleStart') || {}).value || '',
+          end:   (document.getElementById('scCycleEnd')   || {}).value || '',
         });
         renderSchedulePanel();
       });
@@ -603,6 +611,12 @@ function renderSchedulePanel() {
   renderScCoverage();
   renderScDiag();
   if (typeof renderScCoverageDaily === 'function') renderScCoverageDaily();
+
+  /* 前置排班若已展开，同步刷新 */
+  (function () {
+    const body = document.getElementById('scPreSchedule');
+    if (body && body.style.display !== 'none') renderScPreSchedule();
+  })();
 }
 
 function renderScShiftPool() {
@@ -668,7 +682,8 @@ function renderScCphGrid() {
       '<td><input type="number" min="0" step="0.1" style="width:60px" data-name="' + esc(e.name) + '" data-hour="' + h + '" value="' + (cph[h] || 0).toFixed(2) + '"></td>'
     ).join('') + '</tr>';
   }).join('');
-  el.innerHTML = '<table>' + header + rows + '</table>';
+  el.innerHTML = '<p class="muted" style="font-size:11.5px;margin:0 0 6px">日 CPH = 当日 CASE / 8；样本 ≥3 去极值后取 P90</p>' +
+    '<table>' + header + rows + '</table>';
   el.querySelectorAll('input').forEach(inp => {
     inp.addEventListener('change', () => {
       const n = inp.dataset.name, h = inp.dataset.hour;
@@ -721,6 +736,65 @@ function renderScHolidayGrid() {
   el.innerHTML = '<table><tr><th>姓名</th><th>基础</th><th>3倍天数</th><th>已休</th><th>剩余</th></tr>' + rows + '</table>';
 }
 
+/* 该员工在 date 是否有明确日期的休假诉求（leave_on） */
+function isLeaveRequest(name, date) {
+  const req = (S.parsedRequests || {})[name];
+  if (!req || !req.items) return false;
+  for (const it of req.items) {
+    if (it.type === 'leave_on' && Array.isArray(it.dates) && it.dates.indexOf(date) >= 0) return true;
+  }
+  return false;
+}
+
+/* 前置排班预览（只读） */
+function renderScPreSchedule() {
+  const el = document.getElementById('scPreSchedule');
+  if (!el) return;
+  const c = scGetCycle();
+  const dates = scDatesBetween(c.start, c.end);
+  const emps = scActiveEmployees();
+  if (!S.scheduleDraft.length) { el.innerHTML = '<p class="muted">无前置排班。</p>'; return; }
+
+  const map = {};
+  for (const d of S.scheduleDraft) {
+    if (!map[d.name]) map[d.name] = {};
+    map[d.name][d.date] = d.shift;
+  }
+
+  const head = '<tr><th>姓名</th>' + dates.map(d => '<th>' + esc(d.slice(5)) + '</th>').join('') + '</tr>';
+  const rows = emps.map(e => {
+    const m = map[e.name] || {};
+    return '<tr><td>' + esc(e.name) + '</td>' + dates.map(d => {
+      const s = m[d] || '';
+      if (!s) return '<td></td>';
+      const meta = S.shiftMeta[s];
+      const isLeaveReq = isLeaveRequest(e.name, d);
+      const bg = isLeaveReq ? SC_COLOR_LEAVE_REQ : ((meta && meta.color) || '');
+      const style = bg ? ' style="background:' + bg + ';color:#333"' : '';
+      return '<td' + style + '>' + esc(s) + '</td>';
+    }).join('') + '</tr>';
+  }).join('');
+  el.innerHTML = '<table>' + head + rows + '</table>';
+}
+
+(function bindPreScheduleToggle() {
+  const run = () => {
+    const head = document.getElementById('scPreHead');
+    const body = document.getElementById('scPreSchedule');
+    const arr  = document.getElementById('scPreArrow');
+    if (!head || head._bound) return;
+    head._bound = true;
+    head.addEventListener('click', () => {
+      const open = body.style.display !== 'none';
+      body.style.display = open ? 'none' : 'block';
+      arr.textContent = open ? '▶' : '▼';
+      if (!open) renderScPreSchedule();
+    });
+  };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run);
+  else run();
+})();
+
 function renderScResult() {
   const el = document.getElementById('scResult');
   if (!el) return;
@@ -733,13 +807,25 @@ function renderScResult() {
     if (!map[r.name]) map[r.name] = {};
     map[r.name][r.date] = r.shift;
   }
+  /* 用于判定某格是否为前置排班 */
+  const preSet = new Set();
+  for (const d of S.scheduleDraft) {
+    if (d.shift) preSet.add(d.name + '|' + d.date);
+  }
+
   const header = '<tr><th>姓名</th>' + dates.map(d => '<th>' + esc(d.slice(5)) + '</th>').join('') + '</tr>';
   const rows = emps.map(e => {
     const m = map[e.name] || {};
     return '<tr><td>' + esc(e.name) + '</td>' + dates.map(d => {
       const s = m[d] || '';
-      const cls = scIsLateShift(s) ? 'sc-late' : scIsRestShift(s) ? 'sc-rest' : scIsLeaveShift(s) ? 'sc-leave' : 'sc-work';
-      return '<td class="' + cls + '">' + esc(s) + '</td>';
+      if (!s) return '<td></td>';
+      const meta = S.shiftMeta[s];
+      const isLeaveReq = isLeaveRequest(e.name, d);
+      const bg = isLeaveReq ? SC_COLOR_LEAVE_REQ : ((meta && meta.color) || '');
+      const isPre = preSet.has(e.name + '|' + d);
+      const style = bg ? ' style="background:' + bg + ';color:#333"' : '';
+      const cls = 'sc-cell' + (isPre ? ' sc-cell-locked' : '');
+      return '<td class="' + cls + '"' + style + '>' + esc(s) + '</td>';
     }).join('') + '</tr>';
   }).join('');
   el.innerHTML = '<table>' + header + rows + '</table>';
@@ -936,10 +1022,10 @@ async function scCopyMarkdown() {
 
 /* ==================== 周期 / 班次池 / 需求 ==================== */
 function scGetCycle() {
-  return S.scheduleCycle || { start:'', end:'', reqStart:'', reqEnd:'' };
+  return S.scheduleCycle || { start: '', end: '' };
 }
 function scSetCycle(c) {
-  S.scheduleCycle = Object.assign({ start:'', end:'', reqStart:'', reqEnd:'' }, c || {});
+  S.scheduleCycle = Object.assign({ start: '', end: '' }, c || {});
 }
 function scSetShiftReq(biz, shift, kind, n) {
   if (!S.shiftReqs[biz]) S.shiftReqs[biz] = {};

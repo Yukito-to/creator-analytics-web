@@ -1104,36 +1104,65 @@ function isLeaveRequest(name, date) {
   return false;
 }
 
-/* ==================== 三倍日网格 ==================== */
+/* ==================== 三倍日网格（整月显示） ==================== */
 function renderScTripleGrid() {
   const el = document.getElementById('scTripleDates');
   if (!el) return;
   const c = scGetCycle();
-  let dates = scDatesBetween(c.start, c.end);
-  if (!dates.length && S.scheduleDraft.length) {
-    const set = new Set(S.scheduleDraft.map(d => d.date));
-    dates = Array.from(set).sort();
+  if (!c.start || !c.end) {
+    el.innerHTML = '<p class="muted">请先设置排班周期。</p>';
+    return;
   }
 
-  el.innerHTML = dates.map(d => {
-    const wd = new Date(d + 'T00:00:00Z').getUTCDay();
-    const cls = classifyDate(d);
-    const on = S.scTripleDates.has(d);
-    const clsCss = cls === 'holiday' ? 'is-holiday' : (cls === 'workday' ? 'is-workday' : '');
-    const tag = cls === 'holiday' ? '国' : (cls === 'workday' ? '班' : '');
-    return '<button type="button" class="sc-triple-btn ' + clsCss + (on ? ' on' : '') +
-      '" data-date="' + d + '">' +
-      '<span class="d">' + esc(d.slice(5)) + '</span>' +
-      '<span class="w">周' + WEEKDAY_CN[wd] + '</span>' +
-      (tag ? '<span class="t">' + tag + '</span>' : '') +
-    '</button>';
-  }).join('');
+  /* 1. 周期覆盖的所有月份 */
+  const startMonth = c.start.slice(0, 7);
+  const endMonth   = c.end.slice(0, 7);
+  const months = [];
+  let m = startMonth, guard = 0;
+  while (m <= endMonth && guard++ < 24) {
+    months.push(m);
+    const [y, mo] = m.split('-').map(Number);
+    const nextMo = mo === 12 ? 1 : mo + 1;
+    const nextY  = mo === 12 ? y + 1 : y;
+    m = nextY + '-' + String(nextMo).padStart(2, '0');
+  }
 
+  /* 2. 逐月渲染整月 */
+  let html = '';
+  let totalCount = 0;
+  for (const mo of months) {
+    const [y, mm] = mo.split('-').map(Number);
+    const daysInMonth = new Date(y, mm, 0).getDate();
+    totalCount += daysInMonth;
+
+    html += '<div class="sc-triple-month-block">';
+    html += '<div class="sc-triple-month-title">📅 ' + y + '年' + mm + '月</div>';
+    html += '<div class="sc-triple-month">';
+    for (let i = 1; i <= daysInMonth; i++) {
+      const d = mo + '-' + String(i).padStart(2, '0');
+      const wd = new Date(d + 'T00:00:00Z').getUTCDay();
+      const cls = classifyDate(d);
+      const on = S.scTripleDates.has(d);
+      const clsCss = cls === 'holiday' ? 'is-holiday' : (cls === 'workday' ? 'is-workday' : '');
+      const tag = cls === 'holiday' ? '国' : (cls === 'workday' ? '班' : '');
+      html += '<button type="button" class="sc-triple-btn ' + clsCss + (on ? ' on' : '') +
+        '" data-date="' + d + '">' +
+        '<span class="d">' + esc(d.slice(5)) + '</span>' +
+        '<span class="w">周' + WEEKDAY_CN[wd] + '</span>' +
+        (tag ? '<span class="t">' + tag + '</span>' : '') +
+      '</button>';
+    }
+    html += '</div></div>';
+  }
+  el.innerHTML = html;
+
+  /* 3. 计数 */
   const cnt = document.getElementById('scTripleCount');
   const tot = document.getElementById('scTripleTotal');
   if (cnt) cnt.textContent = S.scTripleDates.size;
-  if (tot) tot.textContent = dates.length;
+  if (tot) tot.textContent = totalCount;
 
+  /* 4. 手动点选 */
   el.querySelectorAll('.sc-triple-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       const d = btn.dataset.date;
@@ -1144,43 +1173,74 @@ function renderScTripleGrid() {
       renderScGrid();
     });
   });
+
+  /* 5. 首次渲染且节假日 API 未加载 → 主动拉一次再重绘 */
+  if (typeof _cnHolidayVersion === 'string' && _cnHolidayVersion.indexOf('未加载') >= 0) {
+    if (typeof initHolidayData === 'function') {
+      initHolidayData()
+        .then(() => { try { renderScTripleGrid(); } catch (_) {} })
+        .catch(() => {});
+    }
+  }
 }
 
 /* 三倍日全选 / 清空 / 自动匹配 */
 (function bindTripleTools() {
-  const run = () => {
-    const tools = document.querySelector('.sc-triple-tools');
-    if (!tools || tools._bound) return;
-    tools._bound = true;
-    tools.addEventListener('click', async (e) => {
-      const btn = e.target.closest('button[data-act]');
-      if (!btn) return;
-      const act = btn.dataset.act;
-      const c = scGetCycle();
-      let dates = scDatesBetween(c.start, c.end);
-      if (!dates.length && S.scheduleDraft.length) {
-        dates = Array.from(new Set(S.scheduleDraft.map(d => d.date))).sort();
+  const tools = document.querySelector('.sc-triple-tools');
+  if (!tools || tools._bound) return;
+  tools._bound = true;
+
+  /* 计算周期覆盖的所有月份的所有日期 */
+  const allMonthDates = () => {
+    const c = scGetCycle();
+    if (!c.start || !c.end) return [];
+    const months = [];
+    let m = c.start.slice(0, 7), guard = 0;
+    const em = c.end.slice(0, 7);
+    while (m <= em && guard++ < 24) {
+      months.push(m);
+      const [y, mo] = m.split('-').map(Number);
+      const nextMo = mo === 12 ? 1 : mo + 1;
+      const nextY  = mo === 12 ? y + 1 : y;
+      m = nextY + '-' + String(nextMo).padStart(2, '0');
+    }
+    const out = [];
+    for (const mo of months) {
+      const [y, mm] = mo.split('-').map(Number);
+      const days = new Date(y, mm, 0).getDate();
+      for (let i = 1; i <= days; i++) {
+        out.push(mo + '-' + String(i).padStart(2, '0'));
       }
-      if (act === 'all')  dates.forEach(d => S.scTripleDates.add(d));
-      if (act === 'none') dates.forEach(d => S.scTripleDates.delete(d));
-      if (act === 'auto') {
-        if (typeof initHolidayData === 'function') {
-          try { await initHolidayData(); } catch (_) {}
-        }
-        const map = getHolidayMap();
-        let n = 0;
-        dates.forEach(d => {
-          if (map[d] === 'holiday') { S.scTripleDates.add(d); n++; }
-        });
-        toast('🎆 已自动勾选 ' + n + ' 个法定节假日');
-      }
-      scSaveRules();
-      renderScTripleGrid();
-      renderScGrid();
-    });
+    }
+    return out;
   };
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run);
-  else run();
+
+  tools.addEventListener('click', async (e) => {
+    const btn = e.target.closest('button[data-act]');
+    if (!btn) return;
+    const act = btn.dataset.act;
+    const dates = allMonthDates();
+
+    if (act === 'all') {
+      dates.forEach(d => S.scTripleDates.add(d));
+    } else if (act === 'none') {
+      dates.forEach(d => S.scTripleDates.delete(d));
+    } else if (act === 'auto') {
+      if (typeof initHolidayData === 'function') {
+        try { await initHolidayData(); } catch (_) {}
+      }
+      const map = getHolidayMap();
+      let n = 0;
+      dates.forEach(d => {
+        if (map[d] === 'holiday') { S.scTripleDates.add(d); n++; }
+      });
+      toast('🎆 已自动勾选 ' + n + ' 个法定节假日');
+    }
+
+    scSaveRules();
+    renderScTripleGrid();
+    renderScGrid();
+  });
 })();
 
 /* ==================== 休假规则表 ==================== */

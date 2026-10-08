@@ -703,21 +703,116 @@ function renderScCphGrid() {
   const el = document.getElementById('scCphGrid');
   if (!el) return;
   const emps = scActiveEmployees();
-  if (!emps.length) { el.innerHTML = '<p class="muted">无可用员工（请先导入花名册）。</p>'; return; }
-  const header = '<tr><th>姓名</th>' + SC_HOURS.map(h => '<th>' + h + '时</th>').join('') + '</tr>';
-  const rows = emps.map(e => {
-    const cph = (S.employeeCPH || {})[e.name] || {};
-    return '<tr><td>' + esc(e.name) + '</td>' + SC_HOURS.map(h =>
-      '<td><input type="number" min="0" step="0.1" style="width:60px" data-name="' + esc(e.name) + '" data-hour="' + h + '" value="' + (cph[h] || 0).toFixed(2) + '"></td>'
-    ).join('') + '</tr>';
-  }).join('');
-  el.innerHTML = '<p class="muted" style="font-size:11.5px;margin:0 0 6px">日 CPH = 当日 CASE / 8；样本 ≥3 去极值后取 P90</p>' +
-    '<table>' + header + rows + '</table>';
-  el.querySelectorAll('input').forEach(inp => {
+  if (!emps.length) { el.innerHTML = '<p class="muted">无可用员工。</p>'; return; }
+
+  /* 周期内每一天 */
+  const c = scGetCycle();
+  let dates = scDatesBetween(c.start, c.end);
+  if (!dates.length && S.scheduleDraft.length) {
+    dates = Array.from(new Set(S.scheduleDraft.map(d => d.date))).sort();
+  }
+
+  const bizTag = (e) => {
+    const b = String(e.biz || '');
+    if (/买手/.test(b) && !/博主/.test(b)) return { text: '买手', color: '#7B8FBF' };
+    if (/博主/.test(b) && !/买手/.test(b)) return { text: '博主', color: '#C4B0CE' };
+    return { text: '弹性', color: '#A0A0AE' };
+  };
+  const pick = (obj, name) => {
+    const cc = (obj || {})[name] || {};
+    for (const h of SC_HOURS) if (cc[h] > 0) return cc[h];
+    return 0;
+  };
+  const isOverridden = (name) => {
+    const auto = pick(S.employeeCPHAuto, name);
+    const cur  = pick(S.employeeCPH, name);
+    return Math.abs(auto - cur) > 1e-6;
+  };
+
+  /* 排序：买手 → 博主 → 弹性 */
+  const order = { '买手': 1, '博主': 2, '弹性': 3 };
+  emps.sort((a, b) => order[bizTag(a).text] - order[bizTag(b).text]);
+
+  /* 表头 */
+  let html = '<table><thead><tr>' +
+    '<th style="width:56px;text-align:center">业务线</th>' +
+    '<th style="min-width:110px">姓名</th>' +
+    '<th style="width:86px;text-align:right">P90 生效值</th>';
+  for (const d of dates) {
+    const wd = new Date(d + 'T00:00:00Z').getUTCDay();
+    const cls = classifyDate(d);
+    const color = cls === 'holiday' ? '#D9363E' : (cls === 'workday' ? '#C75C5C' : '#333');
+    html += '<th style="width:74px;text-align:center;font-size:11.5px;color:' + color + '">' +
+      parseInt(d.slice(5,7),10) + '月' + parseInt(d.slice(8,10),10) + '日' +
+      '<div style="font-size:10px;color:#A0A0AE;font-weight:400">周' + WEEKDAY_CN[wd] + '</div>' +
+    '</th>';
+  }
+  html += '<th style="width:70px;text-align:center">操作</th></tr></thead><tbody>';
+
+  for (const e of emps) {
+    const tag = bizTag(e);
+    const auto = pick(S.employeeCPHAuto, e.name);
+    const cur  = pick(S.employeeCPH, e.name);
+    const ov   = isOverridden(e.name);
+    const autoDisp = auto > 0 ? auto.toFixed(2) : '';
+    const curVal   = cur > 0 ? cur.toFixed(2) : '';
+    const daily = (S.employeeCPHDaily || {})[e.name] || {};
+
+    html += '<tr>' +
+      '<td style="text-align:center">' +
+        '<span style="display:inline-block;padding:1px 6px;font-size:10.5px;' +
+          'border-radius:4px;color:#fff;background:' + tag.color + '">' + tag.text + '</span>' +
+      '</td>' +
+      '<td>' +
+        esc(e.name) +
+        (ov ? ' <span style="color:#E8A33E;font-size:11px">✎</span>' : '') +
+      '</td>' +
+      '<td style="text-align:right">' +
+        '<input type="number" min="0" step="0.1" style="width:70px;text-align:right"' +
+        ' data-name="' + esc(e.name) + '" value="' + curVal + '" placeholder="' + autoDisp + '"' +
+        ' title="P75 生效值（排班算法使用）">' +
+      '</td>';
+    for (const d of dates) {
+      const v = daily[d];
+      const txt = (v > 0) ? v.toFixed(2) : '—';
+      const color = (v > 0) ? '#333' : '#C0BDB5';
+      html += '<td style="text-align:center;color:' + color +
+              ';font-variant-numeric:tabular-nums">' + txt + '</td>';
+    }
+    html += '<td style="text-align:center">' +
+      '<button type="button" class="btn sm" data-reset="' + esc(e.name) + '"' +
+      (ov ? '' : ' disabled') + ' style="padding:2px 8px;font-size:11px">恢复</button>' +
+    '</td></tr>';
+  }
+  html += '</tbody></table>';
+  el.innerHTML = '<p class="muted" style="font-size:11.5px;margin:0 0 6px">' +
+    '<span style="font-weight:400;font-size:11px;color:#77778A">' +
+    '日 CPH = 当日 CASE / 8；IQR 去极值 + 时间衰减加权（每 7 天 ×0.85）+ 加权 P75（CV>0.35 降为 P65）</span>' +
+  '</p>' + html;
+
+  /* 手改生效值 */
+  el.querySelectorAll('input[data-name]').forEach(inp => {
     inp.addEventListener('change', () => {
-      const n = inp.dataset.name, h = inp.dataset.hour;
+      const n = inp.dataset.name;
+      const v = parseFloat(inp.value);
       if (!S.employeeCPH[n]) S.employeeCPH[n] = {};
-      S.employeeCPH[n][h] = parseFloat(inp.value) || 0;
+      if (isNaN(v) || v <= 0) {
+        const auto = pick(S.employeeCPHAuto, n);
+        for (const h of SC_HOURS) S.employeeCPH[n][h] = auto;
+      } else {
+        for (const h of SC_HOURS) S.employeeCPH[n][h] = v;
+      }
+      renderScCphGrid();
+    });
+  });
+  /* 恢复自动 */
+  el.querySelectorAll('button[data-reset]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const n = btn.dataset.reset;
+      const auto = pick(S.employeeCPHAuto, n);
+      if (!S.employeeCPH[n]) S.employeeCPH[n] = {};
+      for (const h of SC_HOURS) S.employeeCPH[n][h] = auto;
+      renderScCphGrid();
     });
   });
 }

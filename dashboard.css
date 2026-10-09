@@ -1013,7 +1013,12 @@ th.sc-stat.hide, td.sc-stat.hide { display: none; }
 }
 .sc-rules-table .btn-del:hover { background: #F9D5D5; }
 .sc-rules-note {
-  margin: 8px 0 0; font-size: 11.5px; color: #A0A0AE; line-height: 1.6;
+  margin: 8px 0 0;
+  font-size: 11.5px;
+  color: #A0A0AE;
+  line-height: 1.6;
+}
+
 /* ==================== 三倍日网格（整月显示） ==================== */
 .sc-triple-month-block { margin-bottom: 14px; }
 .sc-triple-month-title {
@@ -1031,6 +1036,4 @@ th.sc-stat.hide, td.sc-stat.hide { display: none; }
   background: #FAF9F7;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
-}
-
 }

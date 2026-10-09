@@ -1127,7 +1127,11 @@ function renderScTripleGrid() {
       const cls = classifyDate(d);
       const on = S.scTripleDates.has(d);
       const clsCss = cls === 'holiday' ? 'is-holiday' : (cls === 'workday' ? 'is-workday' : '');
-      const tag = cls === 'holiday' ? '国' : (cls === 'workday' ? '班' : '');
+      /* ★ 三倍日优先显示「三倍」标签，其次才是国/班 */
+      let tag = '';
+      if (on) tag = '三倍';
+      else if (cls === 'holiday') tag = '国';
+      else if (cls === 'workday') tag = '班';
       html += '<button type="button" class="sc-triple-btn ' + clsCss + (on ? ' on' : '') +
         '" data-date="' + d + '">' +
         '<span class="d">' + esc(d.slice(5)) + '</span>' +
@@ -1209,15 +1213,24 @@ function renderScTripleGrid() {
     } else if (act === 'none') {
       dates.forEach(d => S.scTripleDates.delete(d));
     } else if (act === 'auto') {
-      if (typeof initHolidayData === 'function') {
-        try { await initHolidayData(); } catch (_) {}
+      /* 优先：timor.tech wage=3（真·三倍工资日） */
+      if (typeof initTimorTripleDays === 'function') {
+        try { await initTimorTripleDays(); } catch (_) {}
       }
-      const map = getHolidayMap();
-      let n = 0;
-      dates.forEach(d => {
-        if (map[d] === 'holiday') { S.scTripleDates.add(d); n++; }
-      });
-      toast('🎆 已自动勾选 ' + n + ' 个法定节假日');
+      const beforeSize = S.scTripleDates.size;
+      dates.forEach(d => S.scTripleDates.add(d));
+      const added = S.scTripleDates.size - beforeSize;
+      if (added > 0) {
+        toast('🎆 已自动勾选 ' + added + ' 个三倍工资日（timor API）');
+      } else {
+        /* 兜底：holiday-cn */
+        const map = getHolidayMap();
+        let n = 0;
+        dates.forEach(d => {
+          if (map[d] === 'holiday' && !S.scTripleDates.has(d)) { S.scTripleDates.add(d); n++; }
+        });
+        toast('🎆 已自动勾选 ' + n + ' 个法定节假日（holiday-cn 兜底）');
+      }
     }
 
     scSaveRules();

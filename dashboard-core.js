@@ -444,8 +444,25 @@ async function initHolidayData() {
     ? 'API（' + years.join('/') + '，共 ' + total + ' 条）'
     : '内置（API 不可用）';
 
+  /* ★ 并行加载 timor 三倍日（写入 S.scTripleDates） */
+  try {
+    await initTimorTripleDays();
+  } catch (e) {
+    console.warn('[timor API] 初始化失败：', e);
+  }
+
   if (typeof renderForecastResult === 'function') { try { renderForecastResult(); } catch (_) {} }
   if (typeof renderForecastConfig === 'function') { try { renderForecastConfig(); } catch (_) {} }
+
+  /* 三倍日数据已就绪 → 若排班页当前可见，刷新网格以显示「三倍」标签
+     （加 _cnHolidayVersion 守卫：避免 renderScTripleGrid → initHolidayData → renderScTripleGrid 递归） */
+  if (typeof renderScTripleGrid === 'function' &&
+      !(typeof _cnHolidayVersion === 'string' && _cnHolidayVersion.indexOf('未加载') >= 0)) {
+    const scView = document.getElementById('view-schedule');
+    if (scView && scView.classList.contains('active')) {
+      try { renderScTripleGrid(); } catch (_) {}
+    }
+  }
 }
 
 const CN_HOLIDAY_FALLBACK = {
@@ -477,6 +494,84 @@ const CN_HOLIDAY_FALLBACK = {
   '2026-10-04': 'holiday', '2026-10-05': 'holiday', '2026-10-06': 'holiday',
   '2026-10-07': 'holiday'
 };
+
+/* ====================================================================
+   timor.tech 免费节假日 API —— 提供 wage 字段（1=调休 2=双休 3=三倍）
+   接口文档：https://timor.tech/api/holiday
+   ==================================================================== */
+const TIMOR_API_BASE = 'https://timor.tech/api/holiday';
+const TIMOR_TRIPLE_CACHE_KEY = 'creator_timor_triple_cache';
+const TIMOR_CACHE_DAYS = 7;
+
+/* 从 timor 年度接口提取 wage=3 的日期集合 */
+async function loadTimorTripleDays(year) {
+  const url = TIMOR_API_BASE + '/year/' + year + '/';
+  try {
+    const resp = await fetch(url, { cache: 'no-cache' });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const json = await resp.json();
+    if (json.code !== 0) throw new Error('API code=' + json.code);
+    const tripleDays = new Set();
+    const holiday = json.holiday || {};
+    for (const key in holiday) {
+      const item = holiday[key];
+      if (item && item.wage === 3 && item.date) tripleDays.add(item.date);
+    }
+    return tripleDays;
+  } catch (e) {
+    console.warn('[timor API] ' + year + ' 年拉取失败：', e.message);
+    return null;
+  }
+}
+
+/* 加载多年三倍日，带 localStorage 缓存（7 天有效） */
+async function initTimorTripleDays() {
+  if (!S || !S.scTripleDates) {
+    console.warn('[timor API] S.scTripleDates 尚未初始化，跳过');
+    return;
+  }
+  const now = new Date();
+  const years = [now.getFullYear() - 1, now.getFullYear(), now.getFullYear() + 1];
+
+  /* 1. 先读缓存 */
+  let cache = null;
+  try {
+    const raw = localStorage.getItem(TIMOR_TRIPLE_CACHE_KEY);
+    if (raw) {
+      const c = JSON.parse(raw);
+      const ageDays = (Date.now() - c.timestamp) / 86400000;
+      if (ageDays <= TIMOR_CACHE_DAYS && c.data) cache = c.data;
+    }
+  } catch (_) {}
+
+  /* 2. 缓存命中 → 直接写入 S.scTripleDates */
+  if (cache) {
+    for (const y of years) {
+      if (cache[y]) cache[y].forEach(d => S.scTripleDates.add(d));
+    }
+    console.log('[timor API] 使用缓存，三倍日 ' + S.scTripleDates.size + ' 天');
+    return;
+  }
+
+  /* 3. 缓存未命中 → 拉取 */
+  const result = {};
+  const fetched = await Promise.all(years.map(y => loadTimorTripleDays(y)));
+  years.forEach((y, i) => { if (fetched[i]) result[y] = Array.from(fetched[i]); });
+
+  const total = Object.values(result).reduce((s, arr) => s + arr.length, 0);
+  if (total > 0) {
+    for (const y of years) {
+      if (result[y]) result[y].forEach(d => S.scTripleDates.add(d));
+    }
+    try {
+      localStorage.setItem(TIMOR_TRIPLE_CACHE_KEY, JSON.stringify({ timestamp: Date.now(), data: result }));
+    } catch (_) {}
+    console.log('[timor API] 已加载三倍日 ' + total + ' 天');
+  } else {
+    console.warn('[timor API] 未获取到三倍日数据，回退到 holiday-cn 兜底');
+  }
+}
+
 function getHolidayMap() {
   if (_cnHolidayMap && Object.keys(_cnHolidayMap).length > 0) return _cnHolidayMap;
   return CN_HOLIDAY_FALLBACK;

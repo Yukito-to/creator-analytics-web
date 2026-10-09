@@ -1213,8 +1213,7 @@ function calcPeerAvgCPH(name) {
 
 /* 遍历所有参与员工，产出全员 CPH 表（生成后可在 UI 手动覆盖单个值） */
 function calcAllEmployeeCPH() {
-  const el = document.getElementById('scCphAlpha');
-  const alpha = parseFloat((el && el.value) || '1.00') || 1.0;
+  const alpha = 1.0;
   S.employeeCPH = {};
   S.employeeCPHAuto = {};
   S.employeeCPHDaily = {};

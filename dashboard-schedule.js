@@ -571,23 +571,6 @@ function renderSchedulePanel() {
     }
   });
 
-  const alphaEl = document.getElementById('scCphAlpha');
-  if (alphaEl && !alphaEl._scBound) {
-    alphaEl._scBound = true;
-    alphaEl.addEventListener('change', () => {
-      let alpha = parseFloat(alphaEl.value);
-      if (!isFinite(alpha) || alpha <= 0) { alpha = 1.0; alphaEl.value = '1.00'; }
-      if (!(S.records || []).length) { toast('尚无数据，无法重算 CPH'); return; }
-      try {
-        calcAllEmployeeCPH();
-        renderScCphGrid();
-        toast('✓ 已按 α=' + alpha.toFixed(2) + ' 重算 CPH');
-      } catch (e) {
-        console.warn('[scCphAlpha]', e);
-        toast('重算 CPH 失败：' + e.message);
-      }
-    });
-  }
 
   /* CPH 尚未计算时先算一遍，便于预览与手动覆盖 */
   if ((!S.employeeCPH || !Object.keys(S.employeeCPH).length) && (S.records || []).length) {

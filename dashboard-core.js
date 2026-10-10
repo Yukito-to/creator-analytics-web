@@ -1148,13 +1148,10 @@ function parseShiftPeriodsSheet() {
 
 /* ============================================================
    员工 CPH（排班用产能预测值）
-   口径：日 CPH = 当日 CASE / 8
-   算法：
-     ① 剔除异常日（CASE < 8 或 IQR 外）
-     ② 时间衰减加权（每 7 天权重 ×0.85）
-     ③ 分工作日 / 周末分别求加权分位，再取平均
-     ④ 加权 P75；若加权 CV > 0.35 降为 P65
-     ⑤ 无样本 → calcPeerAvgCPH 兜底
+   口径：日 CPD = 当日 CASE 总量；CPH = CPD / 8
+   算法：取该员工历史「日 CPD 最高的三天」，求平均后 / 8
+        - 无任何 CASE 记录 → calcPeerAvgCPH 兜底
+        - 样本不足三天 → 用所有可用样本
    ============================================================ */
 function calcEmployeeCPH(name, alpha) {
   alpha = alpha || 1.0;
@@ -1167,97 +1164,24 @@ function calcEmployeeCPH(name, alpha) {
     dayVol.set(r.date, (dayVol.get(r.date) || 0) + (r.volume || 0));
   }
 
-  /* 2. 工作日期集合：草稿优先，无草稿则用有服务量的所有日期兜底 */
-  const workDates = [];
-  const seen = new Set();
-  for (const d of S.scheduleDraft) {
-    if (d.name !== name) continue;
-    if (!scIsWorkingShift(d.shift)) continue;
-    if (seen.has(d.date)) continue;
-    seen.add(d.date);
-    workDates.push(d.date);
+  /* 2. 每日 CPD 列表（volume > 0 才算一天） */
+  const dailies = [];
+  for (const [date, v] of dayVol.entries()) {
+    if (v > 0) dailies.push({ date, cpd: v });
   }
-  if (!workDates.length) {
-    for (const d of dayVol.keys()) workDates.push(d);
-  }
-  workDates.sort();
 
-  /* 3. 剔除异常日 */
-  let raw = [];
-  for (const d of workDates) {
-    const v = dayVol.get(d) || 0;
-    if (v < 8) continue;
-    raw.push({ date: d, cph: v / 8 });
-  }
-  if (raw.length >= 8) {
-    const sorted = raw.map(x => x.cph).sort((a, b) => a - b);
-    const q1 = sorted[Math.floor(sorted.length * 0.25)];
-    const q3 = sorted[Math.floor(sorted.length * 0.75)];
-    const iqr = q3 - q1;
-    const lo = q1 - 1.5 * iqr;
-    const hi = q3 + 1.5 * iqr;
-    raw = raw.filter(x => x.cph >= lo && x.cph <= hi);
-  }
-  if (!raw.length) {
+  /* 3. 无数据兜底 */
+  if (!dailies.length) {
     const peer = calcPeerAvgCPH(name);
     for (const h of PREDICT_PERIODS) out[h] = Math.max(0, peer * alpha);
     return out;
   }
 
-  /* 4. 时间衰减权重 */
-  const latest = raw[raw.length - 1].date;
-  const dayDiff = (a, b) => {
-    const tA = Date.parse(a + 'T00:00:00Z');
-    const tB = Date.parse(b + 'T00:00:00Z');
-    return Math.round((tB - tA) / 86400000);
-  };
-  for (const x of raw) {
-    const daysAgo = Math.max(0, dayDiff(x.date, latest));
-    x.w = Math.pow(0.85, daysAgo / 7);
-  }
-
-  /* 5. 分工作日 / 周末 */
-  const isWeekendDate = d => {
-    const wd = new Date(d + 'T00:00:00Z').getUTCDay();
-    return wd === 0 || wd === 6;
-  };
-  const wdSamples = raw.filter(x => !isWeekendDate(x.date));
-  const weSamples = raw.filter(x =>  isWeekendDate(x.date));
-
-  const weightedQuantile = (samples, q) => {
-    if (!samples.length) return 0;
-    const s = samples.slice().sort((a, b) => a.cph - b.cph);
-    const totalW = s.reduce((acc, x) => acc + x.w, 0);
-    let acc = 0;
-    for (const x of s) {
-      acc += x.w;
-      if (acc / totalW >= q) return x.cph;
-    }
-    return s[s.length - 1].cph;
-  };
-  const weightedStats = (samples) => {
-    if (!samples.length) return { mean: 0, cv: 0 };
-    const totalW = samples.reduce((a, x) => a + x.w, 0);
-    const mean = samples.reduce((a, x) => a + x.cph * x.w, 0) / totalW;
-    const varW = samples.reduce((a, x) => a + x.w * Math.pow(x.cph - mean, 2), 0) / totalW;
-    return { mean, cv: mean > 0 ? Math.sqrt(varW) / mean : 0 };
-  };
-
-  const pick = (samples) => {
-    if (!samples.length) return null;
-    const st = weightedStats(samples);
-    const q = st.cv > 0.35 ? 0.65 : 0.75;
-    return weightedQuantile(samples, q);
-  };
-
-  const wdCph = pick(wdSamples);
-  const weCph = pick(weSamples);
-
-  const finalWd = (wdCph != null) ? wdCph : (weCph != null ? weCph : calcPeerAvgCPH(name));
-  const finalWe = (weCph != null) ? weCph : finalWd;
-
-  const unified = (finalWd + finalWe) / 2;
-  const value = Math.max(0, unified * alpha);
+  /* ★ 4. MAX 前三 CPD → 平均 CPD → CPH = avgCpd / 8 */
+  dailies.sort((a, b) => b.cpd - a.cpd);
+  const top3 = dailies.slice(0, 3);
+  const avgCpd = top3.reduce((s, x) => s + x.cpd, 0) / top3.length;
+  const value = Math.max(0, (avgCpd / 8) * alpha);
 
   for (const h of PREDICT_PERIODS) out[h] = value;
   return out;
@@ -1307,17 +1231,47 @@ function calcPeerAvgCPH(name) {
   return quantileArr(sorted, 0.75);
 }
 
-/* 遍历所有参与员工，产出全员 CPH 表（生成后可在 UI 手动覆盖单个值） */
+/* ============================================================
+   CPH 手动覆盖值持久化
+   localStorage['creator_sc_cph_manual'] = { "姓名": 数字, ... }
+   ============================================================ */
+const SC_CPH_MANUAL_KEY = 'creator_sc_cph_manual';
+
+function scLoadCphManual() {
+  try {
+    const raw = localStorage.getItem(SC_CPH_MANUAL_KEY);
+    if (!raw) return {};
+    const obj = JSON.parse(raw);
+    return (obj && typeof obj === 'object') ? obj : {};
+  } catch (_) { return {}; }
+}
+function scSaveCphManual(map) {
+  try { localStorage.setItem(SC_CPH_MANUAL_KEY, JSON.stringify(map || {})); } catch (_) {}
+}
+
+/* 遍历所有参与员工，产出全员 CPH 表
+   ★ 若 localStorage 里有该员工的手动值 → 直接覆盖到 S.employeeCPH */
 function calcAllEmployeeCPH() {
   const alpha = 1.0;
   S.employeeCPH = {};
   S.employeeCPHAuto = {};
   S.employeeCPHDaily = {};
 
+  const manual = scLoadCphManual();
+
   for (const e of scActiveEmployees()) {
+    /* 自动值（算法） */
     const v = calcEmployeeCPH(e.name, alpha);
     S.employeeCPHAuto[e.name] = Object.assign({}, v);
-    S.employeeCPH[e.name]     = Object.assign({}, v);
+
+    /* 优先应用手动值 */
+    const mv = parseFloat(manual[e.name]);
+    if (isFinite(mv) && mv > 0) {
+      S.employeeCPH[e.name] = {};
+      for (const h of PREDICT_PERIODS) S.employeeCPH[e.name][h] = mv;
+    } else {
+      S.employeeCPH[e.name] = Object.assign({}, v);
+    }
 
     /* 每日原始 CPH = 当日 CASE / 8（仅统计工作班次日） */
     const vols = {};

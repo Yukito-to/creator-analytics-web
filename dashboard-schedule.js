@@ -101,16 +101,38 @@ function scDisplayDateRange(cycle) {
 }
 
 /* ==================== 员工池 ==================== */
+/* ★ 员工顺序：优先按「排班草稿表格」中出现顺序（= 员工行顺序）；
+    草稿里没有、但花名册里符合条件的一线员工，追加在最后（保持 roster 顺序）。 */
 function scActiveEmployees() {
   const c = scGetCycle();
   const start = c.start || S.latestDate || '';
-  return (S.roster || []).filter(e => {
-    if (!e.name) return false;
-    if (e.resignDate && start && e.resignDate < start) return false;   // H7 已离职不参与
-    /* ★ 仅一线员工进入排班系统 */
-    if (!/一线/.test(e.attr || '')) return false;
-    return true;
-  });
+
+  /* 1. 建过滤后的 name → emp 映射 */
+  const empMap = new Map();
+  for (const e of (S.roster || [])) {
+    if (!e.name) continue;
+    if (e.resignDate && start && e.resignDate < start) continue;
+    if (!/一线/.test(e.attr || '')) continue;
+    empMap.set(e.name, e);
+  }
+
+  /* 2. 按 scheduleDraft 出现顺序提取 */
+  const orderedNames = [];
+  const seen = new Set();
+  for (const d of (S.scheduleDraft || [])) {
+    if (!d.name || seen.has(d.name)) continue;
+    seen.add(d.name);
+    if (empMap.has(d.name)) orderedNames.push(d.name);
+  }
+
+  /* 3. 草稿里没有的一线员工追加在末尾（保持 roster 顺序） */
+  for (const e of (S.roster || [])) {
+    if (!empMap.has(e.name) || seen.has(e.name)) continue;
+    seen.add(e.name);
+    orderedNames.push(e.name);
+  }
+
+  return orderedNames.map(n => empMap.get(n));
 }
 /* H8：按业务线专属/弹性分池 */
 function scPartitionEmployees() {
@@ -878,9 +900,7 @@ function renderScCphGrid() {
     return Math.abs(auto - cur) > 1e-6;
   };
 
-  /* 排序：买手 → 博主 → 弹性 */
-  const order = { '买手': 1, '博主': 2, '弹性': 3 };
-  emps.sort((a, b) => order[bizTag(a).text] - order[bizTag(b).text]);
+  /* ★ 顺序与 scActiveEmployees() 保持一致（= 排班草稿表格中的员工行顺序） */
 
   /* 表头 */
   let html = '<table><thead><tr>' +
@@ -919,7 +939,7 @@ function renderScCphGrid() {
       '<td style="text-align:right">' +
         '<input type="number" min="0" step="0.1" style="width:70px;text-align:right"' +
         ' data-name="' + esc(e.name) + '" value="' + curVal + '" placeholder="' + autoDisp + '"' +
-        ' title="P75 生效值（排班算法使用）">' +
+        ' title="生效值（排班算法使用）：留空 = 自动值 = 日 CPD 前三均值 / 8；手动填写后持久保存">' +
       '</td>';
     for (const d of dates) {
       const v = daily[d];
@@ -936,28 +956,39 @@ function renderScCphGrid() {
   html += '</tbody></table>';
   el.innerHTML = '<p class="muted" style="font-size:11.5px;margin:0 0 6px">' +
     '<span style="font-weight:400;font-size:11px;color:#77778A">' +
-    '日 CPH = 当日 CASE / 8；IQR 去极值 + 时间衰减加权（每 7 天 ×0.85）+ 加权 P75（CV>0.35 降为 P65）</span>' +
+    '日 CPH = 当日 CASE / 8；自动 CPH = 日 CPD 最高三天求平均后 / 8（无记录则用同组同事均值兜底）</span>' +
   '</p>' + html;
 
-  /* 手改生效值 */
+  /* 手改生效值 → 持久化到 localStorage */
   el.querySelectorAll('input[data-name]').forEach(inp => {
     inp.addEventListener('change', () => {
       const n = inp.dataset.name;
       const v = parseFloat(inp.value);
+      const manual = scLoadCphManual();
       if (!S.employeeCPH[n]) S.employeeCPH[n] = {};
+
       if (isNaN(v) || v <= 0) {
+        /* 清空输入框 = 撤销手动值 → 用自动值 */
+        delete manual[n];
+        scSaveCphManual(manual);
         const auto = pick(S.employeeCPHAuto, n);
         for (const h of SC_HOURS) S.employeeCPH[n][h] = auto;
       } else {
+        /* 手动值生效 + 写盘 */
+        manual[n] = v;
+        scSaveCphManual(manual);
         for (const h of SC_HOURS) S.employeeCPH[n][h] = v;
       }
       renderScCphGrid();
     });
   });
-  /* 恢复自动 */
+  /* 恢复自动 → 同时删除手动值 */
   el.querySelectorAll('button[data-reset]').forEach(btn => {
     btn.addEventListener('click', () => {
       const n = btn.dataset.reset;
+      const manual = scLoadCphManual();
+      delete manual[n];
+      scSaveCphManual(manual);
       const auto = pick(S.employeeCPHAuto, n);
       if (!S.employeeCPH[n]) S.employeeCPH[n] = {};
       for (const h of SC_HOURS) S.employeeCPH[n][h] = auto;

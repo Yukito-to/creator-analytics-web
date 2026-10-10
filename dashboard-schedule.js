@@ -908,6 +908,7 @@ function renderSchedulePanel() {
   renderScTripleGrid();
   renderScRulesTable();
   renderScGrid();
+  renderScRulesSummary();   // ★ 渲染规则说明面板
 }
 
 function renderScShiftPool() {
@@ -1982,6 +1983,149 @@ function renderScCoverage() {
   }
   const t2 = '<h3 class="sub-title">时段服务能力 / 预测量（红色 = H6 不达标）</h3><table>' + head2 + rows2.join('') + '</table>';
   el.innerHTML = t1 + t2;
+}
+
+/* ============================================================
+   ★ 排班规则说明面板
+   —— 展示：
+     ① 当前配置摘要（业务线 / 周期 / 班次池 / 需求规则 / 诉求）
+     ② 硬约束（必执行）
+     ③ 软约束（打分排序）
+   —— 数据实时反映 S 状态，每次 renderSchedulePanel 都会重渲。
+   ============================================================ */
+function renderScRulesSummary() {
+  const el = document.getElementById('scRulesSummary');
+  if (!el) return;
+
+  /* ---------- 一、当前配置摘要 ---------- */
+  const biz   = S.scBizState || '买手合作';
+  const c     = scGetCycle();
+  const pool  = S.shiftPoolByBiz[biz] || [];
+  const rules = S.shiftReqRules[biz] || [];
+  const emps  = scActiveEmployees();
+
+  /* 周期天数 */
+  let cycleDays = 0;
+  if (c.start && c.end) cycleDays = scDatesBetween(c.start, c.end).length;
+
+  /* 需求规则统计：已确认 / 待补全 */
+  let okRules = 0, warnRules = 0;
+  for (const r of rules) {
+    const ok = Array.isArray(r.dates) && r.dates.length > 0
+            && Array.isArray(r.shifts) && r.shifts.length > 0;
+    if (ok) okRules++; else warnRules++;
+  }
+
+  /* 诉求解析统计 */
+  const reqNames = Object.keys(S.parsedRequests || {});
+  let reqOk = 0, reqErr = 0;
+  for (const n of reqNames) {
+    const it = (S.parsedRequests[n] || {});
+    if (it.error) reqErr++;
+    else if (Array.isArray(it.items) && it.items.length) reqOk++;
+  }
+
+  /* 锁定人数 */
+  let lockedCount = 0;
+  for (const d of (S.scheduleDraft || [])) {
+    if (d.shift && d.date >= (c.start || '') && d.date <= (c.end || '')) lockedCount++;
+  }
+
+  const tile = (label, value, color) =>
+    '<div class="sc-rs-tile">' +
+      '<div class="k">' + label + '</div>' +
+      '<div class="v"' + (color ? ' style="color:' + color + '"' : '') + '>' + value + '</div>' +
+    '</div>';
+
+  const summaryTiles = [
+    tile('当前业务线',    esc(biz),                                       '#7B8FBF'),
+    tile('排班周期',      c.start && c.end ? (c.start.slice(5) + ' ~ ' + c.end.slice(5)) : '—'),
+    tile('周期天数',      cycleDays || '—'),
+    tile('在排员工',      emps.length + ' 人'),
+    tile('可排班次',      pool.length + ' 个',                             pool.length ? '#6EA980' : '#C98383'),
+    tile('需求规则',      rules.length + ' 条' + (warnRules ? '（' + warnRules + ' 条待补全）' : ''),
+                                                                warnRules ? '#C98383' : (okRules ? '#6EA980' : '#A0A0AE')),
+    tile('前置锁定',      lockedCount + ' 格'),
+    tile('员工诉求已解析', reqOk + (reqErr ? ' 成功 / ' + reqErr + ' 失败' : ' 人'),
+                                                                reqErr ? '#C98383' : (reqOk ? '#6EA980' : '#A0A0AE'))
+  ].join('');
+
+  /* ---------- 二、硬约束 ---------- */
+  const hardRules = [
+    { code: 'H1', text: '前置排班 / 员工诉求里的明确班次<b>直接锁定</b>，不再重排' },
+    { code: 'H2', text: '「只上 X」诉求 → 该员工其他班次<b>全部排除</b>' },
+    { code: 'H3', text: '「不上 X」诉求 → 该班次<b>不分配给该员工</b>' },
+    { code: 'H4', text: '连续工作天数 <b>≤ 6 天</b>，第 7 天必须休息' },
+    { code: 'H5', text: '实际工作天数 <b>≥ 周期天数 − 可休总额</b>（后验告警）' },
+    { code: 'H6', text: '每小时缺口 = <b>预测量 − Σ(在岗 × CPH)</b>，缺口时段优先征调' },
+    { code: 'H7', text: '已离职员工在<b>离职日当日及之后</b>不参与排班' },
+    { code: 'H8', text: '按业务线分池：<b>买手专属 / 博主专属 / 弹性</b>，专属优先，缺口才跨池征调' },
+    { code: 'H9', text: '需求上限：<b>规则命中的班次不超过每天最多人数</b>（多条规则取最小值）' }
+  ];
+
+  /* ---------- 三、软约束（打分） ---------- */
+  const softRules = [
+    { code: 'S1', score: '+100', text: '「希望上 X」诉求命中 → 加分' },
+    { code: 'S2', score: '+300', text: '与<b>昨日同班次</b> → 保持班次一致性，最高优先级' },
+    { code: 'S3', score: '-40/次', text: '晚班越多越不倾向再排晚班（均衡）' },
+    { code: 'S3·E', score: '-60/次', text: 'E 班专项：避免同一员工连续被排 E 班' },
+    { code: 'S4', score: '+5/天', text: '<b>剩余可休天数</b>越多者 → 越优先排班' },
+    { code: 'S5', score: '-5/天', text: '<b>连续工作天数</b>越多者 → 越不优先排班' },
+    { code: 'S6', score: '+90 / -30', text: '「跟 XXX 一样」 → 与目标人物今日班次一致 / 不一致' }
+  ];
+
+  /* ---------- 四、局部搜索（生成后优化） ---------- */
+  const searchRules = [
+    { text: '<b>晚班均衡</b>：晚班计数极差 &gt; 2 时，随机交换两人某天的工作班次（带硬约束回验）' },
+    { text: '<b>休息均衡</b>：同组内实际工作天数差 &gt; 1 时，把多干者某工作日与少干者某放休日对调' }
+  ];
+
+  /* ---------- 五、渲染 ---------- */
+  const HTML = [
+    '<div class="sc-rs-card">',
+      '<div class="sc-rs-head">',
+        '<span class="sc-rs-title">📋 当前配置摘要</span>',
+      '</div>',
+      '<div class="sc-rs-tiles">' + summaryTiles + '</div>',
+    '</div>',
+
+    '<div class="sc-rs-card">',
+      '<div class="sc-rs-head">',
+        '<span class="sc-rs-title">🔒 硬约束（保证执行）</span>',
+        '<span class="sc-rs-badge">违反则不排</span>',
+      '</div>',
+      '<ul class="sc-rs-list">',
+        hardRules.map(r =>
+          '<li><code>' + r.code + '</code><span>' + r.text + '</span></li>'
+        ).join(''),
+      '</ul>',
+    '</div>',
+
+    '<div class="sc-rs-card">',
+      '<div class="sc-rs-head">',
+        '<span class="sc-rs-title">⚖️ 软约束（打分排序）</span>',
+        '<span class="sc-rs-badge">用于候选优先级</span>',
+      '</div>',
+      '<ul class="sc-rs-list sc-rs-list-soft">',
+        softRules.map(r =>
+          '<li><code>' + r.code + '</code>' +
+            '<span class="sc-rs-score">' + r.score + '</span>' +
+            '<span>' + r.text + '</span></li>'
+        ).join(''),
+      '</ul>',
+    '</div>',
+
+    '<div class="sc-rs-card">',
+      '<div class="sc-rs-head">',
+        '<span class="sc-rs-title">🔁 生成后局部搜索优化</span>',
+      '</div>',
+      '<ul class="sc-rs-list">',
+        searchRules.map(r => '<li><span>' + r.text + '</span></li>').join(''),
+      '</ul>',
+    '</div>'
+  ].join('');
+
+  el.innerHTML = HTML;
 }
 
 function renderScDiag() {

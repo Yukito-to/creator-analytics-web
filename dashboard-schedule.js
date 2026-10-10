@@ -12,6 +12,8 @@ const SC_BASE_HOLIDAY = 6;
 const SC_TRIPLE_BONUS = 1;
 const SC_HOURS = PREDICT_PERIODS;   // ['9'..'23']
 const SC_MAX_STREAK = 6;
+/* 周期起始日相对"前置排班最后一天"的偏移量：+1 = 最后一天 + 1 */
+const SC_CYCLE_START_OFFSET = 1;
 const SC_BIZ_LIST = ['买手合作', '博主合作'];
 const SC_COLOR_LEAVE_REQ = '#92D050';   // Excel 标准绿
 const SC_COLOR_REST_ALGO = '#FFA94D';   // 橙色：非员工诉求的休息（前置/算法/其它假）
@@ -650,13 +652,28 @@ function scBuildDiag(ctx, result) {
 let scReqBizState = '买手合作';   // 需求表当前业务线
 
 function renderSchedulePanel() {
-  const c = scGetCycle();
-  if (!c.start && S.latestDate) {
-    c.start = S.latestDate;
-    c.end   = dateAdd(S.latestDate, 13);
-    scSetCycle(c);
+  let c = scGetCycle();
+  if (!c.start) {
+    const inferred = (typeof scInferCycleFromDraft === 'function')
+      ? scInferCycleFromDraft() : null;
+    if (inferred) {
+      scSetCycle({ start: inferred.start, end: inferred.end });
+      console.log('[排班] 自动推断周期 →', inferred.start, '~', inferred.end,
+                  '（前置排班最后一天：' + inferred.lastDraftDate + '）');
+    } else if (S.latestDate) {
+      scSetCycle({ start: S.latestDate, end: dateAdd(S.latestDate, 6) });
+      console.log('[排班] 回退到 latestDate →', S.latestDate);
+    }
+    /* ★ scSetCycle 会重建 S.scheduleCycle 对象，必须重新取一次，
+       否则下面的 set() 读到的是旧引用（空值），输入框不会被填充。 */
+    c = scGetCycle();
   }
-  const set = (id, v) => { const el = document.getElementById(id); if (el && v) el.value = v; };
+  const set = (id, v) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (document.activeElement === el) return;   /* 正在输入 → 不覆盖，避免打断焦点 */
+    if (v) el.value = v;
+  };
   set('scCycleStart', c.start);
   set('scCycleEnd',   c.end);
 
@@ -664,15 +681,31 @@ function renderSchedulePanel() {
     const el = document.getElementById(id);
     if (el && !el._scBound) {
       el._scBound = true;
-      el.addEventListener('change', () => {
-        scSetCycle({
-          start: (document.getElementById('scCycleStart') || {}).value || '',
-          end:   (document.getElementById('scCycleEnd')   || {}).value || '',
-        });
+      const handler = () => {
+        const s = (document.getElementById('scCycleStart') || {}).value || '';
+        const e = (document.getElementById('scCycleEnd')   || {}).value || '';
+        scSetCycle({ start: s, end: e });
+        console.log('[排班] 周期已保存 →', s, '~', e);
         renderSchedulePanel();
-      });
+      };
+      el.addEventListener('input',  handler);
+      el.addEventListener('change', handler);
     }
   });
+
+  /* ★ 「🎯 自动识别」：从前置排班最后一天重算周期 */
+  const btnInfer = document.getElementById('scCycleInfer');
+  if (btnInfer && !btnInfer._scBound) {
+    btnInfer._scBound = true;
+    btnInfer.addEventListener('click', () => {
+      const inferred = (typeof scInferCycleFromDraft === 'function')
+        ? scInferCycleFromDraft() : null;
+      if (!inferred) { toast('未找到前置排班记录，无法推断'); return; }
+      scSetCycle({ start: inferred.start, end: inferred.end });
+      toast('🎯 已识别：' + inferred.start + ' ~ ' + inferred.end);
+      renderSchedulePanel();
+    });
+  }
 
 
   /* CPH 尚未计算时先算一遍，便于预览与手动覆盖 */
@@ -1055,7 +1088,7 @@ function renderScGrid() {
       let bg;
       if (isLeaveReq) {
         bg = SC_COLOR_LEAVE_REQ;
-      } else if (meta && !meta.isWorking) {
+      } else if (inCycle && meta && !meta.isWorking) {
         bg = SC_COLOR_REST_ALGO;
       } else {
         bg = (meta && meta.color) || '';
@@ -1707,6 +1740,23 @@ async function scCopyMarkdown() {
 /* ==================== 周期 / 班次池 / 需求 ==================== */
 function scGetCycle() {
   return S.scheduleCycle || { start: '', end: '' };
+}
+
+/* 从前置排班草稿推断周期：
+   起始 = 草稿里最后一个有班次的日期 + SC_CYCLE_START_OFFSET
+   结束 = 起始 + 6（默认 7 天周期） */
+function scInferCycleFromDraft() {
+  if (!S.scheduleDraft || !S.scheduleDraft.length) return null;
+  let maxDate = '';
+  for (const d of S.scheduleDraft) {
+    if (!d.shift || !d.date) continue;
+    if (d.date > maxDate) maxDate = d.date;
+  }
+  if (!maxDate) return null;
+  const start = dateAdd(maxDate, SC_CYCLE_START_OFFSET);
+  if (!start) return null;
+  const end = dateAdd(start, 6);   /* 7 天周期 */
+  return { start, end, lastDraftDate: maxDate };
 }
 function scSetCycle(c) {
   S.scheduleCycle = Object.assign({ start: '', end: '' }, c || {});

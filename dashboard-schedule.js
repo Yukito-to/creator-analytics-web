@@ -932,15 +932,12 @@ function renderScGrid() {
     resultMap[r.name][r.date] = r.shift;
   }
 
-  /* ===== 表头 ===== */
+  /* ===== 表头（仅保留 员工 + 可休/已休/未休 + 日期列） ===== */
   const statCols = ['可休', '已休', '未休'];
-  /* 每个班次的列（只列工作班次） */
-  const workingShifts = Object.keys(S.shiftMeta || {}).filter(s => scIsWorkingShift(s));
 
   let headTop = '<tr>' +
     '<th>员工</th>' +
-    statCols.map(s => '<th class="sc-stat">' + s + '</th>').join('') +
-    workingShifts.map(s => '<th class="sc-stat">' + esc(s) + '</th>').join('');
+    statCols.map(s => '<th class="sc-stat">' + s + '</th>').join('');
   for (const d of dates) {
     const wd = new Date(d + 'T00:00:00Z').getUTCDay();
     const cls = classifyDate(d);
@@ -963,16 +960,6 @@ function renderScGrid() {
       '<td class="sc-stat">' + st.used.toFixed(2).replace(/\.00$/, '') + '</td>',
       '<td class="sc-stat">' + (st.remain == null ? '—' : st.remain.toFixed(2).replace(/\.00$/, '')) + '</td>',
     ].join('');
-    /* 各工作班次计数 */
-    const shiftCount = {};
-    for (const d of dates) {
-      const s = (resultMap[e.name] && resultMap[e.name][d]) ||
-                (draftMap[e.name]  && draftMap[e.name][d])   || '';
-      if (s) shiftCount[s] = (shiftCount[s] || 0) + 1;
-    }
-    const shiftTds = workingShifts.map(s =>
-      '<td class="sc-stat">' + (shiftCount[s] || '') + '</td>'
-    ).join('');
 
     const dayTds = dates.map((d, ci) => {
       const s = (resultMap[e.name] && resultMap[e.name][d]) ||
@@ -988,7 +975,7 @@ function renderScGrid() {
              (s ? esc(s) : '') + '</td>';
     }).join('');
 
-    return '<tr><td>' + esc(e.name) + '</td>' + statTds + shiftTds + dayTds + '</tr>';
+    return '<tr><td>' + esc(e.name) + '</td>' + statTds + dayTds + '</tr>';
   }).join('');
 
   tbl.innerHTML = '<thead>' + headTop + '</thead><tbody>' + bodyRows + '</tbody>';

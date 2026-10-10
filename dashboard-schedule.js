@@ -1091,6 +1091,24 @@ function isLeaveRequest(name, date) {
 function renderScTripleGrid() {
   const el = document.getElementById('scTripleDates');
   if (!el) return;
+
+  /* ★ 月份折叠状态：懒初始化 */
+  if (!S.scTripleMonthOpen) {
+    S.scTripleMonthOpen = new Set();
+    /* 从 localStorage 恢复 */
+    const rawLS = localStorage.getItem('creator_sc_triple_month_open');
+    if (rawLS) {
+      try {
+        const saved = JSON.parse(rawLS);
+        if (Array.isArray(saved)) {
+          saved.forEach(m => S.scTripleMonthOpen.add(m));
+          S.scTripleMonthOpen._hasSaved = true;  /* 有存档（哪怕存的是空数组=全折叠） */
+        }
+      } catch (_) {}
+    }
+    /* 首次无记录 → 默认全部展开（下面渲染时会自动补全当月） */
+    if (!S.scTripleMonthOpen._hasSaved) S.scTripleMonthOpen._defaultAll = true;
+  }
   const c = scGetCycle();
   if (!c.start || !c.end) {
     el.innerHTML = '<p class="muted">请先设置排班周期。</p>';
@@ -1118,9 +1136,24 @@ function renderScTripleGrid() {
     const daysInMonth = new Date(y, mm, 0).getDate();
     totalCount += daysInMonth;
 
+    /* 首次渲染默认全部展开 */
+    if (S.scTripleMonthOpen._defaultAll) S.scTripleMonthOpen.add(mo);
+    const open = S.scTripleMonthOpen.has(mo);
+
+    /* 该月已勾选三倍日数 */
+    let selCount = 0;
+    for (let i = 1; i <= daysInMonth; i++) {
+      const d = mo + '-' + String(i).padStart(2, '0');
+      if (S.scTripleDates.has(d)) selCount++;
+    }
+
     html += '<div class="sc-triple-month-block">';
-    html += '<div class="sc-triple-month-title">📅 ' + y + '年' + mm + '月</div>';
-    html += '<div class="sc-triple-month">';
+    html += '<div class="sc-triple-month-title' + (open ? '' : ' collapsed') + '" data-month="' + esc(mo) + '">' +
+      '<span class="arrow">▼</span>' +
+      '<span>📅 ' + y + '年' + mm + '月</span>' +
+      '<span class="meta">已选 ' + selCount + ' / ' + daysInMonth + ' 天</span>' +
+    '</div>';
+    html += '<div class="sc-triple-month' + (open ? '' : ' hidden') + '" data-month="' + esc(mo) + '">';
     for (let i = 1; i <= daysInMonth; i++) {
       const d = mo + '-' + String(i).padStart(2, '0');
       const wd = new Date(d + 'T00:00:00Z').getUTCDay();
@@ -1142,6 +1175,22 @@ function renderScTripleGrid() {
     html += '</div></div>';
   }
   el.innerHTML = html;
+
+  /* ★ 月份折叠绑定 */
+  el.querySelectorAll('.sc-triple-month-title').forEach(head => {
+    head.addEventListener('click', () => {
+      const mo = head.dataset.month;
+      if (S.scTripleMonthOpen.has(mo)) S.scTripleMonthOpen.delete(mo);
+      else S.scTripleMonthOpen.add(mo);
+      S.scTripleMonthOpen._defaultAll = false;
+      /* 持久化 */
+      try {
+        localStorage.setItem('creator_sc_triple_month_open',
+          JSON.stringify(Array.from(S.scTripleMonthOpen)));
+      } catch (_) {}
+      renderScTripleGrid();
+    });
+  });
 
   /* 3. 计数 */
   const cnt = document.getElementById('scTripleCount');

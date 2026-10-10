@@ -1019,21 +1019,52 @@ th.sc-stat.hide, td.sc-stat.hide { display: none; }
   line-height: 1.6;
 }
 
-/* ==================== 三倍日网格（整月显示） ==================== */
-.sc-triple-month-block { margin-bottom: 14px; }
+/* ==================== 三倍日网格（整月显示 · 横向 auto-fill） ==================== */
+.sc-triple-month-block {
+  margin-bottom: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: #FFFFFF;
+  overflow: hidden;
+}
 .sc-triple-month-title {
-  font-size: 12.5px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
   color: #7B8FBF;
   font-weight: 600;
-  margin: 4px 0 6px;
-  padding-left: 2px;
+  padding: 9px 12px;
+  background: #FAF9F7;
+  cursor: pointer;
+  user-select: none;
+  border-bottom: 1px solid var(--border);
+  transition: background .15s ease;
+}
+.sc-triple-month-title:hover { background: #F2F0EB; }
+.sc-triple-month-title .arrow {
+  display: inline-block;
+  width: 12px;
+  font-size: 10px;
+  color: #7B8FBF;
+  transition: transform .15s ease;
+}
+.sc-triple-month-title .meta {
+  margin-left: auto;
+  font-size: 11.5px;
+  color: #A0A0AE;
+  font-weight: 400;
+}
+.sc-triple-month-title.collapsed .arrow {
+  transform: rotate(-90deg);
 }
 .sc-triple-month {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
   gap: 6px;
   padding: 10px 12px;
   background: #FAF9F7;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
+}
+.sc-triple-month.hidden {
+  display: none;
 }

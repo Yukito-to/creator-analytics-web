@@ -150,18 +150,33 @@ function scIsTripleDay(date) {
   return S.scTripleDates.has(date);
 }
 
-/* 单员工休假统计：
-   tripleDays = 在 S.scTripleDates 里、且排了工作班次的天数
-   used       = sheet「休」列（shiftMeta.restDays）求和
+/* 单员工休假统计（按「统计月」口径，默认 = 排班周期起始月）：
+   tripleDays = 在 S.scTripleDates 里、且排了工作班次的天数（仅统计月内）
+   used       = sheet「休」列（shiftMeta.restDays）求和（仅统计月内）
    total      = 按 S.scHolidayRules 精确匹配 tripleDays 得到的应休天数
-   remain     = max(0, total - used)；未匹配规则时 total/remain 为 null */
+   remain     = max(0, total - used)；未匹配规则时 total/remain 为 null
+
+   统计月优先级：排班周期起始月 (S.scheduleCycle.start) → S.month → 空(=全部)
+   例：周期 2026-09-28~10-04 → 统计月 = 2026-09；
+       周期 2026-10-05~10-11 → 统计月 = 2026-10。
+   S.scheduleDraft 里其它月份的记录仍然保留，只是不计入这三列。 */
 function scHolidayStat(name) {
   const tripleSet = S.scTripleDates;
   let tripleDays = 0;
   let used = 0;
 
+  /* ★ 统计月份：优先取排班周期起始月，其次 S.month，最后空 = 统计全部 */
+  const cycle = (typeof scGetCycle === 'function') ? scGetCycle() : (S.scheduleCycle || {});
+  const statMonth = (cycle && cycle.start)
+    ? cycle.start.slice(0, 7)
+    : (S.month || '');
+
   for (const d of S.scheduleDraft) {
     if (d.name !== name) continue;
+
+    /* ★ 月度过滤：只统计统计月内的日期 */
+    if (statMonth && d.date.slice(0, 7) !== statMonth) continue;
+
     const shift = d.shift;
     if (!shift) continue;
 

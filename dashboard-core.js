@@ -617,7 +617,7 @@ const S = {
   roster:[], records:[], wtRecords:[], inspections:[],
   slaBuyer:[], slaBlogger:[],
   businessMap:{}, business2Map:{},
-  shiftMap:{}, schedule:{}, scheduleDates:[],
+  shiftMap:{}, shiftAttn:{}, shiftColor:{}, schedule:{}, scheduleDates:[],
   month:'', latestDate:'', latestWK:0, hidden:false,
   attOverride:{}, personSel:new Set(),
   teamSel:{ group:new Set(), batch:new Set(), category:new Set() },
@@ -1363,13 +1363,34 @@ function buildAll() {
   S.records = []; S.wtRecords = []; S.inspections = [];
   S.slaBuyer = []; S.slaBlogger = [];
   S.businessMap = {}; S.business2Map = {};
-  S.shiftMap = {}; S.schedule = {}; S.scheduleDates = [];
+  S.shiftMap = {}; S.shiftAttn = {}; S.shiftColor = {};
+  S.schedule = {}; S.scheduleDates = [];
   S.forecastBuyer = {}; S.forecastBlogger = {};
   S.volumeForecast = {};
 
   if (S.sheets.business) { for (const o of rowsToObjs('business')) { const l1 = String(o.l1||'').trim(); const biz = String(o.biz||'').trim(); if (l1 && biz && !S.businessMap[l1]) S.businessMap[l1] = biz; } }
   if (S.sheets.business2) { for (const o of rowsToObjs('business2')) { const l1 = String(o.l1||'').trim(); const l2 = String(o.l2||'').trim(); const biz = String(o.biz||'').trim(); if (l1 && l2 && biz) { const key = l1 + '|' + l2; if (!S.business2Map[key]) S.business2Map[key] = biz; } } }
-  if (S.sheets.shift) { for (const row of S.sheets.shift.rows) { if (!row) continue; const name = String(row[0]||'').trim(); if (!name || name === '班次') continue; S.shiftMap[name] = num(row[1]); } }
+  /* ★ 班次 sheet 解析：
+       column A = 班次名
+       column B = 人力计数（用于 CPD 分母：CASE / Σ人力计数）
+       column C = 出勤计数（用于三倍判断：>0 视为出勤）
+       cellColors[ri][0] = column A 的填充色（用于渲染兜底）
+     表头行（"班次"）自动跳过。 */
+  if (S.sheets.shift) {
+    const rows   = S.sheets.shift.rows || [];
+    const colors = S.sheets.shift.cellColors || [];
+    for (let ri = 0; ri < rows.length; ri++) {
+      const row = rows[ri];
+      if (!row) continue;
+      const name = String(row[0] || '').trim();
+      if (!name || name === '班次') continue;
+
+      S.shiftMap[name]  = num(row[1]);          // 人力计数
+      S.shiftAttn[name] = num(row[2]);          // 出勤计数
+      const color = colors[ri] && colors[ri][0];
+      if (color) S.shiftColor[name] = color;
+    }
+  }
   if (S.sheets.schedule) {
     const rows = S.sheets.schedule.rows;
     if (rows.length) {

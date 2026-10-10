@@ -23,17 +23,33 @@ function scIsLateShift(shift) {
   const meta = S.shiftMeta && S.shiftMeta[shift];
   return !!(meta && meta.isLate);
 }
+/* ★ 判断是否为「休息」班次：
+     ① 优先：S.shiftMeta 里 !isWorking 且 restDays > 0
+     ② 回退：班次 sheet 的「出勤计数」= 0（不计出勤 = 休）
+     ③ 兜底：班次 sheet 的「人力计数」= 0
+   注意：请假类（isLeaveShift）不重叠——请假 = 出勤 0 且 人力 0。 */
 function scIsRestShift(shift) {
   const meta = S.shiftMeta && S.shiftMeta[shift];
-  return !!(meta && !meta.isWorking && meta.restDays > 0);
+  if (meta) return !meta.isWorking && meta.restDays > 0;
+  if (S.shiftAttn && S.shiftAttn[shift] != null) return S.shiftAttn[shift] === 0;
+  if (S.shiftMap  && S.shiftMap[shift]  != null) return S.shiftMap[shift]  === 0;
+  return false;
 }
 function scIsLeaveShift(shift) {
   const meta = S.shiftMeta && S.shiftMeta[shift];
   return !!(meta && !meta.isWorking && meta.restDays === 0);
 }
+/* ★ 判断班次是否为「工作班次」（三档回退）：
+     ① 优先：S.shiftMeta[shift].isWorking（来自「班次时段」sheet）
+     ② 回退：班次 sheet 的「出勤计数」列（column C）> 0
+     ③ 兜底：班次 sheet 的「人力计数」列（column B）> 0
+   这样即使没有「班次时段」sheet，也能正确区分工作 / 休息班次。 */
 function scIsWorkingShift(shift) {
   const meta = S.shiftMeta && S.shiftMeta[shift];
-  return !!(meta && meta.isWorking);
+  if (meta) return !!meta.isWorking;
+  if (S.shiftAttn && S.shiftAttn[shift] != null) return S.shiftAttn[shift] > 0;
+  if (S.shiftMap  && S.shiftMap[shift]  != null) return S.shiftMap[shift]  > 0;
+  return false;
 }
 function scWeekdayOf(date) { return new Date(date + 'T00:00:00Z').getUTCDay(); }
 function scIsWeekend(date) { const wd = scWeekdayOf(date); return wd === 0 || wd === 6; }
@@ -246,6 +262,19 @@ function scHolidayStat(name) {
     monthDates = Array.from(dateSet).sort();
   }
 
+  /* ★ 三倍天数 & 已休天数的数据源：
+       · 三倍判定：排班草稿及诉求 sheet（scEffectiveShift 的草稿来源）
+                    × 班次 sheet 的「出勤计数」列（scIsWorkingShift 的回退来源）
+                    × 用户勾选的三倍日集合（S.scTripleDates）
+       · 已休天数：班次 sheet 的「休」列（S.shiftMeta[shift].restDays，
+                   若 shiftMeta 缺失则为 0）
+
+     判定链：
+       ① 员工该日必须「在职」（离职日当天及之后跳过）
+       ② 排班草稿里有明确班次（scEffectiveShift）
+       ③ 该日是三倍日（tripleSet.has）
+       ④ 该班次是工作班次（scIsWorkingShift → 优先 shiftMeta.isWorking，
+                           回退班次 sheet 出勤计数 > 0） */
   for (const d of monthDates) {
     if (!scIsActiveOn(name, d)) continue;   // ★ 离职日及之后不计入休假统计
     const shift = scEffectiveShift(name, d);

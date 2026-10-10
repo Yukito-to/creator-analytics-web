@@ -1057,10 +1057,11 @@ function renderScGrid() {
     resultMap[r.name][r.date] = r.shift;
   }
 
-  /* ===== 表头（仅保留 员工 + 可休/已休/未休 + 日期列） ===== */
+  /* ===== 表头（业务线 + 员工 + 可休/已休/未休 + 日期列） ===== */
   const statCols = ['可休', '已休', '未休'];
 
   let headTop = '<tr>' +
+    '<th>业务线</th>' +
     '<th>员工</th>' +
     statCols.map(s => '<th class="sc-stat">' + s + '</th>').join('');
   for (const d of dates) {
@@ -1078,10 +1079,37 @@ function renderScGrid() {
   headTop += '</tr>';
 
   /* ===== 表身 ===== */
+  /* ★ 业务线 tag（与 renderScCphGrid 保持一致的配色） */
+  const scBizTagOf = (e) => {
+    const b = String(e.biz || '');
+    if (/买手/.test(b) && !/博主/.test(b)) return { text: '买手', color: '#7B8FBF' };
+    if (/博主/.test(b) && !/买手/.test(b)) return { text: '博主', color: '#C4B0CE' };
+    return { text: '弹性', color: '#A0A0AE' };
+  };
+
   const bodyRows = emps.map((e, ri) => {
     const st = scHolidayStat(e.name);
+    const tag = scBizTagOf(e);
+
+    /* ★ 业务线列 */
+    const bizTd =
+      '<td style="text-align:center">' +
+        '<span style="display:inline-block;padding:1px 6px;font-size:10.5px;' +
+          'border-radius:4px;color:#fff;background:' + tag.color + '">' +
+          tag.text +
+        '</span>' +
+      '</td>';
+
+    /* ★ 可休列：主值 + 红字小字（tripleDays > 0 时显示） */
+    const tripleTxt = (st.tripleDays > 0)
+      ? '<div style="color:#D9363E;font-size:10px;font-weight:600;' +
+          'line-height:1.15;margin-top:1px">（' + st.tripleDays + '）</div>'
+      : '';
     const statTds = [
-      '<td class="sc-stat">' + (st.total == null ? '—' : st.total) + '</td>',
+      '<td class="sc-stat">' +
+        '<div>' + (st.total == null ? '—' : st.total) + '</div>' +
+        tripleTxt +
+      '</td>',
       '<td class="sc-stat">' + st.used.toFixed(2).replace(/\.00$/, '') + '</td>',
       '<td class="sc-stat">' + (st.remain == null ? '—' : st.remain.toFixed(2).replace(/\.00$/, '')) + '</td>',
     ].join('');
@@ -1131,7 +1159,7 @@ function renderScGrid() {
              (s ? esc(s) : '') + '</td>';
     }).join('');
 
-    return '<tr><td>' + esc(e.name) + '</td>' + statTds + dayTds + '</tr>';
+    return '<tr>' + bizTd + '<td>' + esc(e.name) + '</td>' + statTds + dayTds + '</tr>';
   }).join('');
 
   tbl.innerHTML = '<thead>' + headTop + '</thead><tbody>' + bodyRows + '</tbody>';

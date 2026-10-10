@@ -255,19 +255,21 @@
         <div id="scBizTabs" class="head-controls" style="margin-bottom:8px"></div>
 
         <!-- [3] 班次池 -->
-        <h3 class="sub-title">③ 选择本业务线可排班次</h3>
+        <h3 class="sub-title">选择本业务线可排班次</h3>
         <div id="scShiftPool" class="chips"></div>
 
         <!-- [4] 需求设置 -->
-        <h3 class="sub-title">④ 各业务线班次人数需求（留空 = 无限制）</h3>
-        <div id="scReqGrid" class="table-scroll"></div>
+        <h3 class="sub-title">班次每日人数上限
+          <span class="help" data-tip="每条规则 = 生效日期 + 限制班次 + 每天最多人数。多条规则同时命中同一 (日期, 班次) 时取最严格（最小）上限。空 = 不限制。">?</span>
+        </h3>
+        <div id="scReqGrid"></div>
 
         <!-- [5] CPH 预览 -->
-        <h3 class="sub-title">⑤ 员工 CPH（可手动覆盖）</h3>
+        <h3 class="sub-title">员工 CPH（可手动覆盖）</h3>
         <div id="scCphGrid" class="table-scroll"></div>
 
         <!-- [5] 诉求识别 -->
-        <h3 class="sub-title">④ 员工排班诉求
+        <h3 class="sub-title">员工排班诉求
           <button id="btnScParseReq" class="btn sm">🤖 AI 解析诉求</button>
           <span id="scReqStatus" class="muted"></span>
         </h3>

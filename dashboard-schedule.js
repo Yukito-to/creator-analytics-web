@@ -949,35 +949,190 @@ function renderScReqGrid() {
   if (!el) return;
 
   const biz = S.scBizState;
-  const pool = S.shiftPoolByBiz[biz] || [];
+  const rules = S.shiftReqRules[biz] || [];
+  const pool  = S.shiftPoolByBiz[biz] || [];
+  const cycle = scGetCycle();
 
+  /* 生效日期候选 = 排班周期内每一天 */
+  let cycleDates = [];
+  if (cycle.start && cycle.end) cycleDates = scDatesBetween(cycle.start, cycle.end);
+
+  /* 空状态 */
   if (!pool.length) {
-    el.innerHTML = '<p class="muted">请先在「③ 选择本业务线可排班次」中勾选至少一个班次。</p>';
+    el.innerHTML = '<p class="muted" style="margin:4px 0">请先在上方「选择本业务线可排班次」中勾选至少一个班次。</p>';
+    return;
+  }
+  if (!cycleDates.length) {
+    el.innerHTML = '<p class="muted" style="margin:4px 0">请先设置排班周期。</p>';
     return;
   }
 
-  const header = '<tr>' +
-    '<th>班次</th>' +
-    '<th>工作日上限</th>' +
-    '<th>周末上限</th>' +
-  '</tr>';
+  const cards = rules.map((r, idx) => renderScReqRuleCardHTML(idx, r, cycleDates, pool)).join('');
+  const emptyTip = rules.length === 0
+    ? '<p class="muted" style="margin:4px 0;font-size:12px">暂无规则。点击下方「+ 添加规则」创建第一条。</p>'
+    : '';
 
-  const rows = pool.map(s => {
-    const r = (S.shiftReqs[biz] && S.shiftReqs[biz][s]) || {};
-    return '<tr>' +
-      '<td>' + esc(s) + '</td>' +
-      '<td><input type="number" min="0" data-shift="' + esc(s) + '" data-kind="weekday" value="' +
-        (r.weekday == null ? '' : r.weekday) + '" placeholder="不限"></td>' +
-      '<td><input type="number" min="0" data-shift="' + esc(s) + '" data-kind="weekend" value="' +
-        (r.weekend == null ? '' : r.weekend) + '" placeholder="不限"></td>' +
-    '</tr>';
+  el.innerHTML = emptyTip +
+    '<div class="sc-req-cards">' + cards + '</div>' +
+    '<button type="button" class="btn sm" id="scReqAddRule" style="margin-top:10px">+ 添加规则</button>';
+
+  bindScReqRuleEvents(el, cycleDates, pool, biz);
+}
+
+/* 单条规则卡片的 HTML */
+function renderScReqRuleCardHTML(idx, rule, cycleDates, pool) {
+  const dates = rule.dates  || [];
+  const shifts = rule.shifts || [];
+  const max = rule.max;
+  const confirmed = !!rule.confirmed;
+
+  /* 顶部状态提示 */
+  const warnings = [];
+  if (!dates.length)  warnings.push('日期');
+  if (!shifts.length) warnings.push('班次');
+  let statusHTML = '';
+  if (confirmed) {
+    statusHTML = '<span style="color:#6EA980;font-size:12px">✓ 已确认</span>';
+  } else if (warnings.length) {
+    statusHTML = '<span style="color:#B36A00;font-size:12px">⚠ 请补全：' + warnings.join('、') + '</span>';
+  }
+
+  const dateChips = cycleDates.map(d => {
+    const on = dates.indexOf(d) >= 0;
+    const wd = WEEKDAY_CN[scWeekdayOf(d)];
+    return '<span class="chip' + (on ? ' on' : '') + '" data-date="' + d + '">' +
+      d.slice(5) + ' 周' + wd + '</span>';
   }).join('');
 
-  el.innerHTML = '<table>' + header + rows + '</table>';
+  const shiftChips = pool.map(s => {
+    const on = shifts.indexOf(s) >= 0;
+    return '<span class="chip' + (on ? ' on' : '') + '" data-shift="' + esc(s) + '">' + esc(s) + '</span>';
+  }).join('');
 
-  el.querySelectorAll('input').forEach(inp => {
-    inp.addEventListener('change', () => {
-      scSetShiftReq(biz, inp.dataset.shift, inp.dataset.kind, inp.value);
+  return '<div class="sc-req-card" data-idx="' + idx + '">' +
+    '<div class="sc-req-card-head">' +
+      '<span style="font-weight:600;color:#7B8FBF">规则 #' + (idx + 1) + '</span>' +
+      statusHTML +
+      '<div style="margin-left:auto;display:flex;gap:6px">' +
+        '<button type="button" class="btn sm" data-act="confirm"' + (confirmed ? ' disabled' : '') + '>' +
+          (confirmed ? '✓ 已确认' : '✓ 确认') +
+        '</button>' +
+        '<button type="button" class="btn sm" data-act="delete" style="background:#FCE5E5;color:#D9363E">删除</button>' +
+      '</div>' +
+    '</div>' +
+
+    '<div class="sc-req-card-section">' +
+      '<div class="sc-req-card-label">📅 生效日期' +
+        '<button type="button" class="btn sm" data-act="all-dates">全选</button>' +
+        '<button type="button" class="btn sm" data-act="clear-dates">清空</button>' +
+        '<span style="color:#A0A0AE;font-weight:400;margin-left:auto">已选 ' + dates.length + ' / ' + cycleDates.length + ' 天</span>' +
+      '</div>' +
+      '<div class="chips" style="margin:6px 0 0">' + dateChips + '</div>' +
+    '</div>' +
+
+    '<div class="sc-req-card-section">' +
+      '<div class="sc-req-card-label">🎯 限制班次' +
+        '<button type="button" class="btn sm" data-act="all-shifts">全选</button>' +
+        '<button type="button" class="btn sm" data-act="clear-shifts">清空</button>' +
+        '<span style="color:#A0A0AE;font-weight:400;margin-left:auto">已选 ' + shifts.length + ' / ' + pool.length + ' 个班次</span>' +
+      '</div>' +
+      '<div class="chips" style="margin:6px 0 0">' + shiftChips + '</div>' +
+    '</div>' +
+
+    '<div class="sc-req-card-section" style="display:flex;align-items:center;gap:8px">' +
+      '<span class="sc-req-card-label" style="margin:0">每天最多</span>' +
+      '<input type="number" min="0" step="1" data-act="max" value="' +
+        (max == null ? '' : max) + '" placeholder="不限" style="width:80px">' +
+      '<span>人</span>' +
+    '</div>' +
+  '</div>';
+}
+
+/* 绑定规则卡片的所有交互 */
+function bindScReqRuleEvents(el, cycleDates, pool, biz) {
+  const rules = S.shiftReqRules[biz] || (S.shiftReqRules[biz] = []);
+
+  /* 「+ 添加规则」 */
+  const addBtn = el.querySelector('#scReqAddRule');
+  if (addBtn) {
+    addBtn.addEventListener('click', () => {
+      rules.push({ dates: [], shifts: [], max: null, confirmed: false });
+      renderScReqGrid();
+    });
+  }
+
+  el.querySelectorAll('.sc-req-card').forEach(card => {
+    const idx = parseInt(card.dataset.idx, 10);
+    const rule = rules[idx];
+    if (!rule) return;
+    if (!Array.isArray(rule.dates))  rule.dates  = [];
+    if (!Array.isArray(rule.shifts)) rule.shifts = [];
+
+    /* 日期 chip 点击 */
+    card.querySelectorAll('.chip[data-date]').forEach(ch => {
+      ch.addEventListener('click', () => {
+        const d = ch.dataset.date;
+        const i = rule.dates.indexOf(d);
+        if (i >= 0) rule.dates.splice(i, 1); else rule.dates.push(d);
+        renderScReqGrid();
+      });
+    });
+    /* 班次 chip 点击 */
+    card.querySelectorAll('.chip[data-shift]').forEach(ch => {
+      ch.addEventListener('click', () => {
+        const s = ch.dataset.shift;
+        const i = rule.shifts.indexOf(s);
+        if (i >= 0) rule.shifts.splice(i, 1); else rule.shifts.push(s);
+        renderScReqGrid();
+      });
+    });
+
+    /* 日期 全选 / 清空 */
+    const allDatesBtn = card.querySelector('[data-act="all-dates"]');
+    if (allDatesBtn) allDatesBtn.addEventListener('click', () => {
+      rule.dates = cycleDates.slice(); renderScReqGrid();
+    });
+    const clrDatesBtn = card.querySelector('[data-act="clear-dates"]');
+    if (clrDatesBtn) clrDatesBtn.addEventListener('click', () => {
+      rule.dates = []; renderScReqGrid();
+    });
+
+    /* 班次 全选 / 清空 */
+    const allShiftsBtn = card.querySelector('[data-act="all-shifts"]');
+    if (allShiftsBtn) allShiftsBtn.addEventListener('click', () => {
+      rule.shifts = pool.slice(); renderScReqGrid();
+    });
+    const clrShiftsBtn = card.querySelector('[data-act="clear-shifts"]');
+    if (clrShiftsBtn) clrShiftsBtn.addEventListener('click', () => {
+      rule.shifts = []; renderScReqGrid();
+    });
+
+    /* 每天最多（不重渲，只改数据） */
+    const maxInp = card.querySelector('input[data-act="max"]');
+    if (maxInp) {
+      maxInp.addEventListener('change', () => {
+        const v = parseFloat(maxInp.value);
+        rule.max = (isFinite(v) && v >= 0) ? v : null;
+      });
+    }
+
+    /* 确认 */
+    const okBtn = card.querySelector('[data-act="confirm"]');
+    if (okBtn) okBtn.addEventListener('click', () => {
+      if (rule.dates.length === 0 || rule.shifts.length === 0) {
+        toast('请至少选择 1 个生效日期 + 1 个限制班次');
+        return;
+      }
+      rule.confirmed = true;
+      renderScReqGrid();
+    });
+
+    /* 删除 */
+    const delBtn = card.querySelector('[data-act="delete"]');
+    if (delBtn) delBtn.addEventListener('click', () => {
+      if (!confirm('确定删除「规则 #' + (idx + 1) + '」？')) return;
+      rules.splice(idx, 1);
+      renderScReqGrid();
     });
   });
 }
@@ -1954,7 +2109,9 @@ async function scCopyMarkdown() {
     bind('btnScExport', scExportXlsx);
     bind('btnScCopy', scCopyMarkdown);
     bind('btnScClear', () => {
-      S.shiftPool = []; S.shiftReqs = {}; S.scheduleResult = [];
+      S.shiftPool = []; S.shiftReqs = {};
+      S.shiftReqRules = { '买手合作': [], '博主合作': [] };
+      S.scheduleResult = [];
       S.parsedRequests = {}; S.scheduleDiag = {};
       /* ★ 同时清除所有业务线的独立班次池 */
       if (S.shiftPoolByBiz) {
@@ -2042,10 +2199,26 @@ function scSetShiftReq(biz, shift, kind, n) {
   if (!S.shiftReqs[biz][shift]) S.shiftReqs[biz][shift] = { weekday: null, weekend: null };
   S.shiftReqs[biz][shift][kind] = (n === '' || n == null) ? null : Number(n);
 }
+/* 单班次需求上限（新规则模式）：
+   · 遍历该业务线的所有规则，找匹配 (date, shift) 的规则
+   · 若任一规则匹配且 max 有值 → 取「最小上限」（多规则同时命中时最严格者生效）
+   · 若匹配但 max 为空 → 无限制（返回 null）
+   · 若无规则匹配 → 无限制（返回 null） */
 function scGetShiftReq(biz, shift, date) {
-  const r = S.shiftReqs[biz] && S.shiftReqs[biz][shift];
-  if (!r) return null;
-  return scIsWeekend(date) ? r.weekend : r.weekday;
+  const rules = (S.shiftReqRules && S.shiftReqRules[biz]) || [];
+  let matched = false;
+  let minCap = null;
+  for (const r of rules) {
+    if (!Array.isArray(r.dates)  || r.dates.indexOf(date) < 0)   continue;
+    if (!Array.isArray(r.shifts) || r.shifts.indexOf(shift) < 0) continue;
+    matched = true;
+    const cap = Number(r.max);
+    if (isFinite(cap) && cap >= 0) {
+      if (minCap == null || cap < minCap) minCap = cap;
+    }
+  }
+  if (!matched) return null;
+  return minCap;
 }
 
 /* ==================== 时段需求量（H6 用） ==================== */

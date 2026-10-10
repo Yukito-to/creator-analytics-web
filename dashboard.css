@@ -893,6 +893,51 @@ tbody tr:active td:first-child { background: #FAFAF7; }
   font-size: 13px; color: var(--text); margin: 16px 0 8px; font-weight: 600;
 }
 
+/* ==================== 智能排班 · 班次需求规则卡片 ==================== */
+.sc-req-cards { display: flex; flex-direction: column; gap: 10px; }
+.sc-req-card {
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  background: #FFFFFF;
+  padding: 12px 14px;
+}
+.sc-req-card-head {
+  display: flex; align-items: center; gap: 8px;
+  padding-bottom: 10px;
+  border-bottom: 1px dashed var(--border);
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+.sc-req-card-section { margin-bottom: 10px; }
+.sc-req-card-section:last-child { margin-bottom: 0; }
+.sc-req-card-label {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--text-2);
+  font-weight: 500;
+  flex-wrap: wrap;
+}
+.sc-req-card-label .btn.sm {
+  padding: 2px 8px;
+  font-size: 11px;
+  min-height: 22px;
+  line-height: 1;
+}
+.sc-req-card input[type="number"] {
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-xs);
+  padding: 6px 8px;
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+  background: #FFFFFF;
+  text-align: right;
+  -webkit-appearance: none; appearance: none;
+}
+.sc-req-card input[type="number"]:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(152,168,206,.12);
+}
+
 /* 图例 */
 .sc-legend { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-left: 6px; }
 .sc-legend span { font-size: 11.5px; color: var(--text-2); display: inline-flex; align-items: center; gap: 4px; }

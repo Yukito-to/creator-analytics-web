@@ -639,7 +639,16 @@ const S = {
   scBizState:     '买手合作',     // ★ 当前正在配置的业务线
   shiftPoolByBiz: { '买手合作': [], '博主合作': [] },  // ★ 按业务线独立保存的班次池
   shiftPool:      [],   // 兼容字段：始终指向 shiftPoolByBiz[scBizState]（见下方 IIFE 初始化）
-  shiftReqs:      {},   // {biz: {shift: {weekday:N, weekend:N}}}   N=null 表示无限制
+  shiftReqs:      {},   // 旧结构，保留兼容；新逻辑用 shiftReqRules
+  shiftReqRules:  { '买手合作': [], '博主合作': [] },  // ★ 新结构：规则列表（见下方注释）
+  /*
+    shiftReqRules[biz] = [
+      { dates: ['2026-10-12', ...],   // 生效日期
+        shifts: ['B1','B2', ...],      // 限制班次
+        max: 3 | null,                 // 每天最多人数；null = 无限制
+        confirmed: false }             // 是否已点"确认"（仅影响警告条显示）
+    ]
+  */
   employeeCPH:    {},   // {name: {'9':cph, '10':cph, ...}}
   employeeCPHAuto: {},   // 默认自动 CPH（供 CPH 表与「恢复」复位使用） /* 推断 */
   employeeCPHDaily: {},   // 记录每个员工每天的实际 CPH（当日 CASE / 8） /* 推断 */
@@ -2488,6 +2497,11 @@ function formatForecastAiContext(ctx) {
   if (!S.shiftPoolByBiz) S.shiftPoolByBiz = { '买手合作': [], '博主合作': [] };
   if (!Array.isArray(S.shiftPoolByBiz[S.scBizState])) S.shiftPoolByBiz[S.scBizState] = [];
   S.shiftPool = S.shiftPoolByBiz[S.scBizState];
+
+  if (!S.shiftReqRules) S.shiftReqRules = { '买手合作': [], '博主合作': [] };
+  for (const b of ['买手合作', '博主合作']) {
+    if (!Array.isArray(S.shiftReqRules[b])) S.shiftReqRules[b] = [];
+  }
 })();
 
 /* ============================================================

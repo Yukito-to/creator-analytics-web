@@ -635,6 +635,7 @@ const S = {
   shiftPeriods:   {},   // {shift: {'9':60, '10':0, ...}}   只在分钟数>0 时写入，缺省=0
   shiftMeta:      {},   // {shift: {totalMin, restDays, startTime, endTime, mealTime}}
   scheduleCycle:  { start:'', end:'', reqStart:'', reqEnd:'' },
+  scCycleLocked:  false,          // ★ 用户是否手动改过排班周期
   shiftPool:      [],   // 用户勾选的可用班次
   shiftReqs:      {},   // {biz: {shift: {weekday:N, weekend:N}}}   N=null 表示无限制
   employeeCPH:    {},   // {name: {'9':cph, '10':cph, ...}}

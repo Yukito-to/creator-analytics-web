@@ -1284,6 +1284,10 @@ function bindEvents() {
     S.forecastBuyer = {}; S.forecastBlogger = {};
     S.volumeForecast = {};
     S.scheduleDates = []; S.month = ''; S.latestDate = ''; S.latestWK = 0;
+    /* ★ 排班周期也一并重置（含锁定标记 / localStorage） */
+    S.scheduleCycle = { start: '', end: '', reqStart: '', reqEnd: '' };
+    S.scCycleLocked = false;
+    try { localStorage.removeItem('creator_sc_cycle'); } catch (_) {}
     S.expandedRows = new Set();
     const ds = $('#dataStatus'); if (ds) { ds.textContent = '未导入'; ds.classList.remove('pill-on'); ds.classList.add('pill-off'); }
     const pw = $('#progressWrap'); if (pw) pw.classList.add('hidden');

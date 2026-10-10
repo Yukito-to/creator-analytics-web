@@ -653,20 +653,34 @@ let scReqBizState = '买手合作';   // 需求表当前业务线
 
 function renderSchedulePanel() {
   let c = scGetCycle();
-  if (!c.start) {
+  const cHint = document.getElementById('scCycleHint');
+
+  /* ★ 自动推断的两个前置条件：
+       ① 用户从未手动改过周期（S.scCycleLocked === false）
+       ② 当前周期还没有值（c.start 为空）
+     这样用户手动改过之后，刷新页面也不会被自动推断覆盖。 */
+  if (!c.start && !S.scCycleLocked) {
     const inferred = (typeof scInferCycleFromDraft === 'function')
       ? scInferCycleFromDraft() : null;
     if (inferred) {
-      scSetCycle({ start: inferred.start, end: inferred.end });
-      console.log('[排班] 自动推断周期 →', inferred.start, '~', inferred.end,
-                  '（前置排班最后一天：' + inferred.lastDraftDate + '）');
+      scSetCycle({ start: inferred.start, end: inferred.end });   // 不写盘
+      if (cHint) {
+        cHint.innerHTML = '📌 已根据前置排班最后一天 <b>' + esc(inferred.lastDraftDate) +
+          '</b> 自动推断周期：<b>' + esc(inferred.start) + ' ~ ' + esc(inferred.end) +
+          '</b>（手动修改后即锁定）';
+      }
     } else if (S.latestDate) {
       scSetCycle({ start: S.latestDate, end: dateAdd(S.latestDate, 6) });
-      console.log('[排班] 回退到 latestDate →', S.latestDate);
+      if (cHint) {
+        cHint.innerHTML = '📌 已回退使用最新数据日期 <b>' + esc(S.latestDate) +
+          '</b> 作为周期起始日（手动修改后即锁定）';
+      }
     }
-    /* ★ scSetCycle 会重建 S.scheduleCycle 对象，必须重新取一次，
-       否则下面的 set() 读到的是旧引用（空值），输入框不会被填充。 */
     c = scGetCycle();
+  } else if (cHint) {
+    cHint.innerHTML = S.scCycleLocked
+      ? '🔒 排班周期已锁定（手动设置过），点「🎯 自动识别」重算或点「🔓 解锁」恢复自动识别。'
+      : '';
   }
   const set = (id, v) => {
     const el = document.getElementById(id);
@@ -684,8 +698,9 @@ function renderSchedulePanel() {
       const handler = () => {
         const s = (document.getElementById('scCycleStart') || {}).value || '';
         const e = (document.getElementById('scCycleEnd')   || {}).value || '';
-        scSetCycle({ start: s, end: e });
-        console.log('[排班] 周期已保存 →', s, '~', e);
+        /* ★ 用户手动改动 → 立即锁定（刷新页面也不会被自动推断覆盖） */
+        scSetCycle({ start: s, end: e }, { locked: true });
+        console.log('[排班] 周期已保存（已锁定）→', s, '~', e);
         renderSchedulePanel();
       };
       el.addEventListener('input',  handler);
@@ -701,8 +716,23 @@ function renderSchedulePanel() {
       const inferred = (typeof scInferCycleFromDraft === 'function')
         ? scInferCycleFromDraft() : null;
       if (!inferred) { toast('未找到前置排班记录，无法推断'); return; }
-      scSetCycle({ start: inferred.start, end: inferred.end });
-      toast('🎯 已识别：' + inferred.start + ' ~ ' + inferred.end);
+      /* ★ 用户主动要求重算 → 直接覆盖并保持锁定 */
+      scSetCycle({ start: inferred.start, end: inferred.end }, { locked: true });
+      toast('🎯 已识别：' + inferred.start + ' ~ ' + inferred.end + '（已锁定）');
+      renderSchedulePanel();
+    });
+  }
+
+  /* ★ 「🔓 解锁」：清除锁定 + 清空周期 → 下一帧触发自动推断 */
+  const btnUnlock = document.getElementById('scCycleUnlock');
+  if (btnUnlock && !btnUnlock._scBound) {
+    btnUnlock._scBound = true;
+    btnUnlock.addEventListener('click', () => {
+      if (!confirm('解锁后将清除当前周期，并恢复基于前置排班的自动识别。继续？')) return;
+      S.scCycleLocked = false;
+      S.scheduleCycle = { start: '', end: '', reqStart: '', reqEnd: '' };
+      try { localStorage.removeItem('creator_sc_cycle'); } catch (_) {}
+      toast('🔓 已解锁，恢复自动识别');
       renderSchedulePanel();
     });
   }
@@ -1742,24 +1772,68 @@ function scGetCycle() {
   return S.scheduleCycle || { start: '', end: '' };
 }
 
+/* ★ 周期 + 锁定状态持久化：只有「用户手动锁定 / 解锁」才写盘，
+     纯自动推断不写 —— 这样用户改了导入数据后能自动跟上新周期。 */
+function scPersistCycle() {
+  try {
+    localStorage.setItem('creator_sc_cycle', JSON.stringify({
+      cycle:  S.scheduleCycle || {},
+      locked: !!S.scCycleLocked
+    }));
+  } catch (_) {}
+}
+(function initScCycleStorage() {
+  try {
+    const raw = localStorage.getItem('creator_sc_cycle');
+    if (!raw) return;
+    const obj = JSON.parse(raw);
+    if (!obj || typeof obj !== 'object') return;
+    if (obj.cycle) {
+      S.scheduleCycle = Object.assign(
+        { start: '', end: '', reqStart: '', reqEnd: '' }, obj.cycle
+      );
+    }
+    S.scCycleLocked = !!obj.locked;
+    console.log('[排班] 从本地恢复周期 →',
+                S.scheduleCycle.start || '（空）',
+                S.scheduleCycle.end   || '（空）',
+                '，锁定 =', S.scCycleLocked);
+  } catch (_) {}
+})();
+
+/* ★ 第二参数 opts.locked：
+     · 省略        → 只更新内存值，不改锁定状态，也不写盘（自动推断用）
+     · true/false  → 显式设置锁定状态，并写盘（用户操作时用） */
+function scSetCycle(c, opts) {
+  opts = opts || {};
+  S.scheduleCycle = Object.assign({ start: '', end: '' }, c || {});
+  if (opts.locked !== undefined) {
+    S.scCycleLocked = !!opts.locked;
+    scPersistCycle();
+  }
+}
+
 /* 从前置排班草稿推断周期：
-   起始 = 草稿里最后一个有班次的日期 + SC_CYCLE_START_OFFSET
-   结束 = 起始 + 6（默认 7 天周期） */
+   起始 = 草稿里最后一个「工作班次」日期 + SC_CYCLE_START_OFFSET
+   结束 = 起始 + 6（默认 7 天周期）
+
+   ★ 只考虑工作班次——「休 / 请假 / 放休 / 事假 / 病假...」等非工作班次，
+     很可能是员工为「新周期」提的休假诉求，不应该把边界推向未来。
+     例：前置排班最后一天是 2026-10-11 → 周期起始日 = 2026-10-12。
+     如果没有任何工作班次（比如草稿全是休），返回 null，交给上层兜底。 */
 function scInferCycleFromDraft() {
   if (!S.scheduleDraft || !S.scheduleDraft.length) return null;
-  let maxDate = '';
+  let maxWorkDate = '';
   for (const d of S.scheduleDraft) {
     if (!d.shift || !d.date) continue;
-    if (d.date > maxDate) maxDate = d.date;
+    if (!scIsWorkingShift(d.shift)) continue;   // ← 关键：跳过「休 / 请假」
+    if (d.date > maxWorkDate) maxWorkDate = d.date;
   }
-  if (!maxDate) return null;
-  const start = dateAdd(maxDate, SC_CYCLE_START_OFFSET);
+  if (!maxWorkDate) return null;
+  const start = dateAdd(maxWorkDate, SC_CYCLE_START_OFFSET);
   if (!start) return null;
-  const end = dateAdd(start, 6);   /* 7 天周期 */
-  return { start, end, lastDraftDate: maxDate };
-}
-function scSetCycle(c) {
-  S.scheduleCycle = Object.assign({ start: '', end: '' }, c || {});
+  const end = dateAdd(start, 6);
+  return { start, end, lastDraftDate: maxWorkDate };
 }
 function scSetShiftReq(biz, shift, kind, n) {
   if (!S.shiftReqs[biz]) S.shiftReqs[biz] = {};

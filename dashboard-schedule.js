@@ -23,32 +23,39 @@ function scIsLateShift(shift) {
   const meta = S.shiftMeta && S.shiftMeta[shift];
   return !!(meta && meta.isLate);
 }
-/* ★ 判断是否为「休息」班次：
-     ① 优先：S.shiftMeta 里 !isWorking 且 restDays > 0
-     ② 回退：班次 sheet 的「出勤计数」= 0（不计出勤 = 休）
-     ③ 兜底：班次 sheet 的「人力计数」= 0
-   注意：请假类（isLeaveShift）不重叠——请假 = 出勤 0 且 人力 0。 */
+/* ★ 判断是否为「休息」班次（出勤计数优先，与 scIsWorkingShift 对称）：
+     ① 权威：S.shiftAttn[shift] === 0 且 restDays > 0
+     ② 回退：S.shiftMeta[shift] 里 !isWorking 且 restDays > 0
+     ③ 兜底：S.shiftMap[shift] === 0
+   用于 renderScShiftPool 过滤「可排班次池」。 */
 function scIsRestShift(shift) {
+  if (S.shiftAttn && S.shiftAttn[shift] != null) {
+    if (S.shiftAttn[shift] > 0) return false;   // 有出勤 = 不是休息
+    /* 出勤 0，再看 restDays 区分「休假类」与「放休类」 */
+    const meta0 = S.shiftMeta && S.shiftMeta[shift];
+    return !!(meta0 && meta0.restDays > 0);
+  }
   const meta = S.shiftMeta && S.shiftMeta[shift];
   if (meta) return !meta.isWorking && meta.restDays > 0;
-  if (S.shiftAttn && S.shiftAttn[shift] != null) return S.shiftAttn[shift] === 0;
-  if (S.shiftMap  && S.shiftMap[shift]  != null) return S.shiftMap[shift]  === 0;
+  if (S.shiftMap && S.shiftMap[shift] != null) return S.shiftMap[shift] === 0;
   return false;
 }
 function scIsLeaveShift(shift) {
   const meta = S.shiftMeta && S.shiftMeta[shift];
   return !!(meta && !meta.isWorking && meta.restDays === 0);
 }
-/* ★ 判断班次是否为「工作班次」（三档回退）：
-     ① 优先：S.shiftMeta[shift].isWorking（来自「班次时段」sheet）
-     ② 回退：班次 sheet 的「出勤计数」列（column C）> 0
-     ③ 兜底：班次 sheet 的「人力计数」列（column B）> 0
-   这样即使没有「班次时段」sheet，也能正确区分工作 / 休息班次。 */
+/* ★ 判断班次是否为「工作班次」（三档判定，出勤计数优先）：
+     ① 权威：S.shiftAttn[shift]（「班次时段」sheet 的「出勤计数」列）> 0
+     ② 回退：S.shiftMeta[shift].isWorking（= 总计分钟 > 0）
+     ③ 兜底：S.shiftMap[shift]（「班次时段」sheet 的「人力计数」列）> 0
+
+   之所以「出勤计数」优先：用户明确指定「三倍出勤」的口径就是它，
+   它与「总计分钟」可能不一致（例如某班次总工时不记出勤）。 */
 function scIsWorkingShift(shift) {
+  if (S.shiftAttn && S.shiftAttn[shift] != null) return S.shiftAttn[shift] > 0;
   const meta = S.shiftMeta && S.shiftMeta[shift];
   if (meta) return !!meta.isWorking;
-  if (S.shiftAttn && S.shiftAttn[shift] != null) return S.shiftAttn[shift] > 0;
-  if (S.shiftMap  && S.shiftMap[shift]  != null) return S.shiftMap[shift]  > 0;
+  if (S.shiftMap && S.shiftMap[shift] != null) return S.shiftMap[shift] > 0;
   return false;
 }
 function scWeekdayOf(date) { return new Date(date + 'T00:00:00Z').getUTCDay(); }

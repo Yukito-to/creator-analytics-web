@@ -1094,6 +1094,10 @@ function parseShiftPeriodsSheet() {
   const idxStart = findCol(/上班时间/, 18);
   const idxEnd   = findCol(/下班时间/, 19);
   const idxMeal  = findCol(/就餐时间/, 20);
+  /* ★ 新增：出勤计数（V 列，用于三倍判定）
+           人力计数（W 列，用于 CPD 分母） */
+  const idxAttn    = findCol(/出勤计数/, 21);
+  const idxManpower = findCol(/人力计数/, 22);
 
   for (let r = 1; r < rows.length; r++) {
     const row = rows[r] || [];
@@ -1136,13 +1140,28 @@ function parseShiftPeriodsSheet() {
     const sM = /^(\d{1,2}):/.exec(startTime);
     if (sM) startHour = parseInt(sM[1], 10);
 
+    /* ★ 出勤计数（V 列）→ 三倍判定的权威依据
+       人力计数（W 列）→ CPD 分母的权威依据
+       两者独立于「总计」，即使总计 > 0 也允许「出勤计数 = 0」
+       （例如某种特殊班次上工时为零/不计出勤）。 */
+    const attn     = num(row[idxAttn]);
+    const manpower = num(row[idxManpower]);
+
     S.shiftMeta[shift] = {
       totalMin: effectiveMin,
       restDays: restDays > 0 ? restDays : 0,
       startTime, endTime, mealTime,
       isWorking, isLate, startHour,
       color: color || null,
+      /* ★ 一并写入 meta，便于后续统一读取 */
+      attn,
+      manpower,
     };
+
+    /* ★ 同步填充全局映射（CPD / 三倍 走这两个字段） */
+    S.shiftAttn[shift] = attn;
+    S.shiftMap[shift]  = manpower;
+    if (color) S.shiftColor[shift] = color;
   }
 }
 

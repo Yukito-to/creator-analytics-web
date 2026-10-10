@@ -293,10 +293,20 @@ function scHolidayStat(name) {
     if (meta && meta.restDays > 0) used += meta.restDays;
   }
 
+  /* ★ 规则匹配（≥ 语义）：
+       把启用的规则按「三倍天数」阈值【从高到低】排序，
+       取第一个满足 `tripleDays >= rule.triple` 的规则的可休天数。
+     例：规则表为 [≥3 → 休6] [≥2 → 休6] [≥1 → 休7] [≥0 → 休7]，
+         tripleDays=0 → 休7；=1 → 休7；=2 → 休6；=3 → 休6；=5 → 休6。 */
   let total = null;
-  for (const r of S.scHolidayRules) {
-    if (!r.enabled) continue;
-    if (Number(r.triple) === tripleDays) { total = Number(r.rest); break; }
+  const activeRules = S.scHolidayRules
+    .filter(r => r.enabled)
+    .map(r => ({ triple: Number(r.triple), rest: Number(r.rest) }))
+    .filter(r => isFinite(r.triple) && isFinite(r.rest))
+    .sort((a, b) => b.triple - a.triple);   // 降序
+
+  for (const r of activeRules) {
+    if (tripleDays >= r.triple) { total = r.rest; break; }
   }
 
   const remain = (total == null) ? null : Math.max(0, total - used);
@@ -1462,6 +1472,7 @@ function renderScTripleGrid() {
   /* 2. 逐月渲染整月 */
   let html = '';
   let totalCount = 0;
+  let selectedCount = 0;   /* ★ 本周期内的已选三倍日数 */
   for (const mo of months) {
     const [y, mm] = mo.split('-').map(Number);
     const daysInMonth = new Date(y, mm, 0).getDate();
@@ -1477,6 +1488,7 @@ function renderScTripleGrid() {
       const d = mo + '-' + String(i).padStart(2, '0');
       if (S.scTripleDates.has(d)) selCount++;
     }
+    selectedCount += selCount;   /* ★ 累计到周期内总数 */
 
     html += '<div class="sc-triple-month-block">';
     html += '<div class="sc-triple-month-title' + (open ? '' : ' collapsed') + '" data-month="' + esc(mo) + '">' +
@@ -1523,10 +1535,10 @@ function renderScTripleGrid() {
     });
   });
 
-  /* 3. 计数 */
+  /* 3. 计数：只统计周期覆盖月份内的已选数 */
   const cnt = document.getElementById('scTripleCount');
   const tot = document.getElementById('scTripleTotal');
-  if (cnt) cnt.textContent = S.scTripleDates.size;
+  if (cnt) cnt.textContent = selectedCount;   /* ★ 周期内计数，不再用 S.scTripleDates.size */
   if (tot) tot.textContent = totalCount;
 
   /* 4. 手动点选 */
@@ -1593,23 +1605,35 @@ function renderScTripleGrid() {
     } else if (act === 'none') {
       dates.forEach(d => S.scTripleDates.delete(d));
     } else if (act === 'auto') {
-      /* 优先：timor.tech wage=3（真·三倍工资日） */
+      const dateSet = new Set(dates);   // 本周期内的所有日期
+
+      /* ① 先尝试 timor.tech（wage=3），首次会拉取全年数据写入 S.scTripleDates */
       if (typeof initTimorTripleDays === 'function') {
         try { await initTimorTripleDays(); } catch (_) {}
       }
-      const beforeSize = S.scTripleDates.size;
-      dates.forEach(d => S.scTripleDates.add(d));
-      const added = S.scTripleDates.size - beforeSize;
-      if (added > 0) {
-        toast('🎆 已自动勾选 ' + added + ' 个三倍工资日（timor API）');
+
+      /* ② 统计 S.scTripleDates 中落在本周期内的三倍日数
+            ★ 不再无条件把所有 dates 塞进去——这是之前「全选」BUG 的根源 */
+      let inCycleCount = 0;
+      for (const d of dateSet) {
+        if (S.scTripleDates.has(d)) inCycleCount++;
+      }
+
+      if (inCycleCount > 0) {
+        toast('🎆 本周期内已勾选 ' + inCycleCount + ' 个三倍工资日（timor API）');
       } else {
-        /* 兜底：holiday-cn */
+        /* ③ timor 无数据 / 与本周期时间不重叠 → 回退 holiday-cn，只处理周期内日期 */
         const map = getHolidayMap();
         let n = 0;
         dates.forEach(d => {
-          if (map[d] === 'holiday' && !S.scTripleDates.has(d)) { S.scTripleDates.add(d); n++; }
+          if (map[d] === 'holiday' && !S.scTripleDates.has(d)) {
+            S.scTripleDates.add(d);
+            n++;
+          }
         });
-        toast('🎆 已自动勾选 ' + n + ' 个法定节假日（holiday-cn 兜底）');
+        toast(n > 0
+          ? '🎆 已自动勾选 ' + n + ' 个法定节假日（holiday-cn 兜底）'
+          : '未在本周期内匹配到三倍工资日或法定节假日');
       }
     }
 
@@ -1625,7 +1649,7 @@ function renderScRulesTable() {
   if (!tbl) return;
   const head = '<thead><tr>' +
     '<th style="width:80px">启用</th>' +
-    '<th>三倍天数 = X</th>' +
+    '<th>三倍天数 ≥ X</th>' +
     '<th>本月可休天数 Y</th>' +
     '<th style="width:100px">操作</th>' +
   '</tr></thead>';

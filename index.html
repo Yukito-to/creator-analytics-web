@@ -311,7 +311,7 @@
             <button id="scRulesReset" class="btn sm">↺ 恢复默认</button>
           </div>
           <p class="sc-grid-hint">
-            勾选法定节假日和对应三倍班次，配置「三倍天数 = X → 本月可休 Y 天」，系统自动统计每位员工的三倍天数并计算应休天数。
+            勾选法定节假日和对应三倍班次，配置「三倍天数 ≥ X → 本月可休 Y 天」（从高到低匹配，取第一个满足条件的规则），系统自动统计每位员工的三倍天数并计算应休天数。
           </p>
 
           <h4 class="sc-sub-h4">📅 法定节假日日期（勾选后计入三倍班）</h4>
@@ -323,10 +323,10 @@
           </div>
           <div id="scTripleDates"></div>
 
-          <h4 class="sc-sub-h4">📋 月度休假规则（三倍天数 = X 时本月可休 Y 天）</h4>
+          <h4 class="sc-sub-h4">📋 月度休假规则（三倍天数 ≥ X 时本月可休 Y 天）</h4>
           <table id="scRulesTable" class="sc-rules-table"></table>
           <button type="button" id="scRulesAdd" class="btn sm">+ 添加规则</button>
-          <p class="sc-rules-note">只对勾选的规则精确匹配「三倍天数 = X」；未匹配到任何规则的员工不计算应休。</p>
+          <p class="sc-rules-note">按「三倍天数」阈值从高到低匹配，取第一个满足 `三倍天数 ≥ X` 的规则；未匹配到任何规则的员工不计算应休。</p>
         </div>
 
         <!-- [7] 生成按钮 -->

@@ -165,32 +165,29 @@ function scHolidayStat(name) {
   let tripleDays = 0;
   let used = 0;
 
-  /* ★ 统计月份：优先取排班周期起始月，其次 S.month，最后空 = 统计全部 */
-  const cycle = (typeof scGetCycle === 'function') ? scGetCycle() : (S.scheduleCycle || {});
+  /* ★ 统计月 = 排班周期起始日所在月；无周期则回退 S.month */
+  const cycle = (typeof scGetCycle === 'function')
+    ? scGetCycle()
+    : (S.scheduleCycle || {});
   const statMonth = (cycle && cycle.start)
     ? cycle.start.slice(0, 7)
     : (S.month || '');
 
   for (const d of S.scheduleDraft) {
     if (d.name !== name) continue;
-
+    if (!d.shift) continue;
     /* ★ 月度过滤：只统计统计月内的日期 */
     if (statMonth && d.date.slice(0, 7) !== statMonth) continue;
 
-    const shift = d.shift;
-    if (!shift) continue;
+    /* 三倍天数：统计月内、在勾选节假日内、且排了工作班次 */
+    if (tripleSet.has(d.date) && scIsWorkingShift(d.shift)) tripleDays++;
 
-    /* 三倍天数：在勾选的节假日内，排了工作班次 */
-    if (tripleSet.has(d.date) && scIsWorkingShift(shift)) tripleDays++;
-
-    /* 已休：只读 sheet 的「休」列
-       短班（短）休=0.5 → +0.5；全班长 休=0 → +0；
-       放休/事假/病假/丧假/婚假 休=0 → +0；纯休 休=1 → +1 */
-    const meta = S.shiftMeta[shift];
+    /* 已休：只累计该班次「休」列对应的 restDays */
+    const meta = S.shiftMeta[d.shift];
     if (meta && meta.restDays > 0) used += meta.restDays;
   }
 
-  /* 按规则匹配可休天数：勾选且 triple 精确匹配 */
+  /* 可休天数：按启用的规则，精确匹配 tripleDays */
   let total = null;
   for (const r of S.scHolidayRules) {
     if (!r.enabled) continue;

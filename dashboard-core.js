@@ -1283,6 +1283,7 @@ function calcAllEmployeeCPH() {
     for (const d of S.scheduleDraft) {
       if (d.name !== e.name) continue;
       if (!scIsWorkingShift(d.shift)) continue;
+      if (!scIsActiveOn(e, d.date)) continue;   // ★
       const vol = vols[d.date] || 0;
       if (vol > 0) daily[d.date] = vol / 8;
     }

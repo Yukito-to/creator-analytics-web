@@ -101,6 +101,18 @@ function scDisplayDateRange(cycle) {
 }
 
 /* ==================== 员工池 ==================== */
+
+/* ★ 判断员工在指定日期是否在职：
+     · 无离职日期 → 全程在职
+     · 有离职日期 → 仅「离职日之前」的日期为在职（离职日当天起不排班） */
+function scIsActiveOn(empOrName, date) {
+  if (!date) return false;
+  const e = (typeof empOrName === 'string') ? getEmp(empOrName) : empOrName;
+  if (!e) return false;
+  if (!e.resignDate) return true;
+  return date < e.resignDate;
+}
+
 /* ★ 员工顺序：优先按「排班草稿表格」中出现顺序（= 员工行顺序）；
     草稿里没有、但花名册里符合条件的一线员工，追加在最后（保持 roster 顺序）。 */
 function scActiveEmployees() {
@@ -111,7 +123,7 @@ function scActiveEmployees() {
   const empMap = new Map();
   for (const e of (S.roster || [])) {
     if (!e.name) continue;
-    if (e.resignDate && start && e.resignDate < start) continue;
+    if (e.resignDate && start && e.resignDate <= start) continue;   // 离职日 <= 周期起始日 → 全周期不参与
     if (!/一线/.test(e.attr || '')) continue;
     empMap.set(e.name, e);
   }
@@ -235,6 +247,7 @@ function scHolidayStat(name) {
   }
 
   for (const d of monthDates) {
+    if (!scIsActiveOn(name, d)) continue;   // ★ 离职日及之后不计入休假统计
     const shift = scEffectiveShift(name, d);
     if (!shift) continue;
 
@@ -291,6 +304,7 @@ function generateSchedule() {
   for (const e of scActiveEmployees()) {
     locked[e.name] = {};
     for (const d of dates) {
+      if (!scIsActiveOn(e, d)) continue;   // ★ 离职日及之后不参与预锁定
       const s = scEffectiveShift(e.name, d);
       if (s) locked[e.name][d] = s;
     }
@@ -350,6 +364,7 @@ function scDoAssign(ctx, date, e, shift, biz) {
 
 function scApplyLocks(ctx, date) {
   for (const e of scActiveEmployees()) {
+    if (!scIsActiveOn(e, date)) continue;   // ★
     const s = ctx.locked[e.name] && ctx.locked[e.name][date];
     if (s) scDoAssign(ctx, date, e, s, '');
   }
@@ -381,6 +396,7 @@ function scAssignBizDay(ctx, date, biz, candidates) {
 
 /* 硬约束校验（H2 only / H3 not / H4 连续工作 ≤6） */
 function scCanAssign(ctx, e, date, shift) {
+  if (!scIsActiveOn(e, date)) return false;   // ★ 离职日及之后一律不排
   if (!scRequestsAllow(ctx, e.name, shift)) return false;
   if ((ctx.workStreak[e.name] || 0) >= SC_MAX_STREAK) return false;   // H4
   /* ★ 员工诉求里明确指定该日休假 → 禁止安排任何工作班次 */
@@ -534,6 +550,7 @@ function scDefaultRestShift() {
 function scFillRest(ctx, date) {
   const def = scDefaultRestShift();
   for (const e of scActiveEmployees()) {
+    if (!scIsActiveOn(e, date)) continue;   // ★ 离职日及之后不填「默认休」
     if (ctx.assigned[date][e.name]) continue;
     ctx.assigned[date][e.name] = def;
   }
@@ -542,6 +559,12 @@ function scFillRest(ctx, date) {
 /* 更新昨日班次与连续工作天数（供次日打分/硬约束用） */
 function scUpdateStreak(ctx, date) {
   for (const e of scActiveEmployees()) {
+    /* ★ 离职日及之后：清零连续工作天数与上次班次，避免污染后续日期的打分 */
+    if (!scIsActiveOn(e, date)) {
+      ctx.workStreak[e.name] = 0;
+      ctx.lastShift[e.name]  = '';
+      continue;
+    }
     const s = ctx.assigned[date] && ctx.assigned[date][e.name];
     if (s && scIsWorkingShift(s)) ctx.workStreak[e.name] = (ctx.workStreak[e.name] || 0) + 1;
     else ctx.workStreak[e.name] = 0;
@@ -592,6 +615,7 @@ function scRebalanceLateShifts(ctx) {
       if (!sa || !sb) continue;
       if (!scIsWorkingShift(sa) || !scIsWorkingShift(sb)) continue;
       if (ctx.locked[pa.name][d] || ctx.locked[pb.name][d]) continue;
+      if (!scIsActiveOn(pa, d) || !scIsActiveOn(pb, d)) continue;   // ★
       if (!scRequestsAllow(ctx, pa.name, sb) || !scRequestsAllow(ctx, pb.name, sa)) continue;
       ctx.assigned[d][pa.name] = sb;
       ctx.assigned[d][pb.name] = sa;
@@ -630,6 +654,7 @@ function scRebalanceRestDays(ctx) {
       if (!sa || !sb) continue;
       if (!scIsWorkingShift(sa) || scIsWorkingShift(sb)) continue;   // a 工作、b 休息才可对调
       if (ctx.locked[pa.name][d] || ctx.locked[pb.name][d]) continue;
+      if (!scIsActiveOn(pa, d) || !scIsActiveOn(pb, d)) continue;   // ★
       if (!scRequestsAllow(ctx, pa.name, sb) || !scRequestsAllow(ctx, pb.name, sa)) continue;
       ctx.assigned[d][pa.name] = sb;
       ctx.assigned[d][pb.name] = sa;
@@ -942,6 +967,11 @@ function renderScCphGrid() {
         ' title="生效值（排班算法使用）：留空 = 自动值 = 日 CPD 前三均值 / 8；手动填写后持久保存">' +
       '</td>';
     for (const d of dates) {
+      /* ★ 离职日及之后：显示淡色占位符 */
+      if (!scIsActiveOn(e, d)) {
+        html += '<td style="text-align:center;color:#E5E1DA">·</td>';
+        continue;
+      }
       const v = daily[d];
       const txt = (v > 0) ? v.toFixed(2) : '—';
       const color = (v > 0) ? '#333' : '#C0BDB5';
@@ -1146,6 +1176,12 @@ function renderScGrid() {
     ].join('');
 
     const dayTds = dates.map((d, ci) => {
+      /* ★ 离职日及之后：单元格留空（不显示前置班次 / 不休假标注） */
+      if (!scIsActiveOn(e, d)) {
+        return '<td class="sc-grid-cell empty" data-r="' + ri + '" data-c="' + ci +
+               '" data-name="' + esc(e.name) + '" data-date="' + d + '"></td>';
+      }
+
       const s = (resultMap[e.name] && resultMap[e.name][d]) ||
                 (draftMap[e.name]  && draftMap[e.name][d])   || '';
       const meta = s ? S.shiftMeta[s] : null;

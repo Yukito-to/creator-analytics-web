@@ -43,6 +43,60 @@ function scDatesBetween(a, b) {
   return out;
 }
 
+/* ============================================================
+   排班表 · 展示日期范围（仅用于表格展示，不参与排班计算）
+   规则：
+     起点 = min(周期起始日 − 7 天, 周期起始日所在月的 1 号)
+     终点 = 周期结束日（不再到月末）
+
+   即：
+     · 起始日往前推 7 天跨月 → 起点 = 往前推 7 天那天
+     · 起始日往前推 7 天同月 → 起点 = 起始月 1 号
+     · 终点 = 周期结束日
+
+   示例：
+     9/28 – 10/4   → 9/1  ~ 10/4
+     10/5 – 10/11  → 9/28 ~ 10/11
+     10/12 – 10/18 → 10/1 ~ 10/18
+     10/12 – 10/25 → 10/1 ~ 10/25
+
+   说明：
+     起始日之前的日期即「前置已排班次 / 历史班次」；
+     用户可点「📦 折叠历史列」按钮一键折叠（由 renderScGrid 里
+     S.scCollapseHist 通过 dates.filter(d => d >= cycle.start) 实现）。
+
+   注意：scDatesBetween 仍被生成/导出/复制等逻辑复用（那些必须是
+   真实周期），因此这里独立实现，不改动 scDatesBetween。
+   ============================================================ */
+function scDisplayDateRange(cycle) {
+  const out = { dates: [], isCrossMonth: false };
+  if (!cycle || !cycle.start || !cycle.end) return out;
+
+  const startMonth = cycle.start.slice(0, 7);   // 'YYYY-MM'
+  const endMonth   = cycle.end.slice(0, 7);
+
+  if (startMonth !== endMonth) out.isCrossMonth = true;
+
+  /* ---- 1. 起点 = min(起始日 − 7 天, 起始月 1 号) ---- */
+  const startMonthFirst = startMonth + '-01';
+  const minus7 = dateAdd(cycle.start, -7);   // 依赖 core 里的 dateAdd
+
+  let beginDate = (minus7 && minus7 < startMonthFirst) ? minus7 : startMonthFirst;
+  if (!beginDate) beginDate = startMonthFirst;
+
+  /* ---- 2. 终点 = 周期结束日（不再延伸到月末） ---- */
+  const endDate = cycle.end;
+
+  /* ---- 3. 逐日生成 ---- */
+  let d = beginDate;
+  let guard = 0;
+  while (d && d <= endDate && guard++ < 400) {
+    out.dates.push(d);
+    d = dateAdd(d, 1);
+  }
+  return out;
+}
+
 /* ==================== 员工池 ==================== */
 function scActiveEmployees() {
   const c = scGetCycle();
@@ -837,9 +891,12 @@ function renderScGrid() {
   const tbl = document.getElementById('scGridTable');
   if (!tbl) return;
 
-  /* 日期范围：默认 = S.scheduleCycle；可选折叠历史（周期起始日前不显示） */
+  /* 日期范围：默认 = 展示范围（min(起始日-7, 起始月1号) ~ 结束日）；
+     可选折叠历史（周期起始日前不显示）。
+     注意：这里用 scDisplayDateRange 而非 scDatesBetween，
+     后者被生成/导出/复制复用，必须是真实周期。 */
   const c = scGetCycle();
-  let dates = scDatesBetween(c.start, c.end);
+  let dates = scDisplayDateRange(c).dates;
   if (!dates.length && S.scheduleDraft.length) {
     /* 兜底：用草稿里所有日期 */
     const set = new Set(S.scheduleDraft.map(d => d.date));

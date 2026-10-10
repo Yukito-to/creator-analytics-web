@@ -179,7 +179,7 @@ function refreshAll() {
   renderS30();
   renderAHT2();
   renderSLA();
-  renderAttendance();
+  /* ★ 出勤看板已融合到员工看板，renderPerson 内部会联动 */
   renderReport();
   /* 时段预测若当前可见，也刷新（函数在 dashboard-forecast.js） */
   const fcView = document.getElementById('view-forecast');
@@ -362,6 +362,8 @@ function renderOverview() {
 }
 
 /* ==================== 员工看板 ==================== */
+const PE_ATT_KEY = '__attendance__';
+
 function refreshPersonOptions() {
   const em = ensureChipContainer('peMetric');
   if (!em) return;
@@ -370,10 +372,16 @@ function refreshPersonOptions() {
   selected.delete('s30Rate');
   if (selected.size === 0 && personMetrics.length > 0) selected.add(personMetrics[0].key);
 
-  em.innerHTML = personMetrics.map(m =>
+  const metricChips = personMetrics.map(m =>
     '<span class="chip' + (selected.has(m.key) ? ' on' : '') +
     '" data-val="' + esc(m.key) + '">' + esc(metricLabel(m)) + '</span>'
   ).join('');
+
+  const attChip = '<span class="chip' + (selected.has(PE_ATT_KEY) ? ' on' : '') +
+    '" data-val="' + PE_ATT_KEY +
+    '" style="border-left:2px solid #7B8FBF">🗓 出勤</span>';
+
+  em.innerHTML = metricChips + attChip;
 
   em.querySelectorAll('.chip').forEach(ch => {
     ch.addEventListener('click', () => {
@@ -415,9 +423,21 @@ function renderPersonBody(src, emps) {
   const el = $('#peBody');
   if (!el) return;
   const names = Array.from(S.personSel).filter(n => emps.some(e => e.name === n));
-  if (!names.length) { el.innerHTML = '<p class="muted">请选择员工。</p>'; return; }
-  const metricKeys = getCheckedValues('#peMetric').filter(k => k !== 's30Rate');
-  if (!metricKeys.length) { el.innerHTML = '<p class="muted">请至少选择一个指标。</p>'; return; }
+  if (!names.length) {
+    el.innerHTML = '<p class="muted">请选择员工。</p>';
+    renderPersonAttCalendar([]);
+    return;
+  }
+
+  const allSel = getCheckedValues('#peMetric');
+  const showAtt = allSel.indexOf(PE_ATT_KEY) >= 0;
+  const metricKeys = allSel.filter(k => k !== 's30Rate' && k !== PE_ATT_KEY);
+
+  if (!metricKeys.length && !showAtt) {
+    el.innerHTML = '<p class="muted">请至少选择一个指标。</p>';
+    renderPersonAttCalendar([]);
+    return;
+  }
   const rows = [];
   for (const n of names) {
     for (const mk of metricKeys) {
@@ -432,6 +452,7 @@ function renderPersonBody(src, emps) {
       rows.push(rowHTMLSrcToggle(n + ' · ' + metricLabel(metric), src, metric, opts, bg, key, expanded, labelHtml));
       if (expanded) { const ex = renderExpandRows(src, opts, mk, key); for (const r of ex) rows.push(r); }
     }
+    if (showAtt) rows.push(rowHTMLAttendance(n));
   }
   const cols = timeCols();
   el.innerHTML = '<table><thead><tr><th>员工 / 指标</th>' +
@@ -443,6 +464,128 @@ function renderPersonBody(src, emps) {
       const key = sp.dataset.key;
       if (S.expandedRows.has(key)) S.expandedRows.delete(key); else S.expandedRows.add(key);
       renderPersonBody(src, emps);
+    });
+  });
+
+  renderPersonAttCalendar(showAtt ? names : []);
+}
+
+/* 出勤行：与现有时序表头对齐 */
+function rowHTMLAttendance(name) {
+  const cols = timeCols();
+  let monthTotal = 0;
+  if (S.month) {
+    const [y, m] = S.month.split('-').map(Number);
+    const daysInMonth = new Date(y, m, 0).getDate();
+    for (let i = 1; i <= daysInMonth; i++) monthTotal += attOf(name, S.month + '-' + pad2(i));
+  }
+  const wkTotals = cols.wks.map(w => {
+    let sum = 0;
+    for (let i = 0; i < 7; i++) {
+      const d = dateAdd(wkStartDate(w), i);
+      if (d) sum += attOf(name, d);
+    }
+    return sum;
+  });
+  const dayTotals = cols.last7.map(d => attOf(name, d));
+
+  const emp = getEmp(name);
+  const grp = emp ? (emp.group || '—') : '—';
+  const labelHtml =
+    '<span class="row-name">' + esc(name) + ' · ' + esc(grp) + '</span>' +
+    '<span class="row-metric">🗓 出勤天数</span>';
+
+  const bgStyle = ' style="background:#F0F4FA"';
+  const tds = [
+    '<td' + bgStyle + '><div class="row-label-stack" style="padding-left:2px">' + labelHtml + '</div></td>',
+    '<td' + bgStyle + '>' + monthTotal.toFixed(2) + '</td>',
+    ...wkTotals.map(v => '<td' + bgStyle + '>' + v.toFixed(2) + '</td>'),
+    '<td' + bgStyle + '>' + diffInt(wkTotals[1], wkTotals[0]) + '</td>',
+    '<td' + bgStyle + '>' + diffInt(wkTotals[2], wkTotals[1]) + '</td>',
+    ...dayTotals.map(v => '<td' + bgStyle + '>' + v.toFixed(2) + '</td>')
+  ];
+  return '<tr>' + tds.join('') + '</tr>';
+}
+
+/* 出勤日历：可折叠，只在勾选「🗓 出勤」时显示 */
+function renderPersonAttCalendar(names) {
+  const el = $('#peAttCalendar');
+  if (!el) return;
+  if (!names || !names.length || !S.month) {
+    el.classList.add('hidden');
+    el.innerHTML = '';
+    return;
+  }
+  el.classList.remove('hidden');
+
+  const blocks = [];
+  for (const name of names) {
+    const emp = getEmp(name);
+    if (!emp) continue;
+    const [y, m] = S.month.split('-').map(Number);
+    const daysInMonth = new Date(y, m, 0).getDate();
+    const days = [];
+    for (let i = 1; i <= daysInMonth; i++) days.push(S.month + '-' + pad2(i));
+
+    let monthTotal = 0;
+    for (const d of days) monthTotal += attOf(name, d);
+
+    const lastWK = S.latestWK || 1;
+    const wkList = [lastWK - 2, lastWK - 1, lastWK];
+    const wkTotals = wkList.map(w => {
+      let sum = 0;
+      for (const d of days) if (wkOf(d) === w) sum += attOf(name, d);
+      return { w, total: sum };
+    });
+
+    const dayCards = days.map(d => {
+      const v = attOf(name, d);
+      const shift = (S.schedule[name] || {})[d] || '';
+      const ov = S.attOverride[name] && S.attOverride[name][d] !== undefined;
+      return '<div class="att-day"><div class="d">' + d.slice(5) + '</div>' +
+        '<input type="number" inputmode="decimal" step="0.01" min="0" max="1" value="' + v.toFixed(2) +
+          '" data-name="' + esc(name) + '" data-d="' + d + '">' +
+        '<div class="shift">' + esc(shift) + (ov ? ' ✎' : '') + '</div></div>';
+    }).join('');
+
+    const ovCount = (S.attOverride[name] ? Object.keys(S.attOverride[name]).length : 0);
+
+    blocks.push(
+      '<details style="margin-bottom:8px;border:1px solid var(--border);border-radius:8px;background:#FAF9F7">' +
+        '<summary style="cursor:pointer;padding:8px 12px;font-size:12.5px;font-weight:600;' +
+          'color:#33333D;user-select:none;outline:none;display:flex;align-items:center;gap:8px">' +
+          '<span>👤 ' + esc(name) + '</span>' +
+          '<span style="font-weight:400;color:#77778A;font-size:11.5px">' +
+            '月度 ' + monthTotal.toFixed(2) + ' 天 · ' +
+            wkTotals.map(x => 'WK' + x.w + ' ' + x.total.toFixed(2)).join(' · ') +
+            (ovCount ? ' · <span style="color:#E8A33E">✎ ' + ovCount + ' 处手动调整</span>' : '') +
+          '</span>' +
+        '</summary>' +
+        '<div style="padding:8px 12px 12px">' +
+          '<div class="att-day-grid">' + dayCards + '</div>' +
+        '</div>' +
+      '</details>'
+    );
+  }
+
+  el.innerHTML = '<div class="card" style="margin-bottom:0;padding:12px 14px">' +
+    '<h3 class="sub-title" style="margin:0 0 8px">🗓 当月每日出勤（展开调整 0~1）</h3>' +
+    blocks.join('') +
+  '</div>';
+
+  el.querySelectorAll('.att-day input').forEach(inp => {
+    inp.addEventListener('change', () => {
+      const nm = inp.dataset.name;
+      const d  = inp.dataset.d;
+      let v = parseFloat(inp.value);
+      if (isNaN(v)) v = 0;
+      v = Math.max(0, Math.min(1, v));
+      v = Math.round(v * 100) / 100;
+      inp.value = v.toFixed(2);
+      if (!S.attOverride[nm]) S.attOverride[nm] = {};
+      S.attOverride[nm][d] = v;
+      persistMemo();
+      renderPerson();
     });
   });
 }

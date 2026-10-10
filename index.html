@@ -35,7 +35,6 @@
   <button data-view="s30">📞 30S</button>
   <button data-view="aht2">📈 AHT</button>
   <button data-view="sla">🎯 达成SLA</button>
-  <button data-view="attendance">🗓 出勤</button>
   <button data-view="forecast">🔮 时段预测</button>
   <button data-view="schedule">🧠 排班</button>
   <button data-view="report">📄 周报</button>
@@ -112,6 +111,7 @@
       </div>
       <div id="peNames" class="chips"></div>
       <div id="peBody" class="table-scroll"></div>
+      <div id="peAttCalendar" class="hidden" style="margin-top:12px"></div>
     </div>
   </section>
 
@@ -173,18 +173,6 @@
         </div>
       </div>
       <div id="slaBody"></div>
-    </div>
-  </section>
-
-  <section id="view-attendance" class="view">
-    <div class="card">
-      <div class="card-head">
-        <h2>出勤看板 <span class="help" data-tip="日度出勤可手动调整 0~1。">?</span></h2>
-        <div class="head-controls">
-          <label>员工 <select id="attName"></select></label>
-        </div>
-      </div>
-      <div id="attBody"></div>
     </div>
   </section>
 

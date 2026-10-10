@@ -1232,14 +1232,7 @@ function initSelects() {
     if (cur && wks.some(w => String(w) === cur)) rpWK.value = cur;
     else if (wks.length) rpWK.value = String(wks[wks.length - 1]);
   }
-  const att = $('#attName');
-  if (att) {
-    const cur = att.value;
-    const emps = S.roster.filter(e => /一线/.test(e.attr || ''));
-    if (emps.length) att.innerHTML = emps.map(e => '<option value="' + esc(e.name) + '">' + esc(e.name) + '</option>').join('');
-    else att.innerHTML = '<option value="">暂无一线员工</option>';
-    if (cur && emps.some(e => e.name === cur)) att.value = cur;
-  }
+  /* ★ 出勤看板融合到员工看板后，不再需要独立的员工下拉 */
   refreshPersonOptions();
   refreshTeamOptions();
   renderTargetConfig();
@@ -1304,7 +1297,7 @@ function bindEvents() {
     const s3b = $('#s30Body'); if (s3b) s3b.innerHTML = '';
     const a2 = $('#a2Body'); if (a2) a2.innerHTML = '';
     const sl = $('#slaBody'); if (sl) sl.innerHTML = '';
-    const at = $('#attBody'); if (at) at.innerHTML = '';
+    const atCal = $('#peAttCalendar'); if (atCal) { atCal.innerHTML = ''; atCal.classList.add('hidden'); }
     const fc = $('#fcResult'); if (fc) fc.innerHTML = '';
     const fn = $('#fcNotes'); if (fn) fn.innerHTML = '';
     const fa = $('#fcAiOut'); if (fa) { fa.style.display = 'none'; fa.innerHTML = ''; }
@@ -1347,7 +1340,7 @@ function bindEvents() {
   on('#a2Biz', 'change', renderAHT2);
   on('#slaBiz', 'change', renderSLA);
   on('#s30Biz', 'change', renderS30);
-  on('#attName', 'change', renderAttendance);
+  /* ★ 出勤看板已融合到员工看板，「#attName」下拉移除 */
   on('#rpBiz', 'change', () => { renderTargetConfig(); renderReport(); });
   on('#rpWK', 'change', renderReport);
   on('#btnRpCopy', 'click', copyReport);

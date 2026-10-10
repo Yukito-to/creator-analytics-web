@@ -143,6 +143,28 @@ function scSameAsTarget(ctx, name) {
   }
   return null;
 }
+/* 判断某员工某日期是否有 leave_on 诉求（明确的休假日期）。
+   注意：与下方 renderScGrid 附近已存在的 isLeaveRequest() 语义完全一致，
+   此处保留独立命名以便排班约束逻辑语义自解释；isLeaveRequest 仍供渲染层使用。 */
+function scHasLeaveOn(name, date) {
+  const req = (S.parsedRequests || {})[name];
+  if (!req || !req.items) return false;
+  for (const it of req.items) {
+    if (it.type === 'leave_on'
+        && Array.isArray(it.dates)
+        && it.dates.indexOf(date) >= 0) return true;
+  }
+  return false;
+}
+
+/* 返回某员工某日期的「有效班次」：
+   优先 scheduleDraft；无则看 leave_on 诉求；都无则空字符串 */
+function scEffectiveShift(name, date) {
+  const draft = S.scheduleDraft.find(x => x.name === name && x.date === date);
+  if (draft && draft.shift) return draft.shift;
+  if (scHasLeaveOn(name, date)) return scDefaultRestShift();
+  return '';
+}
 
 /* ==================== 可休天数 ==================== */
 /* 三倍日判定：只认用户勾选的节假日 */
@@ -173,21 +195,30 @@ function scHolidayStat(name) {
     ? cycle.start.slice(0, 7)
     : (S.month || '');
 
-  for (const d of S.scheduleDraft) {
-    if (d.name !== name) continue;
-    if (!d.shift) continue;
-    /* ★ 月度过滤：只统计统计月内的日期 */
-    if (statMonth && d.date.slice(0, 7) !== statMonth) continue;
+  /* ★ 遍历统计月内所有日期（用日期序列，才能覆盖诉求 leave_on） */
+  let monthDates = [];
+  if (statMonth) {
+    const [y, m] = statMonth.split('-').map(Number);
+    const lastDay = new Date(y, m, 0).getDate();
+    for (let i = 1; i <= lastDay; i++) {
+      monthDates.push(statMonth + '-' + String(i).padStart(2, '0'));
+    }
+  } else {
+    const dateSet = new Set();
+    for (const d of S.scheduleDraft) dateSet.add(d.date);
+    monthDates = Array.from(dateSet).sort();
+  }
 
-    /* 三倍天数：统计月内、在勾选节假日内、且排了工作班次 */
-    if (tripleSet.has(d.date) && scIsWorkingShift(d.shift)) tripleDays++;
+  for (const d of monthDates) {
+    const shift = scEffectiveShift(name, d);
+    if (!shift) continue;
 
-    /* 已休：只累计该班次「休」列对应的 restDays */
-    const meta = S.shiftMeta[d.shift];
+    if (tripleSet.has(d) && scIsWorkingShift(shift)) tripleDays++;
+
+    const meta = S.shiftMeta[shift];
     if (meta && meta.restDays > 0) used += meta.restDays;
   }
 
-  /* 可休天数：按启用的规则，精确匹配 tripleDays */
   let total = null;
   for (const r of S.scHolidayRules) {
     if (!r.enabled) continue;
@@ -227,13 +258,16 @@ function generateSchedule() {
   calcAllEmployeeCPH();
   calcAllHolidayQuota();
 
-  /* ---- H1 硬约束预锁定：排班草稿里所有非空班次 = 前置排班，一律锁定 ---- */
+  /* ---- H1 硬约束预锁定 ----
+     1) 草稿里已有班次（含「休」）→ 直接锁定
+     2) 员工诉求里 leave_on 的日期（草稿未填）→ 锁定为默认休息班次
+     只处理周期内 dates，前置部分不动。 */
   const locked = {};
   for (const e of scActiveEmployees()) {
     locked[e.name] = {};
     for (const d of dates) {
-      const draft = S.scheduleDraft.find(x => x.name === e.name && x.date === d);
-      if (draft && draft.shift) locked[e.name][d] = draft.shift;
+      const s = scEffectiveShift(e.name, d);
+      if (s) locked[e.name][d] = s;
     }
   }
 
@@ -324,6 +358,8 @@ function scAssignBizDay(ctx, date, biz, candidates) {
 function scCanAssign(ctx, e, date, shift) {
   if (!scRequestsAllow(ctx, e.name, shift)) return false;
   if ((ctx.workStreak[e.name] || 0) >= SC_MAX_STREAK) return false;   // H4
+  /* ★ 员工诉求里明确指定该日休假 → 禁止安排任何工作班次 */
+  if (scIsWorkingShift(shift) && scHasLeaveOn(e.name, date)) return false;
   return true;
 }
 
@@ -928,11 +964,24 @@ function renderScGrid() {
     return;
   }
 
-  /* 前置排班 map：name → date → shift */
+  /* 前置排班 map：name → date → shift（含诉求 leave_on 自动补「休」） */
   const draftMap = {};
   for (const d of S.scheduleDraft) {
     if (!draftMap[d.name]) draftMap[d.name] = {};
     draftMap[d.name][d.date] = d.shift;
+  }
+  /* ★ 补充：员工诉求 leave_on 的日期若草稿未填，也视作「休」显示 */
+  if (S.parsedRequests) {
+    for (const n in S.parsedRequests) {
+      const items = (S.parsedRequests[n] || {}).items || [];
+      for (const it of items) {
+        if (it.type !== 'leave_on' || !Array.isArray(it.dates)) continue;
+        if (!draftMap[n]) draftMap[n] = {};
+        for (const dt of it.dates) {
+          if (!draftMap[n][dt]) draftMap[n][dt] = scDefaultRestShift();
+        }
+      }
+    }
   }
   /* 前置集合：用于加左侧竖条 */
   const preSet = new Set(S.scheduleDraft.filter(d => d.shift).map(d => d.name + '|' + d.date));

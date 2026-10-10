@@ -14,6 +14,7 @@ const SC_HOURS = PREDICT_PERIODS;   // ['9'..'23']
 const SC_MAX_STREAK = 6;
 const SC_BIZ_LIST = ['买手合作', '博主合作'];
 const SC_COLOR_LEAVE_REQ = '#92D050';   // Excel 标准绿
+const SC_COLOR_REST_ALGO = '#FFA94D';   // 橙色：非员工诉求的休息（前置/算法/其它假）
 
 /* ==================== 班次 / 日期工具 ==================== */
 function scIsLateShift(shift) {
@@ -1026,8 +1027,39 @@ function renderScGrid() {
       const s = (resultMap[e.name] && resultMap[e.name][d]) ||
                 (draftMap[e.name]  && draftMap[e.name][d])   || '';
       const meta = s ? S.shiftMeta[s] : null;
-      const isLeaveReq = s && isLeaveRequest(e.name, d);
-      const bg = isLeaveReq ? SC_COLOR_LEAVE_REQ : ((meta && meta.color) || '');
+
+      /* ★ 员工休假需求判定（必须同时满足两个条件）：
+         条件 1：日期 d 必须在排班周期内（start ≤ d ≤ end）
+         条件 2：以下任一来源命中：
+                 · 草稿里明确写的非工作班次（休 / 放休 / 事假 / 病假 / 丧假 / 婚假等）
+                 · AI 诉求解析出的 leave_on 日期
+         只有「周期内 + 命中来源」才判定为员工休假需求（绿色）；
+         周期外的休（已完成的前置排班）→ 橙色；
+         其它非工作班次（算法补的休 / 事假 / 病假 / 放休等）→ 橙色；
+         工作班次 → 保留班次自身颜色。 */
+
+      const cycle = (typeof scGetCycle === 'function') ? scGetCycle() : (S.scheduleCycle || {});
+      const inCycle = !!(cycle && cycle.start && cycle.end
+                     && d >= cycle.start && d <= cycle.end);
+
+      const draftShift = (draftMap[e.name] && draftMap[e.name][d]) || '';
+      const draftMeta = draftShift ? S.shiftMeta[draftShift] : null;
+      const isDraftLeave = !!(draftShift && draftMeta && !draftMeta.isWorking);
+      const isAILeave = !!(s && isLeaveRequest(e.name, d));
+      const isLeaveReq = inCycle && (isDraftLeave || isAILeave);
+
+      /* 单元格底色优先级：
+         1）周期内 + 员工诉求 → 绿色
+         2）其它休息类班次（非工作班次）→ 橙色
+         3）工作班次 → 班次原色 */
+      let bg;
+      if (isLeaveReq) {
+        bg = SC_COLOR_LEAVE_REQ;
+      } else if (meta && !meta.isWorking) {
+        bg = SC_COLOR_REST_ALGO;
+      } else {
+        bg = (meta && meta.color) || '';
+      }
       const isPre = preSet.has(e.name + '|' + d);
       const style = bg ? ' style="background:' + bg + '"' : '';
       const cls = 'sc-grid-cell' + (isPre ? ' pre' : '') + (s ? '' : ' empty');

@@ -636,7 +636,9 @@ const S = {
   shiftMeta:      {},   // {shift: {totalMin, restDays, startTime, endTime, mealTime}}
   scheduleCycle:  { start:'', end:'', reqStart:'', reqEnd:'' },
   scCycleLocked:  false,          // ★ 用户是否手动改过排班周期
-  shiftPool:      [],   // 用户勾选的可用班次
+  scBizState:     '买手合作',     // ★ 当前正在配置的业务线
+  shiftPoolByBiz: { '买手合作': [], '博主合作': [] },  // ★ 按业务线独立保存的班次池
+  shiftPool:      [],   // 兼容字段：始终指向 shiftPoolByBiz[scBizState]（见下方 IIFE 初始化）
   shiftReqs:      {},   // {biz: {shift: {weekday:N, weekend:N}}}   N=null 表示无限制
   employeeCPH:    {},   // {name: {'9':cph, '10':cph, ...}}
   employeeCPHAuto: {},   // 默认自动 CPH（供 CPH 表与「恢复」复位使用） /* 推断 */
@@ -2477,6 +2479,15 @@ function formatForecastAiContext(ctx) {
     const r = JSON.parse(localStorage.getItem('creator_sc_rules') || 'null');
     if (Array.isArray(r) && r.length) S.scHolidayRules = r;
   } catch (_) {}
+})();
+
+/* ★ 保持 S.shiftPool 与 S.shiftPoolByBiz[scBizState] 指向同一数组对象，
+     切换业务线时只需重新赋值 S.shiftPool 的引用即可。 */
+(function initScBizState() {
+  if (!S.scBizState) S.scBizState = '买手合作';
+  if (!S.shiftPoolByBiz) S.shiftPoolByBiz = { '买手合作': [], '博主合作': [] };
+  if (!Array.isArray(S.shiftPoolByBiz[S.scBizState])) S.shiftPoolByBiz[S.scBizState] = [];
+  S.shiftPool = S.shiftPoolByBiz[S.scBizState];
 })();
 
 /* ============================================================

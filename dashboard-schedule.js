@@ -525,7 +525,7 @@ function scShiftHasCapacity(ctx, date, biz, shift) {
 
 /* 骨架接口：某员工顶某班次是否有助于覆盖当前缺口 */
 function scCoverageOK(ctx, date, shift, emp) {
-  const short = scCoverageShortage(ctx, date, scReqBizState || '买手合作');
+  const short = scCoverageShortage(ctx, date, S.scBizState || '买手合作');
   if (!short.length) return true;
   const mins = (S.shiftPeriods || {})[shift] || {};
   const cph = (ctx.cph && ctx.cph[emp.name]) || {};
@@ -742,7 +742,26 @@ function scBuildDiag(ctx, result) {
 }
 
 /* ==================== 视图渲染 ==================== */
-let scReqBizState = '买手合作';   // 需求表当前业务线
+/* ★ 业务线 Tab（顶部，全局唯一）：
+     切换后：① 同步活动池引用 ② 重渲班次池 + 需求表 */
+function renderScBizTabs() {
+  const el = document.getElementById('scBizTabs');
+  if (!el) return;
+  el.innerHTML = SC_BIZ_LIST.map(b =>
+    '<button type="button" class="btn ' + (b === S.scBizState ? 'primary' : 'sm') +
+    '" data-biz="' + esc(b) + '">' + esc(b) + '</button>'
+  ).join('');
+  el.querySelectorAll('button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      S.scBizState = btn.dataset.biz;
+      if (!Array.isArray(S.shiftPoolByBiz[S.scBizState])) S.shiftPoolByBiz[S.scBizState] = [];
+      S.shiftPool = S.shiftPoolByBiz[S.scBizState];   // ★ 切换活动引用
+      renderScBizTabs();
+      renderScShiftPool();
+      renderScReqGrid();
+    });
+  });
+}
 
 function renderSchedulePanel() {
   let c = scGetCycle();
@@ -877,6 +896,7 @@ function renderSchedulePanel() {
     }
   })();
 
+  renderScBizTabs();
   renderScShiftPool();
   renderScReqGrid();
   renderScCphGrid();
@@ -893,16 +913,31 @@ function renderSchedulePanel() {
 function renderScShiftPool() {
   const el = document.getElementById('scShiftPool');
   if (!el) return;
+
+  /* ★ 只展示「工作班次」；使用 scIsWorkingShift 三档判定（出勤计数优先），
+       避免因缺失「班次时段」sheet 而把休息类班次混进来 */
   const all = Object.keys(S.shiftMeta || {});
-  const workingShifts = all.filter(s => !scIsRestShift(s) && !scIsLeaveShift(s));
+  const workingShifts = all.filter(s => scIsWorkingShift(s));
+
+  /* ★ 取当前业务线的池子 */
+  const pool = S.shiftPoolByBiz[S.scBizState] || [];
+
+  if (!workingShifts.length) {
+    el.innerHTML = '<p class="muted" style="margin:4px 0">未识别到工作班次（请检查「班次时段」sheet 的「出勤计数」列）。</p>';
+    return;
+  }
+
   el.innerHTML = workingShifts.map(s =>
-    '<span class="chip' + ((S.shiftPool || []).indexOf(s) >= 0 ? ' on' : '') + '" data-shift="' + esc(s) + '">' + esc(s) + '</span>'
+    '<span class="chip' + (pool.indexOf(s) >= 0 ? ' on' : '') +
+    '" data-shift="' + esc(s) + '">' + esc(s) + '</span>'
   ).join('');
+
   el.querySelectorAll('.chip').forEach(ch => {
     ch.addEventListener('click', () => {
       const s = ch.dataset.shift;
-      const i = S.shiftPool.indexOf(s);
-      if (i >= 0) S.shiftPool.splice(i, 1); else S.shiftPool.push(s);
+      const arr = S.shiftPoolByBiz[S.scBizState];
+      const i = arr.indexOf(s);
+      if (i >= 0) arr.splice(i, 1); else arr.push(s);
       renderScShiftPool();
       renderScReqGrid();
     });
@@ -910,30 +945,36 @@ function renderScShiftPool() {
 }
 
 function renderScReqGrid() {
-  const tabs = document.getElementById('scReqTabs');
   const el = document.getElementById('scReqGrid');
   if (!el) return;
-  /* 业务线切换按钮（骨架中的 #scReqBiz 由这里替代） */
-  if (tabs) {
-    tabs.innerHTML = SC_BIZ_LIST.map(b =>
-      '<button class="btn sm' + (b === scReqBizState ? ' primary' : '') + '" data-biz="' + esc(b) + '">' + esc(b) + '</button>'
-    ).join('');
-    tabs.querySelectorAll('button').forEach(btn => {
-      btn.addEventListener('click', () => { scReqBizState = btn.dataset.biz; renderScReqGrid(); });
-    });
+
+  const biz = S.scBizState;
+  const pool = S.shiftPoolByBiz[biz] || [];
+
+  if (!pool.length) {
+    el.innerHTML = '<p class="muted">请先在「③ 选择本业务线可排班次」中勾选至少一个班次。</p>';
+    return;
   }
-  const biz = scReqBizState;
-  if (!(S.shiftPool || []).length) { el.innerHTML = '<p class="muted">请先在上方选择可用班次。</p>'; return; }
-  const header = '<tr><th>班次</th><th>工作日需求</th><th>周末需求</th></tr>';
-  const rows = S.shiftPool.map(s => {
+
+  const header = '<tr>' +
+    '<th>班次</th>' +
+    '<th>工作日上限</th>' +
+    '<th>周末上限</th>' +
+  '</tr>';
+
+  const rows = pool.map(s => {
     const r = (S.shiftReqs[biz] && S.shiftReqs[biz][s]) || {};
     return '<tr>' +
       '<td>' + esc(s) + '</td>' +
-      '<td><input type="number" min="0" data-shift="' + esc(s) + '" data-kind="weekday" value="' + (r.weekday == null ? '' : r.weekday) + '"></td>' +
-      '<td><input type="number" min="0" data-shift="' + esc(s) + '" data-kind="weekend" value="' + (r.weekend == null ? '' : r.weekend) + '"></td>' +
+      '<td><input type="number" min="0" data-shift="' + esc(s) + '" data-kind="weekday" value="' +
+        (r.weekday == null ? '' : r.weekday) + '" placeholder="不限"></td>' +
+      '<td><input type="number" min="0" data-shift="' + esc(s) + '" data-kind="weekend" value="' +
+        (r.weekend == null ? '' : r.weekend) + '" placeholder="不限"></td>' +
     '</tr>';
   }).join('');
+
   el.innerHTML = '<table>' + header + rows + '</table>';
+
   el.querySelectorAll('input').forEach(inp => {
     inp.addEventListener('change', () => {
       scSetShiftReq(biz, inp.dataset.shift, inp.dataset.kind, inp.value);
@@ -1915,6 +1956,12 @@ async function scCopyMarkdown() {
     bind('btnScClear', () => {
       S.shiftPool = []; S.shiftReqs = {}; S.scheduleResult = [];
       S.parsedRequests = {}; S.scheduleDiag = {};
+      /* ★ 同时清除所有业务线的独立班次池 */
+      if (S.shiftPoolByBiz) {
+        for (const biz of SC_BIZ_LIST) {
+          if (Array.isArray(S.shiftPoolByBiz[biz])) S.shiftPoolByBiz[biz] = [];
+        }
+      }
       renderSchedulePanel();
     });
   };

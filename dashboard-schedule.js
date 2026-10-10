@@ -334,7 +334,27 @@ function generateSchedule() {
   const c = scGetCycle();
   if (!c.start || !c.end) { toast('请先设置排班周期'); return null; }
   if (!(S.shiftPool || []).length) { toast('请先选择可用班次'); return null; }
-  if (!Object.keys(S.shiftReqs || {}).length) { toast('请先设置至少一个业务线的班次需求'); return null; }
+
+  /* ★ 校验：至少存在一条「有效」的规则（日期 + 班次都选了），跨所有业务线。
+     判定口径与 scGetShiftReq 保持一致 —— 只要日期、班次都填了就算生效，
+     不要求 confirmed（confirmed 只影响折叠/视觉提示）。 */
+  const hasValidRule = (function () {
+    const all = S.shiftReqRules || {};
+    for (const b of SC_BIZ_LIST) {
+      const list = all[b] || [];
+      for (const r of list) {
+        if (!r) continue;
+        if (Array.isArray(r.dates)  && r.dates.length  > 0 &&
+            Array.isArray(r.shifts) && r.shifts.length > 0) return true;
+      }
+    }
+    return false;
+  })();
+  if (!hasValidRule) {
+    toast('请先设置至少一个业务线的班次需求规则（需选择生效日期和限制班次）');
+    return null;
+  }
+
   const dates = scDatesBetween(c.start, c.end);
   if (!dates.length) { toast('排班周期无效'); return null; }
 
@@ -359,7 +379,6 @@ function generateSchedule() {
   const ctx = {
     dates, locked,
     buyerOnly: pools.buyerOnly, bloggerOnly: pools.bloggerOnly, flex: pools.flex,
-    reqs: S.shiftReqs,
     cph: S.employeeCPH,
     parsed: scLoadParsedRequests(),
     stats: {}, lastShift: {}, workStreak: {},
@@ -981,11 +1000,13 @@ function renderScReqGrid() {
 }
 
 /* 单条规则卡片的 HTML */
+/* 单条规则卡片的 HTML */
 function renderScReqRuleCardHTML(idx, rule, cycleDates, pool) {
   const dates = rule.dates  || [];
   const shifts = rule.shifts || [];
   const max = rule.max;
   const confirmed = !!rule.confirmed;
+  const collapsed = !!rule.collapsed;   // ★ 折叠状态
 
   /* 顶部状态提示 */
   const warnings = [];
@@ -993,10 +1014,22 @@ function renderScReqRuleCardHTML(idx, rule, cycleDates, pool) {
   if (!shifts.length) warnings.push('班次');
   let statusHTML = '';
   if (confirmed) {
-    statusHTML = '<span style="color:#6EA980;font-size:12px">✓ 已确认</span>';
+    statusHTML = '<span style="color:#6EA980;font-size:12px;flex:none">✓ 已确认</span>';
   } else if (warnings.length) {
-    statusHTML = '<span style="color:#B36A00;font-size:12px">⚠ 请补全：' + warnings.join('、') + '</span>';
+    statusHTML = '<span style="color:#B36A00;font-size:12px;flex:none">⚠ 请补全：' + warnings.join('、') + '</span>';
   }
+
+  /* ★ 折叠态摘要 */
+  const dTxt = !dates.length ? '未选日期'
+             : (dates.length === cycleDates.length ? '全周期'
+             : (dates.length <= 3 ? dates.map(d => d.slice(5)).join('、') : dates.length + ' 天'));
+  const sTxt = !shifts.length ? '未选班次' : shifts.join('/');
+  const mTxt = max == null ? '不限' : '≤' + max + '人';
+  const summaryHTML = collapsed
+    ? '<span style="color:#A0A0AE;font-size:11.5px;margin-left:8px;overflow:hidden;' +
+      'text-overflow:ellipsis;white-space:nowrap;min-width:0">' +
+      esc(dTxt + ' · ' + sTxt + ' · ' + mTxt) + '</span>'
+    : '';
 
   const dateChips = cycleDates.map(d => {
     const on = dates.indexOf(d) >= 0;
@@ -1010,17 +1043,31 @@ function renderScReqRuleCardHTML(idx, rule, cycleDates, pool) {
     return '<span class="chip' + (on ? ' on' : '') + '" data-shift="' + esc(s) + '">' + esc(s) + '</span>';
   }).join('');
 
+  /* ★ 折叠时去掉头部下边框 / 下边距，视觉上更紧凑 */
+  const headStyle = collapsed
+    ? ' style="padding-bottom:0;border-bottom:none;margin-bottom:0"'
+    : '';
+
   return '<div class="sc-req-card" data-idx="' + idx + '">' +
-    '<div class="sc-req-card-head">' +
-      '<span style="font-weight:600;color:#7B8FBF">规则 #' + (idx + 1) + '</span>' +
-      statusHTML +
-      '<div style="margin-left:auto;display:flex;gap:6px">' +
+    '<div class="sc-req-card-head"' + headStyle + '>' +
+      '<div data-act="toggle" style="display:flex;align-items:center;gap:8px;' +
+        'cursor:pointer;min-width:0;flex:1 1 auto;user-select:none">' +
+        '<span class="arrow" style="display:inline-block;width:12px;text-align:center;' +
+          'font-size:10px;color:#7B8FBF;flex:none;transition:transform .15s ease;' +
+          'transform:rotate(' + (collapsed ? '-90deg' : '0deg') + ')">▼</span>' +
+        '<span style="font-weight:600;color:#7B8FBF;flex:none">规则 #' + (idx + 1) + '</span>' +
+        statusHTML +
+        summaryHTML +
+      '</div>' +
+      '<div style="margin-left:auto;display:flex;gap:6px;flex:none">' +
         '<button type="button" class="btn sm" data-act="confirm"' + (confirmed ? ' disabled' : '') + '>' +
           (confirmed ? '✓ 已确认' : '✓ 确认') +
         '</button>' +
         '<button type="button" class="btn sm" data-act="delete" style="background:#FCE5E5;color:#D9363E">删除</button>' +
       '</div>' +
     '</div>' +
+
+    '<div class="sc-req-card-body"' + (collapsed ? ' style="display:none"' : '') + '>' +
 
     '<div class="sc-req-card-section">' +
       '<div class="sc-req-card-label">📅 生效日期' +
@@ -1046,6 +1093,8 @@ function renderScReqRuleCardHTML(idx, rule, cycleDates, pool) {
         (max == null ? '' : max) + '" placeholder="不限" style="width:80px">' +
       '<span>人</span>' +
     '</div>' +
+
+    '</div>' +
   '</div>';
 }
 
@@ -1068,6 +1117,15 @@ function bindScReqRuleEvents(el, cycleDates, pool, biz) {
     if (!rule) return;
     if (!Array.isArray(rule.dates))  rule.dates  = [];
     if (!Array.isArray(rule.shifts)) rule.shifts = [];
+
+    /* ★ 新增：点击头部（箭头/标题区域）→ 折叠 / 展开 */
+    const toggleArea = card.querySelector('[data-act="toggle"]');
+    if (toggleArea) {
+      toggleArea.addEventListener('click', () => {
+        rule.collapsed = !rule.collapsed;
+        renderScReqGrid();
+      });
+    }
 
     /* 日期 chip 点击 */
     card.querySelectorAll('.chip[data-date]').forEach(ch => {
@@ -1117,7 +1175,7 @@ function bindScReqRuleEvents(el, cycleDates, pool, biz) {
       });
     }
 
-    /* 确认 */
+    /* 确认 → 校验通过后自动折叠 */
     const okBtn = card.querySelector('[data-act="confirm"]');
     if (okBtn) okBtn.addEventListener('click', () => {
       if (rule.dates.length === 0 || rule.shifts.length === 0) {
@@ -1125,6 +1183,7 @@ function bindScReqRuleEvents(el, cycleDates, pool, biz) {
         return;
       }
       rule.confirmed = true;
+      rule.collapsed = true;   /* ★ 新增：确认后自动折叠 */
       renderScReqGrid();
     });
 

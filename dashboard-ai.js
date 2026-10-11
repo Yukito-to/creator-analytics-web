@@ -1348,6 +1348,16 @@ function bindEvents() {
     S.scheduleCycle = { start: '', end: '', reqStart: '', reqEnd: '' };
     S.scCycleLocked = false;
     try { localStorage.removeItem('creator_sc_cycle'); } catch (_) {}
+    /* ★ 清空排班页的持久化选择习惯 */
+    try {
+      localStorage.removeItem('creator_sc_shift_pool_by_biz');
+      localStorage.removeItem('creator_sc_no_support_blogger');
+    } catch (_) {}
+    if (S.scNoSupportBlogger) S.scNoSupportBlogger.clear();
+    if (S.shiftPoolByBiz) {
+      S.shiftPoolByBiz['买手合作'] = [];
+      S.shiftPoolByBiz['博主合作'] = [];
+    }
     S.expandedRows = new Set();
     const ds = $('#dataStatus'); if (ds) { ds.textContent = '未导入'; ds.classList.remove('pill-on'); ds.classList.add('pill-off'); }
     const pw = $('#progressWrap'); if (pw) pw.classList.add('hidden');

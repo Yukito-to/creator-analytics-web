@@ -23,6 +23,63 @@ const SC_COLOR_REST_ALGO = '#FFA94D';   // 橙色：非员工诉求的休息（�
   if (!S.scNoSupportBlogger) S.scNoSupportBlogger = new Set();
 })();
 
+/* ============================================================
+   ★ 用户选择习惯持久化
+     · 班次池：S.shiftPoolByBiz = { '买手合作': [...], '博主合作': [...] }
+     · 支援博主排除集：S.scNoSupportBlogger = Set<name>
+   提供 loadScPrefs / saveScShiftPool / saveScSupportExclude 三个工具。
+   ============================================================ */
+const SC_PREF_KEY_POOL = 'creator_sc_shift_pool_by_biz';
+const SC_PREF_KEY_EXCL = 'creator_sc_no_support_blogger';
+
+function saveScShiftPool() {
+  try {
+    const obj = {};
+    for (const b of SC_BIZ_LIST) {
+      const arr = (S.shiftPoolByBiz && S.shiftPoolByBiz[b]) || [];
+      obj[b] = Array.from(arr);
+    }
+    localStorage.setItem(SC_PREF_KEY_POOL, JSON.stringify(obj));
+  } catch (_) {}
+}
+
+function saveScSupportExclude() {
+  try {
+    const arr = S.scNoSupportBlogger ? Array.from(S.scNoSupportBlogger) : [];
+    localStorage.setItem(SC_PREF_KEY_EXCL, JSON.stringify(arr));
+  } catch (_) {}
+}
+
+/* 从 localStorage 恢复用户上次的选择习惯（在 core 初始化之后、渲染之前调用一次） */
+(function loadScPrefs() {
+  /* ---- 班次池 ---- */
+  try {
+    const raw = localStorage.getItem(SC_PREF_KEY_POOL);
+    if (raw) {
+      const obj = JSON.parse(raw);
+      if (obj && typeof obj === 'object') {
+        if (!S.shiftPoolByBiz) S.shiftPoolByBiz = { '买手合作': [], '博主合作': [] };
+        for (const b of SC_BIZ_LIST) {
+          if (Array.isArray(obj[b])) S.shiftPoolByBiz[b] = obj[b].slice();
+        }
+        /* 同步活动引用 */
+        if (S.scBizState && S.shiftPoolByBiz[S.scBizState]) {
+          S.shiftPool = S.shiftPoolByBiz[S.scBizState];
+        }
+      }
+    }
+  } catch (_) {}
+
+  /* ---- 支援博主排除集 ---- */
+  try {
+    const raw = localStorage.getItem(SC_PREF_KEY_EXCL);
+    if (raw) {
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr)) S.scNoSupportBlogger = new Set(arr);
+    }
+  } catch (_) {}
+})();
+
 /* ★ 日度量级匹配视图选择：业务线多选集合 + 所选日期 */
 (function initScCoverageSel() {
   if (!S.scCoverageSel) {
@@ -919,6 +976,7 @@ function renderScBizTabs() {
       S.scBizState = btn.dataset.biz;
       if (!Array.isArray(S.shiftPoolByBiz[S.scBizState])) S.shiftPoolByBiz[S.scBizState] = [];
       S.shiftPool = S.shiftPoolByBiz[S.scBizState];   // ★ 切换活动引用
+      saveScShiftPool();                              // ★ 记住当前业务线视角
       renderScBizTabs();
       renderScShiftPool();
       renderScReqGrid();
@@ -1103,6 +1161,7 @@ function renderScShiftPool() {
       const arr = S.shiftPoolByBiz[S.scBizState];
       const i = arr.indexOf(s);
       if (i >= 0) arr.splice(i, 1); else arr.push(s);
+      saveScShiftPool();   /* ★ 记住用户勾选习惯 */
       renderScShiftPool();
       renderScReqGrid();
     });
@@ -1152,6 +1211,7 @@ function renderScSupportExclude() {
       if (!S.scNoSupportBlogger) S.scNoSupportBlogger = new Set();
       if (S.scNoSupportBlogger.has(n)) S.scNoSupportBlogger.delete(n);
       else S.scNoSupportBlogger.add(n);
+      saveScSupportExclude();   /* ★ 记住排除集 */
       renderScSupportExclude();
     });
   });
@@ -2535,12 +2595,17 @@ async function scCopyMarkdown() {
       S.shiftReqRules = { '买手合作': [], '博主合作': [] };
       S.scheduleResult = [];
       S.parsedRequests = {}; S.scheduleDiag = {};
-      /* ★ 同时清除所有业务线的独立班次池 */
       if (S.shiftPoolByBiz) {
         for (const biz of SC_BIZ_LIST) {
           if (Array.isArray(S.shiftPoolByBiz[biz])) S.shiftPoolByBiz[biz] = [];
         }
       }
+      /* ★ 清空持久化的选择习惯 */
+      if (S.scNoSupportBlogger) S.scNoSupportBlogger.clear();
+      try {
+        localStorage.removeItem(SC_PREF_KEY_POOL);
+        localStorage.removeItem(SC_PREF_KEY_EXCL);
+      } catch (_) {}
       renderSchedulePanel();
     });
   };

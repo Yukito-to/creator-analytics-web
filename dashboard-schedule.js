@@ -608,12 +608,12 @@ function scAssignBizDay(ctx, date, biz, candidates) {
   }
 }
 
-/* 硬约束校验（H2 only / H3 not / H4 连续工作 ≤6） */
+/* 硬约束校验（H2 only / H3 not / 离职 / leave_on）——★ H4 已降级为软约束 */
 function scCanAssign(ctx, e, date, shift) {
   if (!scIsActiveOn(e, date)) return false;   // ★ 离职日及之后一律不排
   if (!scRequestsAllow(ctx, e.name, shift)) return false;
-  if ((ctx.workStreak[e.name] || 0) >= SC_MAX_STREAK) return false;   // H4
-  /* ★ 员工诉求里明确指定该日休假 → 禁止安排任何工作班次 */
+  /* ★ H4「连续工作 ≤ 6 天」已从硬约束降级为软约束：
+       不再硬性拦截，由 scScoreCandidate 通过打分自然排序。 */
   if (scIsWorkingShift(shift) && scHasLeaveOn(e.name, date)) return false;
   return true;
 }
@@ -654,8 +654,24 @@ function scScoreCandidate(ctx, e, date, shift) {
   /* S4 剩余可休天数多者优先排班 */
   const q = S.holidayQuota[e.name];
   if (q) s += Math.max(0, q.remain) * 5;
-  /* S5 连续工作天数少者优先 */
-  s -= (ctx.workStreak[e.name] || 0) * 5;
+
+  /* ★ S5 连续工作天数：软约束（H4）
+       · 基础线性扣分
+       · streak >= 6（达到/超过上限）：额外 -800，强烈降权但不禁用
+       · streak >= 8：再额外 -400（越超越多，越不倾向）
+       · streak == 5（次日将达上限）：中等 -100，鼓励次日休息
+     这样正常情况算法会自然避免连上第 7 天；
+     只有"全组都超限、无人可换"时才可能突破，保证排班仍能生成。 */
+  const streak = ctx.workStreak[e.name] || 0;
+  s -= streak * 5;
+  if (scIsWorkingShift(shift)) {
+    if (streak >= SC_MAX_STREAK) {
+      s -= 800;
+      if (streak >= SC_MAX_STREAK + 2) s -= 400;
+    } else if (streak === SC_MAX_STREAK - 1) {
+      s -= 100;
+    }
+  }
   return s;
 }
 
@@ -888,16 +904,11 @@ function scInitStreakFromPre(ctx, cycleStart) {
 }
 
 /* ==================== 局部搜索优化 ==================== */
-/* 全周期重扫某员工，检查任意连续工作段 ≤6（H4） */
+/* 全周期重扫某员工（H4）——★ H4 已降级为软约束，恒返回 true */
 function scStreakOK(ctx, dates, name) {
-  /* ★ 起始值 = 周期起始日前的连续工作天数（前置排班），
-       否则局部搜索（换班/调休）会绕过 H4 的跨周期约束。 */
-  let run = (ctx.preStreak && ctx.preStreak[name]) || 0;
-  for (const d of dates) {
-    const s = ctx.assigned[d] && ctx.assigned[d][name];
-    if (s && scIsWorkingShift(s)) { run++; if (run > SC_MAX_STREAK) return false; }
-    else run = 0;
-  }
+  /* H4 downgraded from HARD to SOFT constraint: always return true.
+     Local search (swap / rest) is no longer rejected by H4.
+     To restore the hard constraint, reinstate the scan loop below. */
   return true;
 }
 

@@ -1090,6 +1090,8 @@ function renderScBizTabs() {
       renderScBizTabs();
       renderScShiftPool();
       renderScReqGrid();
+      /* ★ 切换业务线后同步刷新「支援博主设置」的显隐状态 */
+      if (typeof renderScSupportExclude === 'function') renderScSupportExclude();
     });
   });
 }
@@ -1304,23 +1306,22 @@ function renderScSupportExclude() {
   const el = document.getElementById('scSupportExclude');
   if (!el) return;
 
-  /* ★ 找到「支援博主设置」标题（紧邻 el 的上一个 h4.sc-sub-h4） */
+  /* ★ 定位紧邻的「支援博主设置」标题（h4.sc-sub-h4），
+       博主视角下需要连同标题一起隐藏，避免出现空白标题或错误提示。 */
   const titleEl = el.previousElementSibling;
+  const isTitle = titleEl && titleEl.classList &&
+                  titleEl.classList.contains('sc-sub-h4');
 
   if (S.scBizState !== '买手合作') {
-    /* ★ 博主视角下：整块（标题 + 内容）隐藏，不再展示无意义的提示 */
-    if (titleEl && titleEl.classList && titleEl.classList.contains('sc-sub-h4')) {
-      titleEl.style.display = 'none';
-    }
+    /* 博主视角：整块隐藏，不显示任何提示 */
+    if (isTitle) titleEl.style.display = 'none';
     el.style.display = 'none';
     el.innerHTML = '';
     return;
   }
 
-  /* ★ 买手视角：恢复显示 */
-  if (titleEl && titleEl.classList && titleEl.classList.contains('sc-sub-h4')) {
-    titleEl.style.display = '';
-  }
+  /* 买手视角：恢复显示 */
+  if (isTitle) titleEl.style.display = '';
   el.style.display = '';
 
   const all = scActiveEmployees();
@@ -1455,7 +1456,7 @@ function renderScReqRuleCardHTML(idx, rule, cycleDates, pool) {
              : (dates.length === cycleDates.length ? '全周期'
              : (dates.length <= 3 ? dates.map(d => d.slice(5)).join('、') : dates.length + ' 天'));
   const sTxt = !shifts.length ? '未选班次' : shifts.join('/');
-  const mTxt = max == null ? '不限' : '≤' + max + '人';
+  const mTxt = max == null ? '不限' : '=' + max + '人';
   const summaryHTML = collapsed
     ? '<span style="color:#A0A0AE;font-size:11.5px;margin-left:8px;overflow:hidden;' +
       'text-overflow:ellipsis;white-space:nowrap;min-width:0">' +

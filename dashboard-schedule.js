@@ -18,6 +18,11 @@ const SC_BIZ_LIST = ['买手合作', '博主合作'];
 const SC_COLOR_LEAVE_REQ = '#92D050';   // Excel 标准绿
 const SC_COLOR_REST_ALGO = '#FFA94D';   // 橙色：非员工诉求的休息（前置/算法/其它假）
 
+/* ★ 支援博主排除集：买手里不具备博主技能、不应被派去支援的人员名单 */
+(function initScSupportExclude() {
+  if (!S.scNoSupportBlogger) S.scNoSupportBlogger = new Set();
+})();
+
 /* ==================== 班次 / 日期工具 ==================== */
 function scIsLateShift(shift) {
   const meta = S.shiftMeta && S.shiftMeta[shift];
@@ -384,6 +389,7 @@ function generateSchedule() {
     stats: {}, lastShift: {}, workStreak: {},
     preStreak: {},                      /* ★ 前置连续工作天数基线 */
     assigned: {}, assignedBiz: {},
+    assignedSupport: {},   /* ★ 记录哪些格子是「买手支援博主」的班次 */
     demandVol: {}, warnings: [],
   };
 
@@ -402,6 +408,7 @@ function generateSchedule() {
     scAssignBizDay(ctx, d, '博主合作', ctx.bloggerOnly);
     scFillShortage(ctx, d, '买手合作');
     scFillShortage(ctx, d, '博主合作');
+    scAssignBuyerSurplusToBlogger(ctx, d);   /* ★ 买手剩余人力主动支援博主 */
     scFillRest(ctx, d);
     scUpdateStreak(ctx, d);
   }
@@ -416,7 +423,12 @@ function generateSchedule() {
     for (const e of scActiveEmployees()) {
       const s = ctx.assigned[d] && ctx.assigned[d][e.name];
       if (!s) continue;
-      result.push({ date: d, name: e.name, shift: s, biz: ctx.assignedBiz[d][e.name] || empBiz(e.name) });
+      const sup = !!(ctx.assignedSupport[d] && ctx.assignedSupport[d][e.name]);
+      result.push({
+        date: d, name: e.name, shift: s,
+        biz: ctx.assignedBiz[d][e.name] || empBiz(e.name),
+        support: sup   /* ★ 支援博主标记 */
+      });
     }
   }
   scValidateQuota(ctx);   // H5 后验校验（只告警不回改，避免初期无人可排）
@@ -426,9 +438,13 @@ function generateSchedule() {
 }
 
 /* ==================== 分配内部函数 ==================== */
-function scDoAssign(ctx, date, e, shift, biz) {
+function scDoAssign(ctx, date, e, shift, biz, support) {
   ctx.assigned[date][e.name] = shift;
   ctx.assignedBiz[date][e.name] = biz || '';
+  if (support) {
+    if (!ctx.assignedSupport[date]) ctx.assignedSupport[date] = {};
+    ctx.assignedSupport[date][e.name] = true;
+  }
   if (!ctx.stats[e.name]) ctx.stats[e.name] = {};
   ctx.stats[e.name][shift] = (ctx.stats[e.name][shift] || 0) + 1;
 }
@@ -573,7 +589,10 @@ function scFillShortage(ctx, date, biz) {
     if (!best || best.gain <= 0) {
       const otherShort = scCoverageShortage(ctx, date, otherBiz);
       if (otherShort.length === 0) {
-        const borrowCands = other.filter(e => !ctx.assigned[date][e.name]);
+        const borrowCands = other
+          .filter(e => !ctx.assigned[date][e.name])
+          /* ★ 从买手借调到博主时，排除「不支援博主」的员工 */
+          .filter(e => !(biz === '博主合作' && (S.scNoSupportBlogger || new Set()).has(e.name)));
         const best2 = scPickBestCandidate(ctx, date, biz, borrowCands, short);
         if (best2 && best2.gain > 0) best = best2;
       }
@@ -583,7 +602,58 @@ function scFillShortage(ctx, date, biz) {
       ctx.warnings.push(date + ' ' + biz + ' 存在时段缺口且无可征调人力');
       break;
     }
-    scDoAssign(ctx, date, best.e, best.shift, biz);
+    /* ★ 博主需求 + 买手/弹性候选人 → 打 support 标记 */
+    const isBuyerPool = ctx.buyerOnly.indexOf(best.e) >= 0 || ctx.flex.indexOf(best.e) >= 0;
+    const isSupport   = (biz === '博主合作' && isBuyerPool);
+    scDoAssign(ctx, date, best.e, best.shift, biz, isSupport);
+  }
+}
+
+/* ★ 买手剩余人力主动支援博主：
+     · 只在博主有「明确班次需求」（scGetShiftReq 返回数字）且需求尚未填满时才征调
+     · 候选 = 尚未被分配的买手专属 + 弹性员工，且不在 S.scNoSupportBlogger 里
+     · 按 scScoreCandidate 打分排序 */
+function scAssignBuyerSurplusToBlogger(ctx, date) {
+  const biz = '博主合作';
+
+  /* 1. 汇总博主各班次当前缺口 */
+  const shiftGap = {};
+  for (const shift of S.shiftPool) {
+    const need = scGetShiftReq(biz, shift, date);
+    if (need == null || !isFinite(need) || need <= 0) continue;
+    let already = 0;
+    for (const n in ctx.assigned[date]) {
+      if (ctx.assigned[date][n] === shift && ctx.assignedBiz[date][n] === biz) already++;
+    }
+    const gap = need - already;
+    if (gap > 0) shiftGap[shift] = gap;
+  }
+  if (!Object.keys(shiftGap).length) return;
+
+  /* 2. 候选池：买手专属 + 弹性，未分配、可支援、在职 */
+  const exclude = S.scNoSupportBlogger || new Set();
+  const candidates = ctx.buyerOnly
+    .concat(ctx.flex)
+    .filter(e => !ctx.assigned[date][e.name])
+    .filter(e => !exclude.has(e.name))
+    .filter(e => scIsActiveOn(e, date));
+  if (!candidates.length) return;
+
+  /* 3. 逐班次分配 */
+  for (const shift of Object.keys(shiftGap)) {
+    let gap = shiftGap[shift];
+    if (gap <= 0) continue;
+    const sorted = candidates
+      .filter(e => !ctx.assigned[date][e.name])
+      .filter(e => scCanAssign(ctx, e, date, shift))
+      .filter(e => scShiftHasCapacity(ctx, date, biz, shift))
+      .map(e => ({ e, score: scScoreCandidate(ctx, e, date, shift) }))
+      .sort((a, b) => b.score - a.score);
+    for (const item of sorted) {
+      if (gap <= 0) break;
+      scDoAssign(ctx, date, item.e, shift, biz, true);   /* ★ 打 support 标记 */
+      gap--;
+    }
   }
 }
 
@@ -739,7 +809,13 @@ function scRebalanceLateShifts(ctx) {
       if (!scRequestsAllow(ctx, pa.name, sb) || !scRequestsAllow(ctx, pb.name, sa)) continue;
       ctx.assigned[d][pa.name] = sb;
       ctx.assigned[d][pb.name] = sa;
-      if (scStreakOK(ctx, dates, pa.name) && scStreakOK(ctx, dates, pb.name)) { swapped = true; break; }
+      if (scStreakOK(ctx, dates, pa.name) && scStreakOK(ctx, dates, pb.name)) {
+        if (ctx.assignedSupport[d]) {
+          delete ctx.assignedSupport[d][pa.name];
+          delete ctx.assignedSupport[d][pb.name];
+        }
+        swapped = true; break;
+      }
       ctx.assigned[d][pa.name] = sa;   // 回滚
       ctx.assigned[d][pb.name] = sb;
     }
@@ -778,7 +854,13 @@ function scRebalanceRestDays(ctx) {
       if (!scRequestsAllow(ctx, pa.name, sb) || !scRequestsAllow(ctx, pb.name, sa)) continue;
       ctx.assigned[d][pa.name] = sb;
       ctx.assigned[d][pb.name] = sa;
-      if (scStreakOK(ctx, dates, pa.name) && scStreakOK(ctx, dates, pb.name)) { done = true; break; }
+      if (scStreakOK(ctx, dates, pa.name) && scStreakOK(ctx, dates, pb.name)) {
+        if (ctx.assignedSupport[d]) {
+          delete ctx.assignedSupport[d][pa.name];
+          delete ctx.assignedSupport[d][pb.name];
+        }
+        done = true; break;
+      }
       ctx.assigned[d][pa.name] = sa;   // 回滚
       ctx.assigned[d][pb.name] = sb;
     }
@@ -973,6 +1055,7 @@ function renderSchedulePanel() {
   renderScBizTabs();
   renderScShiftPool();
   renderScReqGrid();
+  renderScSupportExclude();   // ★ 新增
   renderScCphGrid();
   renderScReqList();
   renderScCoverage();
@@ -1015,6 +1098,54 @@ function renderScShiftPool() {
       if (i >= 0) arr.splice(i, 1); else arr.push(s);
       renderScShiftPool();
       renderScReqGrid();
+    });
+  });
+}
+
+/* ★ 支援博主设置：只展示买手专属 + 弹性员工 */
+function renderScSupportExclude() {
+  const el = document.getElementById('scSupportExclude');
+  if (!el) return;
+
+  if (S.scBizState !== '买手合作') {
+    el.innerHTML = '<p class="muted" style="margin:4px 0;font-size:12px">' +
+      '该设置仅在「买手合作」业务线下生效，请切换到「买手合作」后配置。</p>';
+    return;
+  }
+
+  const all = scActiveEmployees();
+  const buyerPool = [];
+  for (const e of all) {
+    const b = String(e.biz || '');
+    if (/买手/.test(b) && !/博主/.test(b)) buyerPool.push(e);
+    else if (!/买手/.test(b) && !/博主/.test(b)) buyerPool.push(e);
+  }
+
+  if (!buyerPool.length) {
+    el.innerHTML = '<p class="muted" style="margin:4px 0;font-size:12px">' +
+      '未识别到买手专属 / 弹性员工。</p>';
+    return;
+  }
+
+  const exSet = S.scNoSupportBlogger || new Set();
+
+  el.innerHTML =
+    '<p class="muted" style="margin:0 0 6px;font-size:11.5px">' +
+      '勾选 = <b>不支援博主</b>（默认全部可支援）。当前已排除：<b>' + exSet.size + '</b> 人' +
+    '</p>' +
+    buyerPool.map(e => {
+      const on = exSet.has(e.name);
+      return '<span class="chip' + (on ? ' on' : '') + '" data-name="' + esc(e.name) + '">' +
+        esc(e.name) + '</span>';
+    }).join('');
+
+  el.querySelectorAll('.chip').forEach(ch => {
+    ch.addEventListener('click', () => {
+      const n = ch.dataset.name;
+      if (!S.scNoSupportBlogger) S.scNoSupportBlogger = new Set();
+      if (S.scNoSupportBlogger.has(n)) S.scNoSupportBlogger.delete(n);
+      else S.scNoSupportBlogger.add(n);
+      renderScSupportExclude();
     });
   });
 }
@@ -1472,7 +1603,7 @@ function renderScGrid() {
   const resultMap = {};
   for (const r of (S.scheduleResult || [])) {
     if (!resultMap[r.name]) resultMap[r.name] = {};
-    resultMap[r.name][r.date] = r.shift;
+    resultMap[r.name][r.date] = { shift: r.shift, support: !!r.support };
   }
 
   /* ===== 表头（业务线 + 员工 + 可休/已休/未休 + 日期列） ===== */
@@ -1539,8 +1670,16 @@ function renderScGrid() {
                '" data-name="' + esc(e.name) + '" data-date="' + d + '"></td>';
       }
 
-      const s = (resultMap[e.name] && resultMap[e.name][d]) ||
-                (draftMap[e.name]  && draftMap[e.name][d])   || '';
+      /* ★ 调度结果（对象）优先，其次前置草稿（字符串） */
+      let s = '';
+      let isSupport = false;
+      const rr = resultMap[e.name] && resultMap[e.name][d];
+      if (rr) {
+        s = rr.shift;
+        isSupport = !!rr.support;
+      } else {
+        s = (draftMap[e.name] && draftMap[e.name][d]) || '';
+      }
       const meta = s ? S.shiftMeta[s] : null;
 
       /* ★ 员工休假需求判定（必须同时满足两个条件）：
@@ -1578,9 +1717,19 @@ function renderScGrid() {
       const isPre = preSet.has(e.name + '|' + d);
       const style = bg ? ' style="background:' + bg + '"' : '';
       const cls = 'sc-grid-cell' + (isPre ? ' pre' : '') + (s ? '' : ' empty');
+      /* ★ 支援博主的班次 → 加一枚「博主」小徽章（不改 s 本体） */
+      const cellText = s
+        ? (isSupport
+            ? esc(s) + '<span style="display:inline-block;margin-left:3px;' +
+              'padding:0 3px;font-size:9px;line-height:1.4;border-radius:3px;' +
+              'background:#7B8FBF;color:#fff;vertical-align:middle;' +
+              'font-weight:400;letter-spacing:.2px">博主</span>'
+            : esc(s))
+        : '';
+
       return '<td class="' + cls + '"' + style +
              ' data-r="' + ri + '" data-c="' + ci + '" data-name="' + esc(e.name) + '" data-date="' + d + '">' +
-             (s ? esc(s) : '') + '</td>';
+             cellText + '</td>';
     }).join('');
 
     return '<tr>' + bizTd + '<td>' + esc(e.name) + '</td>' + statTds + dayTds + '</tr>';
@@ -1725,8 +1874,14 @@ function scSetCell(name, date, shift) {
   }
   /* 同时更新 scheduleResult（若已生成） */
   let rr = (S.scheduleResult || []).find(x => x.name === name && x.date === date);
-  if (rr) rr.shift = shift;
-  else if (shift) (S.scheduleResult = S.scheduleResult || []).push({ date, name, shift, biz: '' });
+  if (rr) {
+    rr.shift = shift;
+    rr.support = false;   /* ★ 手工编辑 → 清掉支援标记 */
+  } else if (shift) {
+    (S.scheduleResult = S.scheduleResult || []).push({
+      date, name, shift, biz: '', support: false
+    });
+  }
 }
 
 /* 该员工在 date 是否有明确日期的休假诉求（leave_on） */

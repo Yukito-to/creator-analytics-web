@@ -1045,7 +1045,15 @@ tbody tr:active td:first-child { background: #FAFAF7; }
 }
 
 /* 排班表格 */
-.sc-grid-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+/* 排班表滚动容器：横向 + 纵向滚动；
+   纵向滚动使得表头 sticky top:0 生效（否则 sticky 无参照，视觉上"粘不住"） */
+.sc-grid-scroll {
+  overflow-x: auto;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  max-height: calc(100vh - 220px);   /* 视口高度 - 顶部/卡片/工具栏预留 */
+  min-height: 320px;
+}
 #scGridTable {
   border-collapse: separate; border-spacing: 0;
   font-size: 12px; white-space: nowrap;
@@ -1061,14 +1069,22 @@ tbody tr:active td:first-child { background: #FAFAF7; }
   top: 32px; font-size: 11px; font-weight: 400; color: #77778A;
   padding: 2px 8px 4px;
 }
-/* 第 1 列：业务线（sticky left:0） */
+/* 第 1 列：业务线（sticky left:0 + top:0 双向固定） */
 #scGridTable tbody td:nth-child(1),
 #scGridTable thead th:nth-child(1) {
   position: sticky; left: 0; background: #FFFFFF; z-index: 4;
   text-align: center; min-width: 56px; width: 56px; max-width: 56px;
   box-shadow: inset -1px 0 0 #E7E5DE;
 }
-#scGridTable thead th:nth-child(1) { z-index: 5; background: #F4F3EF; }
+/* ★ 表头第 1 列：双向 sticky（top:0 + left:0），并加底部阴影分隔数据行 */
+#scGridTable thead th:nth-child(1) {
+  top: 0; left: 0; z-index: 5; background: #F4F3EF;
+  box-shadow: inset -1px 0 0 #E7E5DE, inset 0 -1px 0 #E7E5DE;
+}
+/* ★ 第二行表头第 1 列：top:32px + left:0 */
+#scGridTable thead tr:nth-child(2) th:nth-child(1) {
+  top: 32px; left: 0;
+}
 
 /* 第 2 列：员工（sticky left:56px = 业务线列宽） */
 #scGridTable tbody td:nth-child(2),
@@ -1076,7 +1092,15 @@ tbody tr:active td:first-child { background: #FAFAF7; }
   position: sticky; left: 56px; background: #FFFFFF; z-index: 4;
   text-align: left; min-width: 96px; box-shadow: inset -1px 0 0 #E7E5DE;
 }
-#scGridTable thead th:nth-child(2) { z-index: 5; background: #F4F3EF; }
+/* ★ 表头第 2 列：双向 sticky（top:0 + left:56px） */
+#scGridTable thead th:nth-child(2) {
+  top: 0; left: 56px; z-index: 5; background: #F4F3EF;
+  box-shadow: inset -1px 0 0 #E7E5DE, inset 0 -1px 0 #E7E5DE;
+}
+/* ★ 第二行表头第 2 列：top:32px + left:56px */
+#scGridTable thead tr:nth-child(2) th:nth-child(2) {
+  top: 32px; left: 56px;
+}
 
 /* 日期列头：日期一行 + 「周 X（标签）」一行；均强制单行不换行 */
 .sc-date-h {

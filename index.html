@@ -337,22 +337,24 @@
           <p class="sc-rules-note">按「三倍天数」阈值从高到低匹配，取第一个满足 `三倍天数 ≥ X` 的规则；未匹配到任何规则的员工不计算应休。</p>
         </div>
 
-        <!-- [7] 生成按钮 -->
-        <div class="head-controls" style="margin-top:16px">
-          <button id="btnScRun" class="btn primary">🚀 生成排班</button>
-          <button id="btnScExport" class="btn sm">📥 导出 XLSX</button>
-          <button id="btnScCopy" class="btn sm">📋 复制 Markdown</button>
-          <button id="btnScClear" class="btn sm">清空</button>
-        </div>
+        <!-- ★ 排班规则说明面板（硬约束 / 软约束 / 局部搜索） -->
+        <div id="scRulesSummary" class="sc-rules-summary" style="margin-top:16px"></div>
+
+        <!-- [7] 生成按钮已移至「排班结果」子页 -->
       </div>
     </div>
 
     <div id="scSub-result" class="sub-view">
       <div class="card">
-        <div class="card-head"><h2>📊 排班结果</h2></div>
-
-        <!-- ★ 当前配置摘要（同时显示两个业务线） -->
-        <div id="scRulesSummary" class="sc-rules-summary"></div>
+        <div class="card-head">
+          <h2>📊 排班结果</h2>
+          <div class="head-controls" style="margin-top:8px">
+            <button id="btnScRun" class="btn primary">🚀 生成排班</button>
+            <button id="btnScExport" class="btn sm">📥 导出 XLSX</button>
+            <button id="btnScCopy" class="btn sm">📋 复制 Markdown</button>
+            <button id="btnScClear" class="btn sm">清空</button>
+          </div>
+        </div>
 
         <!-- 排班失败 / 诊断信息 -->
         <div id="scDiag" class="muted" style="margin-top:10px"></div>

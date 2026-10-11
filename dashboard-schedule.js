@@ -2140,6 +2140,110 @@ function renderScGrid() {
 /* 拖拽是否移动过（用于抑制拖拽结束后的 click 弹窗） */
 let scDragMoved = false;
 
+/* ★ 单元格班次选择浮层：
+     · 在点击位置旁弹出，选项 = 当前业务线班次池（scBizState 决定）
+     · 若班次池为空，则回退到 S.shiftMeta 里所有班次（工作 + 休息）
+     · 额外给一个「（清空）」选项
+     · 点击浮层外 / Esc / 再次点击同一格 → 关闭
+   返回值：无。选择结果通过 scSetCell 写回，并触发 renderScGrid。 */
+function scShowShiftPicker(anchorTd, name, date, cur) {
+  /* 清掉可能残留的旧浮层 */
+  const old = document.getElementById('scShiftPicker');
+  if (old) old.remove();
+
+  /* 选项来源：优先当前业务线班次池，其次全部班次 */
+  const biz = S.scBizState || '买手合作';
+  let pool = (S.shiftPoolByBiz && S.shiftPoolByBiz[biz]) || [];
+  if (!pool.length) {
+    /* 回退：全部班次，但把工作班次排在前面 */
+    const all = Object.keys(S.shiftMeta || {});
+    const work = all.filter(s => scIsWorkingShift(s));
+    const rest = all.filter(s => !scIsWorkingShift(s));
+    pool = work.concat(rest);
+  }
+
+  /* 组装浮层 */
+  const div = document.createElement('div');
+  div.id = 'scShiftPicker';
+  div.style.cssText = 'position:absolute;z-index:9999;background:#fff;' +
+    'border:1px solid var(--border-2);border-radius:8px;' +
+    'box-shadow:0 6px 20px rgba(60,60,80,.18);padding:6px;' +
+    'max-height:260px;overflow:auto;min-width:110px';
+
+  /* 「清空」置顶，用淡灰样式 */
+  let html = '<div data-v="" style="padding:6px 12px;font-size:12.5px;' +
+    'color:#A0A0AE;cursor:pointer;border-radius:6px;text-align:center">（清空）</div>';
+
+  for (const s of pool) {
+    const isCur = (s === cur);
+    const isWork = scIsWorkingShift(s);
+    const color = isWork ? '#333' : '#77778A';
+    const bg = isCur ? 'background:#E7ECF5;font-weight:600' : '';
+    html += '<div data-v="' + esc(s) + '" style="padding:6px 12px;font-size:12.5px;' +
+      'color:' + color + ';cursor:pointer;border-radius:6px;' +
+      'white-space:nowrap;' + bg + '">' + esc(s) + '</div>';
+  }
+  div.innerHTML = html;
+  document.body.appendChild(div);
+
+  /* 定位：默认贴在单元格下方，超出右边界则左移 */
+  const rect = anchorTd.getBoundingClientRect();
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  let left = rect.left + window.scrollX;
+  let top  = rect.bottom + window.scrollY + 2;
+  const divW = div.offsetWidth;
+  const divH = div.offsetHeight;
+  if (left + divW > vw - 8) left = Math.max(4, vw - divW - 8);
+  if (rect.bottom + divH > vh - 8) top = Math.max(4, rect.top + window.scrollY - divH - 2);
+  div.style.left = left + 'px';
+  div.style.top  = top + 'px';
+
+  /* 关闭函数 */
+  const close = () => {
+    document.removeEventListener('mousedown', onOutside, true);
+    document.removeEventListener('keydown', onKey, true);
+    const d = document.getElementById('scShiftPicker');
+    if (d) d.remove();
+  };
+  const onOutside = (e) => {
+    if (!div.contains(e.target)) close();
+  };
+  const onKey = (e) => {
+    if (e.key === 'Escape') close();
+  };
+
+  /* 选项点击 */
+  div.querySelectorAll('div[data-v]').forEach(item => {
+    item.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const v = item.dataset.v || '';
+      scSetCell(name, date, v);
+      close();
+      renderScGrid();
+      /* 焦点交还表格，方便继续 Ctrl+C/V */
+      const t = document.getElementById('scGridTable');
+      if (t) { try { t.focus({ preventScroll: true }); } catch (_) { t.focus(); } }
+    });
+    /* 悬停高亮 */
+    item.addEventListener('mouseenter', () => {
+      item.style.background = item.dataset.v === cur ? '#DDE6F5' : '#F4F3EF';
+    });
+    item.addEventListener('mouseleave', () => {
+      item.style.background = item.dataset.v === cur ? '#E7ECF5' : '';
+    });
+  });
+
+  /* 延迟绑定外部点击：避免本次 mousedown 冒泡立刻关闭 */
+  setTimeout(() => {
+    document.addEventListener('mousedown', onOutside, true);
+    document.addEventListener('keydown', onKey, true);
+    /* 挂到浮层节点上，供外部（如再次点击格子）能正确 removeEventListener */
+    div._scOutside = onOutside;
+    div._scKey     = onKey;
+  }, 0);
+}
+
 function bindScGridEvents(tbl, emps, dates) {
   /* 清理上一次渲染遗留的监听，避免重复叠加 */
   if (tbl._scCopy)    document.removeEventListener('copy', tbl._scCopy);
@@ -2150,21 +2254,31 @@ function bindScGridEvents(tbl, emps, dates) {
   const cells = tbl.querySelectorAll('.sc-grid-cell');
   tbl.tabIndex = 0;
 
-  /* 单击 → 弹出班次选择（简版：prompt） */
+  /* 单击 → 弹出班次选择浮层（下拉） */
   cells.forEach(td => {
-    td.addEventListener('click', () => {
+    td.addEventListener('click', (e) => {
       if (scDragMoved) { scDragMoved = false; return; }
-      const cur = td.textContent.trim();
-      const next = prompt(
-        '输入班次（留空 = 清空）\n' +
-        '可选：' + Object.keys(S.shiftMeta).join(' / '),
-        cur
-      );
-      if (next == null) return;
-      scSetCell(td.dataset.name, td.dataset.date, next.trim());
-      renderScGrid();
-      const t = document.getElementById('scGridTable');
-      if (t) { try { t.focus({ preventScroll: true }); } catch (_) { t.focus(); } }
+
+      /* ★ 若浮层已存在，先关闭旧浮层（同一格二次点击 → 收起） */
+      const oldPicker = document.getElementById('scShiftPicker');
+      if (oldPicker) {
+        const wasSame = oldPicker._scAnchor === td;
+        if (oldPicker._scOutside) document.removeEventListener('mousedown', oldPicker._scOutside, true);
+        if (oldPicker._scKey)     document.removeEventListener('keydown',   oldPicker._scKey,     true);
+        oldPicker.remove();
+        if (wasSame) return;
+      }
+
+      /* ★ 取当前格子显示值（去掉「博主」徽章文字影响） */
+      let cur = td.textContent.trim();
+      if (cur.indexOf('博主') >= 0) cur = cur.replace(/博主/g, '').trim();
+
+      /* ★ 弹出自定义下拉浮层 */
+      scShowShiftPicker(td, td.dataset.name, td.dataset.date, cur);
+      const picker = document.getElementById('scShiftPicker');
+      if (picker) picker._scAnchor = td;
+
+      e.stopPropagation();
     });
   });
 

@@ -1268,6 +1268,106 @@ function initBizSwitchers() {
   }
 }
 
+/* ★ 周次下拉改造：原生 <select> 展开列表高度不可控，
+   这里隐藏原 select（保留为数据源），在其旁边创建自定义触发器 + 浮层，
+   浮层 max-height 限制为约 4 项高度（4 × 36px ≈ 144px），其余滚动查看。
+   与 initBizSwitchers 思路一致：点选项 → 更新 select.value + 派发 change。 */
+function initWeekPicker() {
+  const sel = document.getElementById('rpWK');
+  if (!sel) return;
+
+  /* ---------- 首次：隐藏 select + 创建触发器 + 浮层 + 绑定事件 ---------- */
+  if (!sel._wpInited) {
+    sel._wpInited = true;
+    sel.style.display = 'none';
+
+    const wrap = document.createElement('div');
+    wrap.id = 'rpWKPicker';
+    wrap.style.cssText = 'position:relative;display:inline-block;' +
+      'flex:1 1 auto;min-width:0';
+
+    wrap.innerHTML =
+      '<div id="rpWKTrigger" style="display:flex;align-items:center;' +
+        'justify-content:space-between;gap:8px;padding:9px 10px;' +
+        'border:1px solid var(--border-2);border-radius:8px;' +
+        'background:#fff;cursor:pointer;font-size:13.5px;' +
+        'font-family:inherit;color:#33333D;user-select:none;' +
+        'min-height:40px;box-sizing:border-box">' +
+        '<span id="rpWKLabel" style="flex:1;overflow:hidden;' +
+          'text-overflow:ellipsis;white-space:nowrap">—</span>' +
+        '<span style="color:#77778A;font-size:10px;flex:none">▼</span>' +
+      '</div>' +
+      '<div id="rpWKList" style="display:none;position:absolute;' +
+        'top:calc(100% + 4px);left:0;right:0;z-index:100;' +
+        'background:#fff;border:1px solid var(--border-2);' +
+        'border-radius:8px;box-shadow:0 6px 20px rgba(60,60,80,.15);' +
+        'max-height:144px;overflow-y:auto;padding:4px;' +
+        'box-sizing:border-box">' +
+      '</div>';
+
+    /* 插到 select 之前，确保在 label 的 flex 布局中占位 */
+    sel.parentNode.insertBefore(wrap, sel);
+
+    const trigger = wrap.querySelector('#rpWKTrigger');
+    const listEl  = wrap.querySelector('#rpWKList');
+    const labelEl = wrap.querySelector('#rpWKLabel');
+
+    /* 触发器点击 → 开关浮层 */
+    trigger.addEventListener('click', (e) => {
+      e.stopPropagation();
+      listEl.style.display = (listEl.style.display === 'none') ? 'block' : 'none';
+    });
+
+    /* 点击外部 / Esc → 关闭浮层 */
+    document.addEventListener('click', (e) => {
+      if (!wrap.contains(e.target)) listEl.style.display = 'none';
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') listEl.style.display = 'none';
+    });
+
+    /* 每次调用时刷新：选项 + 触发器文字 */
+    sel._wpRefresh = function () {
+      const opts = Array.from(sel.options);
+      const cur  = sel.value;
+      const curOpt = opts.find(o => o.value === cur);
+      labelEl.textContent = curOpt ? curOpt.textContent
+                                   : (opts[0] ? opts[0].textContent : '—');
+
+      listEl.innerHTML = opts.map(o => {
+        const on = o.value === cur;
+        return '<div data-v="' + esc(o.value) + '" data-cur="' + (on ? '1' : '') + '" ' +
+          'style="padding:7px 10px;font-size:12.5px;border-radius:6px;' +
+          'cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;' +
+          (on ? 'background:#E7ECF5;font-weight:600' : '') + '">' +
+          esc(o.textContent) + '</div>';
+      }).join('');
+
+      listEl.querySelectorAll('div[data-v]').forEach(item => {
+        item.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const v = item.dataset.v;
+          if (sel.value !== v) {
+            sel.value = v;
+            sel.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+          listEl.style.display = 'none';
+          sel._wpRefresh();
+        });
+        item.addEventListener('mouseenter', () => {
+          if (item.dataset.cur !== '1') item.style.background = '#F4F3EF';
+        });
+        item.addEventListener('mouseleave', () => {
+          if (item.dataset.cur !== '1') item.style.background = '';
+        });
+      });
+    };
+  }
+
+  /* ---------- 每次调用：刷新选项与触发器文字 ---------- */
+  if (sel._wpRefresh) sel._wpRefresh();
+}
+
 /* ★ 让所有业务线按钮组重新高亮（读各自的 select.value） */
 function syncBizSwitchers() {
   const ids = ['#ovBiz','#peBiz','#tmBiz','#s30Biz','#a2Biz','#slaBiz','#rpBiz','#fcBiz'];
@@ -1314,6 +1414,9 @@ function initSelects() {
   /* ★ 所有业务线下拉 → 按钮组；初始化后再同步一次高亮 */
   initBizSwitchers();
   syncBizSwitchers();
+
+  /* ★ 周次下拉 → 自定义浮层（最多 4 项高度，其余滚动） */
+  initWeekPicker();
 }
 
 function bindEvents() {

@@ -23,6 +23,13 @@ const SC_COLOR_REST_ALGO = '#FFA94D';   // 橙色：非员工诉求的休息（�
   if (!S.scNoSupportBlogger) S.scNoSupportBlogger = new Set();
 })();
 
+/* ★ 日度量级匹配视图选择：业务线多选集合 + 所选日期 */
+(function initScCoverageSel() {
+  if (!S.scCoverageSel) {
+    S.scCoverageSel = { bizSet: new Set(SC_BIZ_LIST), date: '' };
+  }
+})();
+
 /* ==================== 班次 / 日期工具 ==================== */
 function scIsLateShift(shift) {
   const meta = S.shiftMeta && S.shiftMeta[shift];
@@ -2685,61 +2692,199 @@ function scComputeDemandTable(biz, dates) {
   return out;
 }
 
-/* ==================== 日度量级匹配 · 每日总览 ==================== */
+/* ==================== 日度量级匹配 · 每日总览 + 时段明细 ==================== */
 function renderScCoverageDaily() {
-  const el = document.getElementById('scCoverageDaily');
+  const bizBar   = document.getElementById('scCovBiz');
+  const dateWrap = document.getElementById('scCovDateWrap');
+  const el       = document.getElementById('scCoverageDaily');
+  const el2      = document.getElementById('scCoverage');
   if (!el) return;
+
+  /* 未生成排班结果：清空控件与表格，仅显示提示 */
   if (!(S.scheduleResult || []).length) {
+    if (bizBar)   bizBar.innerHTML   = '';
+    if (dateWrap) dateWrap.innerHTML = '';
     el.innerHTML = '<p class="muted">生成排班后显示日度量级匹配。</p>';
+    if (el2) el2.innerHTML = '';
     return;
   }
+
   const c = scGetCycle();
   const dates = scDatesBetween(c.start, c.end);
-  if (!dates.length) { el.innerHTML = '<p class="muted">排班周期无效。</p>'; return; }
+  if (!dates.length) {
+    if (bizBar)   bizBar.innerHTML   = '';
+    if (dateWrap) dateWrap.innerHTML = '';
+    el.innerHTML = '<p class="muted">排班周期无效。</p>';
+    if (el2) el2.innerHTML = '';
+    return;
+  }
 
-  const rows = [];
-  for (const biz of SC_BIZ_LIST) {
-    const demand = scComputeDemandTable(biz, dates);
-    for (const d of dates) {
-      /* 预测量：Σ 各时段 */
-      let forecast = 0;
-      if (S.volumeForecast && S.volumeForecast[biz] && S.volumeForecast[biz][d] > 0) {
-        forecast = S.volumeForecast[biz][d];
-      } else if (demand[d]) {
-        for (const h of SC_HOURS) forecast += demand[d][h] || 0;
-      }
+  /* 视图状态兜底 */
+  if (!S.scCoverageSel || !(S.scCoverageSel.bizSet instanceof Set)) {
+    S.scCoverageSel = { bizSet: new Set(SC_BIZ_LIST), date: '' };
+  }
+  if (dates.indexOf(S.scCoverageSel.date) < 0) S.scCoverageSel.date = dates[0];
 
-      /* 可承接量：Σ(员工 CPH × 在岗小时) */
-      let capacity = 0;
-      for (const r of S.scheduleResult) {
-        if (r.date !== d || r.biz !== biz) continue;
-        const mins = (S.shiftPeriods || {})[r.shift] || {};
-        const cph = (S.employeeCPH || {})[r.name] || {};
-        for (const h in mins) {
-          if (mins[h] > 0 && cph[h]) capacity += cph[h] * (mins[h] / 60);
-        }
-      }
+  /* 业务线多选 chips */
+  if (bizBar) {
+    bizBar.innerHTML = SC_BIZ_LIST.map(b =>
+      '<span class="chip' + (S.scCoverageSel.bizSet.has(b) ? ' on' : '') +
+      '" data-biz="' + esc(b) + '">' + esc(b) + '</span>'
+    ).join('');
+    bizBar.querySelectorAll('.chip').forEach(ch => {
+      ch.addEventListener('click', () => {
+        const b = ch.dataset.biz;
+        if (S.scCoverageSel.bizSet.has(b)) S.scCoverageSel.bizSet.delete(b);
+        else S.scCoverageSel.bizSet.add(b);
+        if (!S.scCoverageSel.bizSet.size) S.scCoverageSel.bizSet = new Set(SC_BIZ_LIST);
+        renderScCoverageDaily();
+      });
+    });
+  }
 
-      const gap = capacity - forecast;
-      const gapPct = forecast > 0 ? (gap / forecast * 100) : 0;
-      const ok = gap >= -forecast * 0.02;   /* 允许 2% 波动 */
-      const color = ok ? '#6EA980' : '#D9363E';
-
-      rows.push('<tr>' +
-        '<td>' + esc(d) + ' 周' + esc(WEEKDAY_CN[scWeekdayOf(d)]) + '</td>' +
-        '<td>' + esc(biz) + '</td>' +
-        '<td style="text-align:right">' + Math.round(forecast) + '</td>' +
-        '<td style="text-align:right">' + Math.round(capacity) + '</td>' +
-        '<td style="text-align:right;color:' + color + ';font-weight:600">' + (gap >= 0 ? '+' : '') + Math.round(gap) + '</td>' +
-        '<td style="text-align:right;color:' + color + ';font-weight:600">' + (gapPct >= 0 ? '+' : '') + gapPct.toFixed(1) + '%</td>' +
-        '<td style="text-align:center;color:' + color + ';font-weight:600">' + (ok ? '✓ 承接充足' : '⚠ 承接不足') + '</td>' +
-        '</tr>');
+  /* 日期下拉（带星期与日期类型标签） */
+  if (dateWrap) {
+    const opts = dates.map(d => {
+      const wd  = WEEKDAY_CN[scWeekdayOf(d)];
+      const cls = classifyDate(d);
+      const tag = cls === 'holiday' ? '节假日'
+                : cls === 'workday' ? '调休上班'
+                : cls === 'weekend' ? '周末' : '工作日';
+      return '<option value="' + d + '"' +
+        (d === S.scCoverageSel.date ? ' selected' : '') + '>' +
+        d + ' 周' + wd + '（' + tag + '）</option>';
+    }).join('');
+    dateWrap.innerHTML =
+      '<select id="scCovDateSel" style="width:100%;max-width:320px;padding:8px 10px;' +
+      'border:1px solid var(--border-2,#ddd);border-radius:8px;font-family:inherit;' +
+      'font-size:13px;background:#fff;outline:none">' + opts + '</select>';
+    const sel = document.getElementById('scCovDateSel');
+    if (sel) {
+      sel.addEventListener('change', () => {
+        S.scCoverageSel.date = sel.value;
+        renderScCoverageDaily();
+      });
     }
   }
 
-  el.innerHTML = '<div class="table-scroll-x"><table class="rp-table"><thead><tr>' +
-    '<th>日期</th><th>业务线</th><th style="text-align:right">预测量</th>' +
-    '<th style="text-align:right">可承接量</th><th style="text-align:right">缺口</th>' +
-    '<th style="text-align:right">缺口率</th><th>状态</th>' +
-    '</tr></thead><tbody>' + rows.join('') + '</tbody></table></div>';
+  const date = S.scCoverageSel.date;
+  const bizList = SC_BIZ_LIST.filter(b => S.scCoverageSel.bizSet.has(b));
+  if (!bizList.length) bizList.push(SC_BIZ_LIST[0]);
+
+  const demandAll = {};
+  for (const biz of bizList) demandAll[biz] = scComputeDemandTable(biz, [date]);
+
+  /* —— 区域 4：所选日期 · 各业务线汇总 —— */
+  const summaryRows = [];
+  for (const biz of bizList) {
+    let forecast = 0;
+    if (S.volumeForecast && S.volumeForecast[biz] && S.volumeForecast[biz][date] > 0) {
+      forecast = S.volumeForecast[biz][date];
+    } else if (demandAll[biz] && demandAll[biz][date]) {
+      for (const h of SC_HOURS) forecast += demandAll[biz][date][h] || 0;
+    }
+
+    let capacity = 0;
+    for (const r of S.scheduleResult) {
+      if (r.date !== date || r.biz !== biz) continue;
+      const mins = (S.shiftPeriods || {})[r.shift] || {};
+      const cph  = (S.employeeCPH || {})[r.name] || {};
+      for (const h in mins) {
+        if (mins[h] > 0 && cph[h]) capacity += cph[h] * (mins[h] / 60);
+      }
+    }
+
+    const gap    = capacity - forecast;
+    const gapPct = forecast > 0 ? (gap / forecast * 100) : 0;
+    const ok     = gap >= -forecast * 0.02;
+    const color  = ok ? '#6EA980' : '#D9363E';
+
+    summaryRows.push('<tr>' +
+      '<td>' + esc(biz) + '</td>' +
+      '<td style="text-align:right">' + Math.round(forecast) + '</td>' +
+      '<td style="text-align:right">' + Math.round(capacity) + '</td>' +
+      '<td style="text-align:right;color:' + color + ';font-weight:600">' +
+        (gap >= 0 ? '+' : '') + Math.round(gap) + '</td>' +
+      '<td style="text-align:right;color:' + color + ';font-weight:600">' +
+        (gapPct >= 0 ? '+' : '') + gapPct.toFixed(1) + '%</td>' +
+      '<td style="text-align:center;color:' + color + ';font-weight:600">' +
+        (ok ? '✓ 承接充足' : '⚠ 承接不足') + '</td>' +
+      '</tr>');
+  }
+
+  const wd = WEEKDAY_CN[scWeekdayOf(date)];
+  el.innerHTML =
+    '<div class="muted" style="font-size:12px;margin-bottom:8px">' +
+      '📅 <b>' + date + '</b> 周' + wd + ' · 业务线：<b>' +
+      bizList.map(b => esc(b)).join(' / ') + '</b></div>' +
+    '<div class="table-scroll-x"><table class="rp-table"><thead><tr>' +
+      '<th>业务线</th><th style="text-align:right">预测量</th>' +
+      '<th style="text-align:right">可承接量</th><th style="text-align:right">缺口</th>' +
+      '<th style="text-align:right">缺口率</th><th>状态</th>' +
+      '</tr></thead><tbody>' + summaryRows.join('') + '</tbody></table></div>';
+
+  if (!el2) return;
+
+  /* —— 区域 5：所选日期 · 逐时段明细 —— */
+  const head = '<tr><th>业务线</th><th>时段</th>' +
+    '<th style="text-align:right">预测量</th>' +
+    '<th style="text-align:right">可承接量</th>' +
+    '<th style="text-align:right">缺口</th>' +
+    '<th style="text-align:center">状态</th></tr>';
+
+  const detailRows = [];
+  for (const biz of bizList) {
+    const cap = {};
+    for (const r of S.scheduleResult) {
+      if (r.date !== date || r.biz !== biz) continue;
+      const mins = (S.shiftPeriods || {})[r.shift] || {};
+      const cph  = (S.employeeCPH || {})[r.name] || {};
+      for (const h in mins) {
+        if (mins[h] > 0 && cph[h]) cap[h] = (cap[h] || 0) + cph[h];
+      }
+    }
+    const demand = (demandAll[biz] && demandAll[biz][date]) || {};
+
+    let needSum = 0, capSum = 0;
+    for (const h of SC_HOURS) { needSum += demand[h] || 0; capSum += cap[h] || 0; }
+    const sumGap = capSum - needSum;
+    const sumOk  = sumGap >= -needSum * 0.02;
+    const sumClr = needSum > 0 ? (sumOk ? '#6EA980' : '#D9363E') : '#8B8B8B';
+
+    detailRows.push(
+      '<tr style="background:#F4F3EF;font-weight:600">' +
+      '<td>' + esc(biz) + '</td>' +
+      '<td style="text-align:center">合计</td>' +
+      '<td style="text-align:right">' + Math.round(needSum) + '</td>' +
+      '<td style="text-align:right">' + Math.round(capSum) + '</td>' +
+      '<td style="text-align:right;color:' + sumClr + '">' +
+        (needSum > 0 ? ((sumGap >= 0 ? '+' : '') + Math.round(sumGap)) : '—') + '</td>' +
+      '<td style="text-align:center;color:' + sumClr + '">' +
+        (needSum > 0 ? (sumOk ? '✓' : '⚠') : '—') + '</td>' +
+      '</tr>'
+    );
+
+    for (const h of SC_HOURS) {
+      const need = Math.round(demand[h] || 0);
+      const got  = Math.round(cap[h] || 0);
+      const bad  = need > 0 && got < need;
+      const clr  = need > 0 ? (bad ? '#D9363E' : '#6EA980') : '#8B8B8B';
+      const gapH = got - need;
+      detailRows.push(
+        '<tr>' +
+        '<td>' + esc(biz) + '</td>' +
+        '<td style="text-align:center">' + h + ':00</td>' +
+        '<td style="text-align:right">' + (need || '—') + '</td>' +
+        '<td style="text-align:right">' + (got || (need ? 0 : '—')) + '</td>' +
+        '<td style="text-align:right;color:' + clr + '">' +
+          (need > 0 ? ((gapH >= 0 ? '+' : '') + gapH) : '—') + '</td>' +
+        '<td style="text-align:center;color:' + clr + '">' +
+          (need > 0 ? (bad ? '⚠' : '✓') : '—') + '</td>' +
+        '</tr>'
+      );
+    }
+  }
+
+  el2.innerHTML = '<div class="table-scroll-x"><table class="rp-table"><thead>' +
+    head + '</thead><tbody>' + detailRows.join('') + '</tbody></table></div>';
 }

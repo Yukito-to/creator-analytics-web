@@ -523,8 +523,25 @@ function generateSchedule() {
       });
     }
   }
-  scValidateQuota(ctx);       // H5 后验校验（只告警不回改，避免初期无人可排）
-  scValidateShiftCounts(ctx); // ★ 班次人数「等于」后验校验（不足 / 超编告警）
+  scValidateQuota(ctx);      // H5 后验校验（只告警不回改，避免初期无人可排）
+
+  /* ★ 硬约束：班次人数必须严格等于规则。
+       不满足 → 不覆盖 S.scheduleResult（保留上次成功的），
+       仅记录失败详情到 S.scheduleDiag，返回 null。 */
+  const countCheck = scValidateShiftCounts(ctx);
+
+  if (!countCheck.ok) {
+    S.scheduleDiag = {
+      dateCount: ctx.dates.length,
+      employeeCount: scActiveEmployees().length,
+      totalSlots: 0,
+      failed: true,
+      mismatches: countCheck.mismatches,
+      warnings: ['❌ 班次人数不符合规则，排班已取消'],
+    };
+    return null;
+  }
+
   S.scheduleResult = result;
   S.scheduleDiag = scBuildDiag(ctx, result);
   return result;
@@ -985,10 +1002,15 @@ function scValidateQuota(ctx) {
    · 实际 > 目标 → 记为「超编」（理论上不会发生，防御性检查）
    · 实际 < 目标 → 记为「不足」（常见原因：人力不够 / 硬约束冲突）
    结果写入 ctx.warnings（最多保留 30 条，避免刷屏）。 */
+/* ★ 硬约束校验：逐 (date, biz, shift) 检查实际分配人数是否严格等于目标。
+   返回 { ok, mismatches }，由 generateSchedule 决定是否中止。
+   - ok = true  → 全部符合
+   - ok = false → mismatches 数组，每项 { date, biz, shift, need, actual, diff } */
 function scValidateShiftCounts(ctx) {
-  if (!ctx || !ctx.dates || !ctx.dates.length) return;
-  if (!S.shiftPool || !S.shiftPool.length) return;
-  const details = [];
+  const mismatches = [];
+  if (!ctx || !ctx.dates || !ctx.dates.length) return { ok: true, mismatches };
+  if (!S.shiftPool || !S.shiftPool.length) return { ok: true, mismatches };
+
   for (const d of ctx.dates) {
     if (!ctx.assigned[d]) continue;
     for (const biz of SC_BIZ_LIST) {
@@ -1000,40 +1022,15 @@ function scValidateShiftCounts(ctx) {
           if (ctx.assigned[d][n] === shift && ctx.assignedBiz[d][n] === biz) actual++;
         }
         if (actual !== need) {
-          details.push({
-            date: d, biz: biz, shift: shift, need: need, actual: actual,
-            diff: actual - need
+          mismatches.push({
+            date: d, biz: biz, shift: shift,
+            need: need, actual: actual, diff: actual - need
           });
         }
       }
     }
   }
-  if (!details.length) return;
-
-  /* 汇总：不足条数 / 超编条数 / 总计缺口 */
-  let underCount = 0, overCount = 0, totalGap = 0;
-  for (const x of details) {
-    if (x.diff < 0) { underCount++; totalGap += (-x.diff); }
-    else overCount++;
-  }
-
-  /* 简要汇总行（放在 warnings 最前面，方便一眼看到） */
-  if (underCount > 0) {
-    ctx.warnings.push(
-      '班次人数不足：共 ' + underCount + ' 处（累计缺口 ' + totalGap + ' 人），' +
-      '例如 ' + details.filter(x => x.diff < 0).slice(0, 3)
-        .map(x => x.date.slice(5) + ' ' + x.biz.slice(0,2) + ' ' + x.shift +
-                  '(' + x.actual + '/' + x.need + ')').join('、')
-    );
-  }
-  if (overCount > 0) {
-    ctx.warnings.push(
-      '班次人数超编：共 ' + overCount + ' 处，' +
-      '例如 ' + details.filter(x => x.diff > 0).slice(0, 3)
-        .map(x => x.date.slice(5) + ' ' + x.biz.slice(0,2) + ' ' + x.shift +
-                  '(' + x.actual + '/' + x.need + ')').join('、')
-    );
-  }
+  return { ok: mismatches.length === 0, mismatches };
 }
 
 /* 诊断信息 */
@@ -2733,7 +2730,58 @@ function renderScDiag() {
   if (!el) return;
   const diag = S.scheduleDiag || {};
   if (!diag.dateCount) { el.textContent = ''; return; }
-  const lines = ['排班范围 ' + diag.dateCount + ' 天 / 员工 ' + diag.employeeCount + ' 人 / 排班记录 ' + diag.totalSlots + ' 条'];
+
+  const baseLine = '排班范围 ' + diag.dateCount + ' 天 / 员工 ' +
+    diag.employeeCount + ' 人 / 排班记录 ' + (diag.totalSlots || 0) + ' 条';
+
+  /* ★ 失败分支：红底提示 + 可展开的明细表 */
+  if (diag.failed && Array.isArray(diag.mismatches) && diag.mismatches.length) {
+    const list = diag.mismatches;
+    const underCount = list.filter(x => x.diff < 0).length;
+    const overCount  = list.filter(x => x.diff > 0).length;
+    const totalGap   = list.reduce((s, x) => s + (x.diff < 0 ? -x.diff : 0), 0);
+
+    const rows = list.map(x => {
+      const gapColor = x.diff < 0 ? '#D9363E' : '#C98383';
+      const gapTxt   = (x.diff > 0 ? '+' : '') + x.diff;
+      return '<tr>' +
+        '<td>' + esc(x.date) + '</td>' +
+        '<td>' + esc(x.biz) + '</td>' +
+        '<td>' + esc(x.shift) + '</td>' +
+        '<td style="text-align:right">' + x.need + '</td>' +
+        '<td style="text-align:right;color:' + gapColor + ';font-weight:600">' + x.actual + '</td>' +
+        '<td style="text-align:right;color:' + gapColor + ';font-weight:600">' + gapTxt + '</td>' +
+      '</tr>';
+    }).join('');
+
+    el.innerHTML =
+      '<div style="padding:10px 14px;background:#F5E5E5;border-radius:10px;' +
+        'border-left:3px solid #C98383;color:#A64A4A;line-height:1.85;font-size:12.5px">' +
+        '❌ <b>排班失败：班次人数不符合「每天等于」规则，本次未生成。</b><br>' +
+        '不匹配 <b>' + list.length + '</b> 处' +
+        '（不足 <b>' + underCount + '</b> 处 / 累计缺口 <b>' + totalGap + '</b> 人' +
+        (overCount ? '，超编 <b>' + overCount + '</b> 处' : '') + '）。<br>' +
+        '<span style="color:#B36A00">' + esc(baseLine) + '（未更新排班表，保留上次结果）</span>' +
+      '</div>' +
+      '<details style="margin-top:10px">' +
+        '<summary style="cursor:pointer;font-size:12.5px;color:#B36A00;' +
+          'user-select:none;outline:none;padding:4px 0">' +
+          '📋 点击查看不匹配明细（共 ' + list.length + ' 条）' +
+        '</summary>' +
+        '<div class="table-scroll-x" style="margin-top:8px;max-height:340px;overflow:auto">' +
+          '<table class="rp-table"><thead><tr>' +
+            '<th>日期</th><th>业务线</th><th>班次</th>' +
+            '<th style="text-align:right">规则人数</th>' +
+            '<th style="text-align:right">实际人数</th>' +
+            '<th style="text-align:right">差额</th>' +
+          '</tr></thead><tbody>' + rows + '</tbody></table>' +
+        '</div>' +
+      '</details>';
+    return;
+  }
+
+  /* 常规分支：保持原样 */
+  const lines = [baseLine];
   if (diag.warnings && diag.warnings.length) {
     lines.push('⚠ 诊断：' + diag.warnings.join('；'));
   } else {
@@ -2847,8 +2895,17 @@ async function scCopyMarkdown() {
       if (btn && !btn._scBound) { btn._scBound = true; btn.addEventListener('click', fn); }
     };
     bind('btnScRun', () => {
-      try { generateSchedule(); renderSchedulePanel(); }
-      catch (e) { console.error(e); toast('排班失败：' + e.message); }
+      try {
+        const r = generateSchedule();
+        renderSchedulePanel();
+        if (r == null && S.scheduleDiag && S.scheduleDiag.failed) {
+          const n = (S.scheduleDiag.mismatches || []).length;
+          toast('❌ 排班失败：' + n + ' 处班次人数不符合规则，详见诊断栏');
+        }
+      } catch (e) {
+        console.error(e);
+        toast('排班失败：' + e.message);
+      }
     });
     bind('btnScExport', scExportXlsx);
     bind('btnScCopy', scCopyMarkdown);

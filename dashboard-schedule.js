@@ -382,9 +382,15 @@ function generateSchedule() {
     cph: S.employeeCPH,
     parsed: scLoadParsedRequests(),
     stats: {}, lastShift: {}, workStreak: {},
+    preStreak: {},                      /* ★ 前置连续工作天数基线 */
     assigned: {}, assignedBiz: {},
     demandVol: {}, warnings: [],
   };
+
+  /* ★ H4 跨周期：用前置排班初始化连续工作天数与「上次班次」，
+       否则周期第 1 天会把所有人当作 streak=0，导致跨越周期的超长连班。 */
+  scInitStreakFromPre(ctx, c.start);
+
   for (const biz of SC_BIZ_LIST) ctx.demandVol[biz] = scComputeDemandTable(biz, dates);
 
   /* ---- 逐日贪心：专属池 → 缺口征调 → 休息填充 ---- */
@@ -637,10 +643,59 @@ function scUpdateStreak(ctx, date) {
   }
 }
 
+/* ★ 用「前置排班」（周期起始日之前）初始化每位员工的连续工作天数。
+   回溯规则：
+     · 从 cycleStart 前一天开始，逐日向前推
+     · 遇到非工作班次（休/假等）→ 停止
+     · 遇到缺失记录（草稿里没有这天）→ 视为未知，停止
+     · 遇到员工当天不在职 → 停止
+     · 最多回溯 MAX_LOOKBACK 天（防御性上限）
+
+   结果：
+     ctx.workStreak[name] = 连续工作天数（作为周期第 1 天的初始值）
+     ctx.lastShift[name]  = 紧邻周期起始日那天的班次（用于 S2 一致性打分）
+     ctx.preStreak[name]  = 同上（常量基线，供 scStreakOK 跨周期复核使用） */
+function scInitStreakFromPre(ctx, cycleStart) {
+  const MAX_LOOKBACK = 30;
+  ctx.preStreak = ctx.preStreak || {};
+
+  /* 把前置草稿整理成 name → date → shift */
+  const draftMap = {};
+  for (const d of (S.scheduleDraft || [])) {
+    if (!d.name || !d.date || !d.shift) continue;
+    if (!draftMap[d.name]) draftMap[d.name] = {};
+    draftMap[d.name][d.date] = d.shift;
+  }
+
+  for (const e of scActiveEmployees()) {
+    let streak = 0;
+    let lastShift = '';
+    let cursor = dateAdd(cycleStart, -1);
+    let step = 0;
+    while (cursor && step++ < MAX_LOOKBACK) {
+      if (!scIsActiveOn(e, cursor)) break;                       // 不在职 → 停
+      const s = draftMap[e.name] && draftMap[e.name][cursor];
+      if (!s) break;                                             // 缺失 → 停（未知即视为不连续）
+      if (scIsWorkingShift(s)) {
+        streak++;
+        if (!lastShift) lastShift = s;                           // 只记最靠后那天
+        cursor = dateAdd(cursor, -1);
+      } else {
+        break;                                                   // 遇到休/假 → 停
+      }
+    }
+    ctx.workStreak[e.name] = streak;
+    ctx.lastShift[e.name]  = lastShift;
+    ctx.preStreak[e.name]  = streak;
+  }
+}
+
 /* ==================== 局部搜索优化 ==================== */
 /* 全周期重扫某员工，检查任意连续工作段 ≤6（H4） */
 function scStreakOK(ctx, dates, name) {
-  let run = 0;
+  /* ★ 起始值 = 周期起始日前的连续工作天数（前置排班），
+       否则局部搜索（换班/调休）会绕过 H4 的跨周期约束。 */
+  let run = (ctx.preStreak && ctx.preStreak[name]) || 0;
   for (const d of dates) {
     const s = ctx.assigned[d] && ctx.assigned[d][name];
     if (s && scIsWorkingShift(s)) { run++; if (run > SC_MAX_STREAK) return false; }

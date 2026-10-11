@@ -1004,19 +1004,30 @@ function scValidateQuota(ctx) {
    结果写入 ctx.warnings（最多保留 30 条，避免刷屏）。 */
 /* ★ 硬约束校验：逐 (date, biz, shift) 检查实际分配人数是否严格等于目标。
    返回 { ok, mismatches }，由 generateSchedule 决定是否中止。
-   - ok = true  → 全部符合
-   - ok = false → mismatches 数组，每项 { date, biz, shift, need, actual, diff } */
+
+   关键点：遍历的是【规则涉及的所有班次】（而不是 S.shiftPool），
+   因为规则里可能写了某班次但用户没把它勾进班次池，
+   此时 scGetShiftReq 仍会返回 need，必须一并校验。 */
 function scValidateShiftCounts(ctx) {
   const mismatches = [];
   if (!ctx || !ctx.dates || !ctx.dates.length) return { ok: true, mismatches };
-  if (!S.shiftPool || !S.shiftPool.length) return { ok: true, mismatches };
+
+  /* 收集所有规则涉及的班次（跨业务线） */
+  const shiftsInRules = new Set();
+  for (const b of SC_BIZ_LIST) {
+    const list = (S.shiftReqRules && S.shiftReqRules[b]) || [];
+    for (const r of list) {
+      if (Array.isArray(r.shifts)) for (const s of r.shifts) shiftsInRules.add(s);
+    }
+  }
+  if (!shiftsInRules.size) return { ok: true, mismatches };
 
   for (const d of ctx.dates) {
     if (!ctx.assigned[d]) continue;
     for (const biz of SC_BIZ_LIST) {
-      for (const shift of S.shiftPool) {
+      for (const shift of shiftsInRules) {
         const need = scGetShiftReq(biz, shift, d);
-        if (need == null || !isFinite(need)) continue;
+        if (need == null || !isFinite(need)) continue;   // 未命中规则 → 不校验
         let actual = 0;
         for (const n in ctx.assigned[d]) {
           if (ctx.assigned[d][n] === shift && ctx.assignedBiz[d][n] === biz) actual++;
@@ -2762,7 +2773,8 @@ function renderScDiag() {
         '不匹配 <b>' + list.length + '</b> 处' +
         '（不足 <b>' + underCount + '</b> 处 / 累计缺口 <b>' + totalGap + '</b> 人' +
         (overCount ? '，超编 <b>' + overCount + '</b> 处' : '') + '）。<br>' +
-        '<span style="color:#B36A00">' + esc(baseLine) + '（未更新排班表，保留上次结果）</span>' +
+        '<span style="color:#B36A00">' + esc(baseLine) + '（未更新排班表，保留上次结果）</span><br>' +
+        '<span style="color:#B36A00">请调小规则人数、增加可用员工、或放宽员工诉求/离职限制后重试。</span>' +
       '</div>' +
       '<details style="margin-top:10px">' +
         '<summary style="cursor:pointer;font-size:12.5px;color:#B36A00;' +
@@ -2782,13 +2794,11 @@ function renderScDiag() {
   }
 
   /* 常规分支：保持原样 */
-  const lines = [baseLine];
-  if (diag.warnings && diag.warnings.length) {
-    lines.push('⚠ 诊断：' + diag.warnings.join('；'));
-  } else {
-    lines.push('✓ 无硬约束告警');
-  }
-  el.textContent = lines.join('　|　');
+  const text = baseLine + '　|　' +
+    ((diag.warnings && diag.warnings.length)
+      ? '⚠ 诊断：' + diag.warnings.join('；')
+      : '✓ 无硬约束告警');
+  el.textContent = text;
 }
 
 /* ==================== 导出 ==================== */

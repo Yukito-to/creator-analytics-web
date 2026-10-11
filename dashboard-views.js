@@ -776,7 +776,8 @@ function renderS30DateSelector(container, allDates, biz) {
 
   let html = '';
   for (const m of months) {
-    const list = byMonth.get(m).sort();
+    /* ★ 最新日期展示在最上面（同一月内降序） */
+    const list = byMonth.get(m).sort().reverse();
     const open = S.s30MonthOpen.has(m);
     const selCount = list.filter(d => S.s30Dates.has(d)).length;
     html += '<div style="margin-bottom:10px">';
@@ -884,8 +885,9 @@ function renderS30Body(biz) {
     map[key].num += r.s30Num;
     map[key].den += r.s30Den;
   }
+  /* ★ 最新日期展示在最上面：日期降序；同一日期内时段保持升序 */
   const list = Object.values(map).sort((a, b) => {
-    if (a.date !== b.date) return a.date < b.date ? -1 : 1;
+    if (a.date !== b.date) return a.date < b.date ? 1 : -1;
     return String(a.period).localeCompare(String(b.period));
   });
 
@@ -1225,15 +1227,60 @@ function renderSLA() {
     const pointsDisp = sc.points != null ? sc.points.toFixed(2) : '—';
     const scoreDisp = sc.finalScore != null ? sc.finalScore.toFixed(2) : '—';
 
+    /* ★ 状态列：显示当前命中的档位 + 距离上一档还差多少（目标值 + 差值）
+       · belowLowest   → 展示距最低档还需要多少
+       · hitTierIndex = 0 → 满档
+       · 其它 → 展示当前档位编号 + 距上一档还需要多少
+       差值口径：
+         · up 指标（越大越好）   → 差值 = 上档 threshold − 实际值
+         · down 指标（越小越好） → 目标值 = tiers[0].threshold / 上档 threshold；
+                                   差值 = 实际值 − 目标值 */
     let statusBadge = '<span class="delta-flat">—</span>';
     if (sc.points != null) {
+      const tiers = c.cfg.tiers;
+      const better = (c.key && METRIC_MAP[c.key]) ? METRIC_MAP[c.key].better : 'up';
+      const fmtVal = v => (v == null || !isFinite(v)) ? '—'
+                       : (isPct ? (v * 100).toFixed(2) + '%' : v.toFixed(2));
+      const fmtGap = v => (v == null || !isFinite(v) || v <= 0) ? '—'
+                       : (isPct ? (v * 100).toFixed(2) + '%' : v.toFixed(2));
+      const dirTxt = (better === 'down') ? '降低' : '提升';
+
       if (sc.belowLowest) {
-        statusBadge = '<span class="rp-badge warn">未达最低档（按最低档计）</span>';
+        const lowest = tiers[tiers.length - 1];
+        let needValue, gapValue;
+        if (better === 'down') {
+          needValue = sc.threshold / lowest.threshold;
+          gapValue  = sc.actualDisp - needValue;
+        } else {
+          needValue = lowest.threshold;
+          gapValue  = lowest.threshold - sc.actualDisp;
+        }
+        statusBadge =
+          '<span class="rp-badge warn">未达最低档（' + lowest.points + ' 分档）</span>' +
+          '<div style="font-size:10.5px;color:#C98383;margin-top:3px;line-height:1.5;white-space:normal">' +
+            '距最低档还需' + dirTxt + ' <b>' + fmtGap(gapValue) + '</b><br>' +
+            '目标：' + fmtVal(needValue) +
+          '</div>';
+      } else if (sc.hitTierIndex === 0) {
+        statusBadge = '<span class="rp-badge ok">满档（' + tiers[0].points + ' 分档）</span>';
       } else {
-        const tiers = c.cfg.tiers;
-        const maxPts = Math.max.apply(null, tiers.map(t => t.points));
-        const isTop = tiers.length && sc.points === maxPts;
-        statusBadge = isTop ? '<span class="rp-badge ok">满档</span>' : '<span class="rp-badge flat">档位</span>';
+        const curTier  = tiers[sc.hitTierIndex];
+        const nextTier = tiers[sc.hitTierIndex - 1];
+        let needValue, gapValue;
+        if (better === 'down') {
+          needValue = sc.threshold / nextTier.threshold;
+          gapValue  = sc.actualDisp - needValue;
+        } else {
+          needValue = nextTier.threshold;
+          gapValue  = nextTier.threshold - sc.actualDisp;
+        }
+        statusBadge =
+          '<span class="rp-badge flat">' + curTier.points + ' 分档' +
+            '（第 ' + (sc.hitTierIndex + 1) + ' / ' + tiers.length + '）</span>' +
+          '<div style="font-size:10.5px;color:#77778A;margin-top:3px;line-height:1.5;white-space:normal">' +
+            '距上档 ' + nextTier.points + ' 分还需' + dirTxt + ' <b>' + fmtGap(gapValue) + '</b><br>' +
+            '目标：' + fmtVal(needValue) +
+          '</div>';
       }
     }
     const metricDisp = esc(it.metric) + (c.key ? '' : '<span class="sla-unknown">（未识别）</span>');

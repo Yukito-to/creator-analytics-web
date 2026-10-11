@@ -1228,7 +1228,9 @@ function initSelects() {
   if (rpWK) {
     const cur = rpWK.value;
     const wks = allWeeks();
-    rpWK.innerHTML = wks.map(w => '<option value="' + w + '">WK' + w + '（' + wkStartDate(w) + ' ~ ' + wkEndDate(w) + '）</option>').join('') || '<option value="">暂无周次</option>';
+    /* ★ 最新周次在最上面：渲染时降序（默认选中仍保留最新的逻辑） */
+    const wksDesc = wks.slice().reverse();
+    rpWK.innerHTML = wksDesc.map(w => '<option value="' + w + '">WK' + w + '（' + wkStartDate(w) + ' ~ ' + wkEndDate(w) + '）</option>').join('') || '<option value="">暂无周次</option>';
     if (cur && wks.some(w => String(w) === cur)) rpWK.value = cur;
     else if (wks.length) rpWK.value = String(wks[wks.length - 1]);
   }

@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
@@ -259,30 +259,41 @@
         <div id="scCycleHint" class="muted"
              style="font-size:11.5px;line-height:1.7;margin:-4px 0 12px 2px;color:#7B8FBF"></div>
 
-        <!-- [2] 业务线选择（顶部，全局唯一） -->
-        <div id="scBizTabs" class="head-controls" style="margin-bottom:8px"></div>
-
-        <!-- [3] 班次池 -->
-        <h3 class="sub-title">选择本业务线可排班次</h3>
-        <div id="scShiftPool" class="chips"></div>
-
-        <!-- [4] 需求设置 -->
-        <h3 class="sub-title" id="scReqToggle"
+        <!-- [2-4.5] 班次规则 · 大板块（可折叠） -->
+        <h3 class="sub-title" id="scRuleBlockToggle"
             style="cursor:pointer;user-select:none;display:flex;align-items:center;gap:6px">
-          <span id="scReqArrow" style="display:inline-block;width:12px;font-size:10px;
+          <span id="scRuleBlockArrow" style="display:inline-block;width:12px;font-size:10px;
                 color:#7B8FBF;transition:transform .15s ease">▼</span>
-          <span>班次每日人数</span>
+          <span>班次规则</span>
+          <span class="help"
+                data-tip="包含：业务线选择、本业务线可排班次、班次每日人数、支援博主设置。整体折叠后不再占据页面空间。"
+                onclick="event.stopPropagation()">?</span>
+        </h3>
+        <div id="scRuleBlockBody">
+
+          <!-- [2] 业务线选择 -->
+          <h4 class="sc-sub-h4">业务线</h4>
+          <div id="scBizTabs" class="head-controls" style="margin-bottom:12px"></div>
+
+          <!-- [4] 班次每日人数 -->
+          <h4 class="sc-sub-h4" id="scReqToggle"
+              style="cursor:pointer;user-select:none;display:flex;align-items:center;gap:6px">
+            <span id="scReqArrow" style="display:inline-block;width:12px;font-size:10px;
+                  color:#7B8FBF;transition:transform .15s ease">▼</span>
+            <span>班次每日人数</span>
           <span class="help" id="scReqHelp"
                 data-tip="每条规则 = 生效日期 + 限制班次 + 每天等于人数。多条规则同时命中同一 (日期, 班次) 时取最小值。空 = 不限制。若人数不足会在生成排班时告警。"
                 onclick="event.stopPropagation()">?</span>
-        </h3>
+          </h4>
         <div id="scReqGrid"></div>
 
-        <!-- [4.5] 支援博主设置 -->
-        <h3 class="sub-title">支援博主设置
-          <span class="help" data-tip="勾选的员工不参与支援博主合作，用于区分没有博主技能的买手员工。默认（未勾选）表示可支援。只在「买手合作」业务线 tab 下生效。">?</span>
-        </h3>
+          <!-- [4.5] 支援博主设置 -->
+          <h4 class="sc-sub-h4">支援博主设置
+            <span class="help" data-tip="勾选的员工不参与支援博主合作，用于区分没有博主技能的买手员工。默认（未勾选）表示可支援。只在「买手合作」业务线 tab 下生效。">?</span>
+          </h4>
         <div id="scSupportExclude" class="chips"></div>
+
+        </div>
 
         <!-- [5] CPH 预览 -->
         <h3 class="sub-title" id="scCphToggle"

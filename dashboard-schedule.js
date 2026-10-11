@@ -115,6 +115,23 @@ function scSaveReqCollapsed() {
   try { localStorage.setItem('creator_sc_req_collapsed', S.scReqCollapsed ? '1' : '0'); } catch (_) {}
 }
 
+/* ★ 「班次规则」大板块折叠状态（默认展开） */
+(function initScRuleBlockCollapsed() {
+  if (typeof S.scRuleBlockCollapsed !== 'boolean') {
+    try {
+      const raw = localStorage.getItem('creator_sc_rule_block_collapsed');
+      S.scRuleBlockCollapsed = raw === '1';
+    } catch (_) { S.scRuleBlockCollapsed = false; }
+  }
+})();
+
+function scSaveRuleBlockCollapsed() {
+  try {
+    localStorage.setItem('creator_sc_rule_block_collapsed',
+      S.scRuleBlockCollapsed ? '1' : '0');
+  } catch (_) {}
+}
+
 /* ==================== 班次 / 日期工具 ==================== */
 function scIsLateShift(shift) {
   const meta = S.shiftMeta && S.shiftMeta[shift];
@@ -1209,6 +1226,24 @@ function renderSchedulePanel() {
       histBtn.textContent = S.scCollapseHist ? '📦 展开历史列' : '📦 折叠历史列';
     }
   })();
+
+  /* ---------- 外层「班次规则」大板块折叠 ---------- */
+  const rbToggle = document.getElementById('scRuleBlockToggle');
+  const rbArrow  = document.getElementById('scRuleBlockArrow');
+  const rbBody   = document.getElementById('scRuleBlockBody');
+
+  if (rbToggle && !rbToggle._scBound) {
+    rbToggle._scBound = true;
+    rbToggle.addEventListener('click', (e) => {
+      if (e.target.closest('.help')) return;   /* 点问号不折叠 */
+      S.scRuleBlockCollapsed = !S.scRuleBlockCollapsed;
+      scSaveRuleBlockCollapsed();
+      renderSchedulePanel();
+    });
+  }
+  if (rbArrow) rbArrow.style.transform =
+    S.scRuleBlockCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)';
+  if (rbBody) rbBody.style.display = S.scRuleBlockCollapsed ? 'none' : '';
 
   renderScBizTabs();
   renderScShiftPool();

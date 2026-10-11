@@ -1301,11 +1301,24 @@ function renderScSupportExclude() {
   const el = document.getElementById('scSupportExclude');
   if (!el) return;
 
+  /* ★ 找到「支援博主设置」标题（紧邻 el 的上一个 h4.sc-sub-h4） */
+  const titleEl = el.previousElementSibling;
+
   if (S.scBizState !== '买手合作') {
-    el.innerHTML = '<p class="muted" style="margin:4px 0;font-size:12px">' +
-      '该设置仅在「买手合作」业务线下生效，请切换到「买手合作」后配置。</p>';
+    /* ★ 博主视角下：整块（标题 + 内容）隐藏，不再展示无意义的提示 */
+    if (titleEl && titleEl.classList && titleEl.classList.contains('sc-sub-h4')) {
+      titleEl.style.display = 'none';
+    }
+    el.style.display = 'none';
+    el.innerHTML = '';
     return;
   }
+
+  /* ★ 买手视角：恢复显示 */
+  if (titleEl && titleEl.classList && titleEl.classList.contains('sc-sub-h4')) {
+    titleEl.style.display = '';
+  }
+  el.style.display = '';
 
   const all = scActiveEmployees();
   const buyerPool = [];

@@ -220,10 +220,68 @@ function buildXlsxBlob(sheetName, rows, opts) {
   return _zipBuild(files);
 }
 
+/* ★ 根据数据实际覆盖的时间范围，动态生成「样本周数」下拉选项。
+   规则：
+     · 基础候选：2 / 4 / 6 / 8 / 12 / 16 / 24 / 26 / 52 周
+     · 只保留 <= 数据覆盖周数的项
+     · 数据不足 2 周 → 只放「近 N 周（全部数据）」
+     · 数据超过 52 周 → 追加「近 N 周（全部数据）」项
+   调用时机：在 renderForecastConfig 开头调用，确保数据变化后选项同步刷新。 */
+function renderForecastSampleWeeksOptions() {
+  const el = document.getElementById('fcSampleWeeks');
+  if (!el) return;
+
+  /* 1. 收集所有有日期的数据 */
+  const dateSet = new Set();
+  for (const r of S.records)     if (r.date) dateSet.add(r.date);
+  for (const r of S.wtRecords)   if (r.date) dateSet.add(r.date);
+  for (const r of S.inspections) if (r.date) dateSet.add(r.date);
+  const dates = Array.from(dateSet).sort();
+  if (!dates.length) return;   /* 无数据时保持原样 */
+
+  /* 2. 计算覆盖天数与最大可选周数 */
+  const earliest = dates[0];
+  const latest   = dates[dates.length - 1];
+  const days     = _dateDiffDays(earliest, latest) + 1;   /* 两端都算 */
+  const maxWeeks = Math.max(1, Math.floor(days / 7));
+
+  /* 3. 生成候选周数列表 */
+  const baseList = [2, 4, 6, 8, 12, 16, 24, 26, 52];
+  let options = baseList.filter(w => w <= maxWeeks);
+  if (!options.length) {
+    /* 数据不足 2 周 → 只放 maxWeeks 本身 */
+    options = [maxWeeks];
+  } else if (maxWeeks > options[options.length - 1]) {
+    /* 数据比最大的基础选项还长 → 追加 maxWeeks（覆盖全部数据） */
+    options.push(maxWeeks);
+  }
+
+  /* 4. 保留用户原选择（若仍可选），否则回退到 4 周或最大周 */
+  const prev = el.value;
+  el.innerHTML = options.map(w => {
+    const isFullSpan = (w === maxWeeks && !baseList.includes(w));
+    const label = isFullSpan
+      ? '近 ' + w + ' 周（全部数据）'
+      : '近 ' + w + ' 周';
+    return '<option value="' + w + '">' + label + '</option>';
+  }).join('');
+
+  if (options.map(String).indexOf(prev) >= 0) {
+    el.value = prev;
+  } else if (options.indexOf(4) >= 0) {
+    el.value = '4';
+  } else {
+    el.value = String(options[options.length - 1]);
+  }
+}
+
 /* ==================== 时段预测视图配置 ==================== */
 function renderForecastConfig() {
   const grid = $('#fcDailyGrid');
   if (!grid) return;
+
+  /* ★ 动态刷新「样本周数」下拉：数据导入 / 变化后，选项自动扩展到最长可覆盖的周数 */
+  renderForecastSampleWeeksOptions();
 
   const bizEl = $('#fcBiz');
   const biz = (bizEl && bizEl.value) || '买手合作';

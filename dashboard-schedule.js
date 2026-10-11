@@ -101,6 +101,20 @@ function scSaveCphCollapsed() {
   try { localStorage.setItem('creator_sc_cph_collapsed', S.scCphCollapsed ? '1' : '0'); } catch (_) {}
 }
 
+/* ★ 班次规则面板折叠状态（默认展开） */
+(function initScReqCollapsed() {
+  if (typeof S.scReqCollapsed !== 'boolean') {
+    try {
+      const raw = localStorage.getItem('creator_sc_req_collapsed');
+      S.scReqCollapsed = raw === '1';
+    } catch (_) { S.scReqCollapsed = false; }
+  }
+})();
+
+function scSaveReqCollapsed() {
+  try { localStorage.setItem('creator_sc_req_collapsed', S.scReqCollapsed ? '1' : '0'); } catch (_) {}
+}
+
 /* ==================== 班次 / 日期工具 ==================== */
 function scIsLateShift(shift) {
   const meta = S.shiftMeta && S.shiftMeta[shift];
@@ -1290,8 +1304,42 @@ function renderScSupportExclude() {
 
 function renderScReqGrid() {
   const el = document.getElementById('scReqGrid');
+  const arrowEl = document.getElementById('scReqArrow');
   if (!el) return;
 
+  /* ---------- 折叠切换绑定（只绑一次） ---------- */
+  const toggleEl = document.getElementById('scReqToggle');
+  if (toggleEl && !toggleEl._bound) {
+    toggleEl._bound = true;
+    toggleEl.addEventListener('click', () => {
+      S.scReqCollapsed = !S.scReqCollapsed;
+      scSaveReqCollapsed();
+      renderScReqGrid();
+    });
+  }
+  if (arrowEl) arrowEl.style.transform = S.scReqCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)';
+
+  /* ---------- 折叠态：清空 DOM 并显示一行摘要 ---------- */
+  if (S.scReqCollapsed) {
+    const biz = S.scBizState;
+    const rules = (S.shiftReqRules && S.shiftReqRules[biz]) || [];
+    const validCnt = rules.filter(r =>
+      Array.isArray(r.dates)  && r.dates.length  > 0 &&
+      Array.isArray(r.shifts) && r.shifts.length > 0
+    ).length;
+    const summary = rules.length === 0
+      ? '<span class="muted" style="font-size:12px">（暂无规则，展开后可添加）</span>'
+      : '<span class="muted" style="font-size:12px">已配置 <b>' + rules.length +
+        '</b> 条规则' + (validCnt < rules.length
+          ? '，其中 <b style="color:#B36A00">' + (rules.length - validCnt) + ' 条待补全</b>'
+          : '') + '</span>';
+    el.innerHTML = '<div style="padding:8px 14px;background:#FAF9F7;' +
+      'border:1px solid var(--border);border-radius:8px;margin-bottom:10px">' +
+      summary + '</div>';
+    return;
+  }
+
+  /* ---------- 展开态：正常渲染 ---------- */
   const biz = S.scBizState;
   const rules = S.shiftReqRules[biz] || [];
   const pool  = S.shiftPoolByBiz[biz] || [];
@@ -2756,6 +2804,9 @@ async function scCopyMarkdown() {
         localStorage.removeItem(SC_PREF_KEY_POOL);
         localStorage.removeItem(SC_PREF_KEY_EXCL);
       } catch (_) {}
+      /* 折叠状态也复位（下次打开默认展开） */
+      S.scReqCollapsed = false;
+      scSaveReqCollapsed();
       renderSchedulePanel();
     });
   };

@@ -267,8 +267,14 @@
         <div id="scShiftPool" class="chips"></div>
 
         <!-- [4] 需求设置 -->
-        <h3 class="sub-title">班次每日人数
-          <span class="help" data-tip="每条规则 = 生效日期 + 限制班次 + 每天等于人数。多条规则同时命中同一 (日期, 班次) 时取最小值。空 = 不限制。若人数不足会在生成排班时告警。">?</span>
+        <h3 class="sub-title" id="scReqToggle"
+            style="cursor:pointer;user-select:none;display:flex;align-items:center;gap:6px">
+          <span id="scReqArrow" style="display:inline-block;width:12px;font-size:10px;
+                color:#7B8FBF;transition:transform .15s ease">▼</span>
+          <span>班次每日人数</span>
+          <span class="help" id="scReqHelp"
+                data-tip="每条规则 = 生效日期 + 限制班次 + 每天等于人数。多条规则同时命中同一 (日期, 班次) 时取最小值。空 = 不限制。若人数不足会在生成排班时告警。"
+                onclick="event.stopPropagation()">?</span>
         </h3>
         <div id="scReqGrid"></div>
 

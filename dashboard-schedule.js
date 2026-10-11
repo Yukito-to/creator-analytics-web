@@ -1278,19 +1278,33 @@ function renderScShiftPool() {
   const el = document.getElementById('scShiftPool');
   if (!el) return;
 
-  /* ★ 只展示「工作班次」；使用 scIsWorkingShift 三档判定（出勤计数优先），
-       避免因缺失「班次时段」sheet 而把休息类班次混进来 */
-  const all = Object.keys(S.shiftMeta || {});
-  const workingShifts = all.filter(s => scIsWorkingShift(s));
+  /* 只展示「工作班次」（出勤计数优先，见 scIsWorkingShift） */
+  const workingShifts = Object.keys(S.shiftMeta || {}).filter(s => scIsWorkingShift(s));
 
-  /* ★ 取当前业务线的池子 */
-  const pool = S.shiftPoolByBiz[S.scBizState] || [];
+  /* ★ 全选 / 清空（只绑一次） */
+  const bindBtn = (id, fn) => {
+    const btn = document.getElementById(id);
+    if (!btn || btn._scBound) return;
+    btn._scBound = true;
+    btn.addEventListener('click', fn);
+  };
+  const applyPool = (arr) => {
+    S.shiftPoolByBiz[S.scBizState] = arr;
+    S.shiftPool = S.shiftPoolByBiz[S.scBizState];   // ★ 保持活动引用同步
+    pruneRulesByPool();                             // ★ 同步清理规则里已失效的班次
+    saveScShiftPool();
+    renderScShiftPool();
+    renderScReqGrid();
+  };
+  bindBtn('scShiftPoolAll',  () => applyPool(workingShifts.slice()));
+  bindBtn('scShiftPoolNone', () => applyPool([]));
 
   if (!workingShifts.length) {
     el.innerHTML = '<p class="muted" style="margin:4px 0">未识别到工作班次（请检查「班次时段」sheet 的「出勤计数」列）。</p>';
     return;
   }
 
+  const pool = S.shiftPoolByBiz[S.scBizState] || [];
   el.innerHTML = workingShifts.map(s =>
     '<span class="chip' + (pool.indexOf(s) >= 0 ? ' on' : '') +
     '" data-shift="' + esc(s) + '">' + esc(s) + '</span>'
@@ -1302,11 +1316,26 @@ function renderScShiftPool() {
       const arr = S.shiftPoolByBiz[S.scBizState];
       const i = arr.indexOf(s);
       if (i >= 0) arr.splice(i, 1); else arr.push(s);
-      saveScShiftPool();   /* ★ 记住用户勾选习惯 */
+      S.shiftPool = arr;              // splice 是原地改，这里保持引用一致
+      pruneRulesByPool();             // ★ 取消勾选 → 同步从规则里摘掉
+      saveScShiftPool();
       renderScShiftPool();
       renderScReqGrid();
     });
   });
+}
+
+/* ★ 新增：保证「规则里引用的班次」始终 ⊆「当前班次池」
+   —— 否则班次池一变更，scValidateShiftCounts 仍会去校验那些已移除的班次，
+      算法根本没机会分配 → actual=0 < need → 每次生成排班都整体失败。 */
+function pruneRulesByPool() {
+  const biz  = S.scBizState || '买手合作';
+  const pool = new Set((S.shiftPoolByBiz && S.shiftPoolByBiz[biz]) || []);
+  const rules = (S.shiftReqRules && S.shiftReqRules[biz]) || [];
+  for (const r of rules) {
+    if (!Array.isArray(r.shifts)) continue;
+    r.shifts = r.shifts.filter(s => pool.has(s));
+  }
 }
 
 /* ★ 支援博主设置：只展示买手专属 + 弹性员工 */

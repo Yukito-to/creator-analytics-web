@@ -276,6 +276,16 @@
           <h4 class="sc-sub-h4">业务线</h4>
           <div id="scBizTabs" class="head-controls" style="margin-bottom:12px"></div>
 
+          <!-- ★ 新增 [3] 本业务线可排班次 -->
+          <h4 class="sc-sub-h4" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+            <span>本业务线可排班次</span>
+            <span class="help"
+                  data-tip="勾选后才会参与排班；休息类班次（无出勤计数 / 无工时）不会出现在这里。切换上方业务线可分别配置买手 / 博主各自的班次池。">?</span>
+            <button type="button" class="btn sm" id="scShiftPoolAll">全选</button>
+            <button type="button" class="btn sm" id="scShiftPoolNone">清空</button>
+          </h4>
+          <div id="scShiftPool" class="chips"></div>
+
           <!-- [4] 班次每日人数 -->
           <h4 class="sc-sub-h4" id="scReqToggle"
               style="cursor:pointer;user-select:none;display:flex;align-items:center;gap:6px">

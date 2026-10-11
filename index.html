@@ -267,8 +267,8 @@
         <div id="scShiftPool" class="chips"></div>
 
         <!-- [4] 需求设置 -->
-        <h3 class="sub-title">班次每日人数上限
-          <span class="help" data-tip="每条规则 = 生效日期 + 限制班次 + 每天最多人数。多条规则同时命中同一 (日期, 班次) 时取最严格（最小）上限。空 = 不限制。">?</span>
+        <h3 class="sub-title">班次每日人数
+          <span class="help" data-tip="每条规则 = 生效日期 + 限制班次 + 每天等于人数。多条规则同时命中同一 (日期, 班次) 时取最小值。空 = 不限制。若人数不足会在生成排班时告警。">?</span>
         </h3>
         <div id="scReqGrid"></div>
 

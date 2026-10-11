@@ -509,7 +509,8 @@ function generateSchedule() {
       });
     }
   }
-  scValidateQuota(ctx);   // H5 后验校验（只告警不回改，避免初期无人可排）
+  scValidateQuota(ctx);       // H5 后验校验（只告警不回改，避免初期无人可排）
+  scValidateShiftCounts(ctx); // ★ 班次人数「等于」后验校验（不足 / 超编告警）
   S.scheduleResult = result;
   S.scheduleDiag = scBuildDiag(ctx, result);
   return result;
@@ -965,6 +966,62 @@ function scValidateQuota(ctx) {
   }
 }
 
+/* ★ 后验校验：逐 (date, biz, shift) 检查实际分配人数是否等于目标人数。
+   · 只对「规则命中的班次」检查（scGetShiftReq 返回非 null）
+   · 实际 > 目标 → 记为「超编」（理论上不会发生，防御性检查）
+   · 实际 < 目标 → 记为「不足」（常见原因：人力不够 / 硬约束冲突）
+   结果写入 ctx.warnings（最多保留 30 条，避免刷屏）。 */
+function scValidateShiftCounts(ctx) {
+  if (!ctx || !ctx.dates || !ctx.dates.length) return;
+  if (!S.shiftPool || !S.shiftPool.length) return;
+  const details = [];
+  for (const d of ctx.dates) {
+    if (!ctx.assigned[d]) continue;
+    for (const biz of SC_BIZ_LIST) {
+      for (const shift of S.shiftPool) {
+        const need = scGetShiftReq(biz, shift, d);
+        if (need == null || !isFinite(need)) continue;
+        let actual = 0;
+        for (const n in ctx.assigned[d]) {
+          if (ctx.assigned[d][n] === shift && ctx.assignedBiz[d][n] === biz) actual++;
+        }
+        if (actual !== need) {
+          details.push({
+            date: d, biz: biz, shift: shift, need: need, actual: actual,
+            diff: actual - need
+          });
+        }
+      }
+    }
+  }
+  if (!details.length) return;
+
+  /* 汇总：不足条数 / 超编条数 / 总计缺口 */
+  let underCount = 0, overCount = 0, totalGap = 0;
+  for (const x of details) {
+    if (x.diff < 0) { underCount++; totalGap += (-x.diff); }
+    else overCount++;
+  }
+
+  /* 简要汇总行（放在 warnings 最前面，方便一眼看到） */
+  if (underCount > 0) {
+    ctx.warnings.push(
+      '班次人数不足：共 ' + underCount + ' 处（累计缺口 ' + totalGap + ' 人），' +
+      '例如 ' + details.filter(x => x.diff < 0).slice(0, 3)
+        .map(x => x.date.slice(5) + ' ' + x.biz.slice(0,2) + ' ' + x.shift +
+                  '(' + x.actual + '/' + x.need + ')').join('、')
+    );
+  }
+  if (overCount > 0) {
+    ctx.warnings.push(
+      '班次人数超编：共 ' + overCount + ' 处，' +
+      '例如 ' + details.filter(x => x.diff > 0).slice(0, 3)
+        .map(x => x.date.slice(5) + ' ' + x.biz.slice(0,2) + ' ' + x.shift +
+                  '(' + x.actual + '/' + x.need + ')').join('、')
+    );
+  }
+}
+
 /* 诊断信息 */
 function scBuildDiag(ctx, result) {
   return {
@@ -1355,7 +1412,7 @@ function renderScReqRuleCardHTML(idx, rule, cycleDates, pool) {
     '</div>' +
 
     '<div class="sc-req-card-section" style="display:flex;align-items:center;gap:8px">' +
-      '<span class="sc-req-card-label" style="margin:0">每天最多</span>' +
+      '<span class="sc-req-card-label" style="margin:0">每天等于</span>' +
       '<input type="number" min="0" step="1" data-act="max" value="' +
         (max == null ? '' : max) + '" placeholder="不限" style="width:80px">' +
       '<span>人</span>' +
@@ -1433,7 +1490,7 @@ function bindScReqRuleEvents(el, cycleDates, pool, biz) {
       rule.shifts = []; renderScReqGrid();
     });
 
-    /* 每天最多（不重渲，只改数据） */
+    /* 每天等于（不重渲，只改数据） */
     const maxInp = card.querySelector('input[data-act="max"]');
     if (maxInp) {
       maxInp.addEventListener('change', () => {
@@ -2491,7 +2548,7 @@ function renderScRulesSummary() {
     { code: 'H6', text: '每小时缺口 = <b>预测量 − Σ(在岗 × CPH)</b>，缺口时段优先征调' },
     { code: 'H7', text: '已离职员工在<b>离职日当日及之后</b>不参与排班' },
     { code: 'H8', text: '按业务线分池：<b>买手专属 / 博主专属 / 弹性</b>，专属优先，缺口才跨池征调' },
-    { code: 'H9', text: '需求上限：<b>规则命中的班次不超过每天最多人数</b>（多条规则取最小值）' }
+    { code: 'H9', text: '需求目标：<b>规则命中的班次等于每天指定人数</b>（多条规则取最小值；不足时告警）' }
   ];
 
   /* ---------- 三、软约束（打分） ---------- */

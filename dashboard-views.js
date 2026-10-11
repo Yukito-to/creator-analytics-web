@@ -157,6 +157,9 @@ function rowHTMLS30(label, biz, metric) {
 
 /* ==================== 视图切换与刷新 ==================== */
 function switchView(name) {
+  /* ★ 兼容：旧的 'team' 视图已合并进 'person'，自动映射 */
+  if (name === 'team') name = 'person';
+
   $$('.view').forEach(v => v.classList.remove('active'));
   const el = document.getElementById('view-' + name);
   if (el) el.classList.add('active');

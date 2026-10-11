@@ -30,8 +30,7 @@
   <button data-view="mapping">🔗 映射</button>
   <button data-view="roster">👥 花名册</button>
   <button data-view="overview">📊 达成</button>
-  <button data-view="person">🧑 员工</button>
-  <button data-view="team">🏢 团队</button>
+  <button data-view="person">👥 数据看板</button>
   <button data-view="s30">📞 30S</button>
   <button data-view="aht2">📈 AHT</button>
   <button data-view="sla">🎯 达成SLA</button>
@@ -94,43 +93,52 @@
   </section>
 
   <section id="view-person" class="view">
-    <div class="card">
-      <div class="card-head">
-        <h2>员工看板 <span class="help" data-tip="先选业务线 → 勾选指标 → 点姓名选员工。">?</span></h2>
-        <div class="head-controls">
-          <label>业务线 <select id="peBiz"></select></label>
-          <label class="chk"><input type="checkbox" id="peAll"> 全选一线</label>
-          <button class="btn sm" id="peToggle">折叠</button>
-        </div>
-      </div>
-      <div class="dims">
-        <div class="dim-row">
-          <span class="dim-label">指标</span>
-          <div id="peMetric" class="chips" style="margin:0"></div>
-        </div>
-      </div>
-      <div id="peNames" class="chips"></div>
-      <div id="peBody" class="table-scroll"></div>
-      <div id="peAttCalendar" class="hidden" style="margin-top:12px"></div>
+    <div class="sub-tabs" id="peSubTabs">
+      <button type="button" class="sub-tab active" data-sub="emp">🧑 员工视角</button>
+      <button type="button" class="sub-tab" data-sub="team">🏢 团队视角</button>
     </div>
-  </section>
 
-  <section id="view-team" class="view">
-    <div class="card">
-      <div class="card-head">
-        <h2>团队看板 <span class="help" data-tip="先选业务线 → 勾选指标 → 再按组别 / 批次 / 分类多选。">?</span></h2>
-        <div class="head-controls">
-          <label>业务线 <select id="tmBiz"></select></label>
+    <!-- ========== 员工视角 ========== -->
+    <div id="peSub-emp" class="sub-view active">
+      <div class="card">
+        <div class="card-head">
+          <h2>员工看板 <span class="help" data-tip="先选业务线 → 勾选指标 → 点姓名选员工。">?</span></h2>
+          <div class="head-controls">
+            <label>业务线 <select id="peBiz"></select></label>
+            <label class="chk"><input type="checkbox" id="peAll"> 全选一线</label>
+            <button class="btn sm" id="peToggle">折叠</button>
+          </div>
         </div>
-      </div>
-      <div class="dims">
-        <div class="dim-row">
-          <span class="dim-label">指标</span>
-          <div id="tmMetric" class="chips" style="margin:0"></div>
+        <div class="dims">
+          <div class="dim-row">
+            <span class="dim-label">指标</span>
+            <div id="peMetric" class="chips" style="margin:0"></div>
+          </div>
         </div>
+        <div id="peNames" class="chips"></div>
+        <div id="peBody" class="table-scroll"></div>
+        <div id="peAttCalendar" class="hidden" style="margin-top:12px"></div>
       </div>
-      <div id="tmDims" class="dims"></div>
-      <div id="tmBody" class="table-scroll"></div>
+    </div>
+
+    <!-- ========== 团队视角 ========== -->
+    <div id="peSub-team" class="sub-view">
+      <div class="card">
+        <div class="card-head">
+          <h2>团队看板 <span class="help" data-tip="先选业务线 → 勾选指标 → 再按组别 / 批次 / 分类多选。">?</span></h2>
+          <div class="head-controls">
+            <label>业务线 <select id="tmBiz"></select></label>
+          </div>
+        </div>
+        <div class="dims">
+          <div class="dim-row">
+            <span class="dim-label">指标</span>
+            <div id="tmMetric" class="chips" style="margin:0"></div>
+          </div>
+        </div>
+        <div id="tmDims" class="dims"></div>
+        <div id="tmBody" class="table-scroll"></div>
+      </div>
     </div>
   </section>
 

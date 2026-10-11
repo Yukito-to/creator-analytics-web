@@ -1216,6 +1216,67 @@ function initAiPanel() {
 }
 
 /* ==================== 全局初始化引导 ==================== */
+/* ★ 业务线下拉 → 按钮组：
+   保留原 <select> 元素（display:none 隐藏），在它前面插入一组按钮。
+   按钮点击 → 更新 select.value + 派发 change 事件，
+   现有的 on(sel, 'change', ...) 监听器照常工作，业务逻辑无需改动。 */
+function initBizSwitchers() {
+  const ids = ['#ovBiz','#peBiz','#tmBiz','#s30Biz','#a2Biz','#slaBiz','#rpBiz','#fcBiz'];
+  for (const sel of ids) {
+    const el = $(sel);
+    if (!el || el._bizSwitched) continue;
+    el._bizSwitched = true;
+
+    /* 隐藏原 select（保留其 DOM 与 value，作为唯一数据源） */
+    el.style.display = 'none';
+
+    /* 生成按钮组 */
+    const wrap = document.createElement('div');
+    wrap.className = 'biz-switch';
+    wrap.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;align-items:center';
+    wrap.innerHTML = BIZ_LIST.map(b =>
+      '<button type="button" class="btn sm" data-biz="' + esc(b) + '">' + esc(b) + '</button>'
+    ).join('');
+
+    /* 高亮：当前选中项用 primary 样式，其余保持 sm 灰底 */
+    const paint = () => {
+      const v = el.value;
+      wrap.querySelectorAll('button').forEach(b => {
+        const on = b.dataset.biz === v;
+        b.classList.toggle('primary', on);
+        b.classList.toggle('sm', !on);
+      });
+    };
+    paint();
+
+    wrap.querySelectorAll('button').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const v = btn.dataset.biz;
+        if (el.value === v) return;
+        el.value = v;
+        paint();
+        /* 派发 change，触发原有监听器 */
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+    });
+
+    /* 暴露 paint，供 syncBizSwitchers 在 select.value 被代码改写后调用 */
+    el._bizPaint = paint;
+
+    /* 插到 select 前面，与 label 里的其他 flex 子项并排显示 */
+    el.parentNode.insertBefore(wrap, el);
+  }
+}
+
+/* ★ 让所有业务线按钮组重新高亮（读各自的 select.value） */
+function syncBizSwitchers() {
+  const ids = ['#ovBiz','#peBiz','#tmBiz','#s30Biz','#a2Biz','#slaBiz','#rpBiz','#fcBiz'];
+  for (const sel of ids) {
+    const el = $(sel);
+    if (el && el._bizPaint) el._bizPaint();
+  }
+}
+
 function initSelects() {
   for (const s of ['#ovBiz','#peBiz','#tmBiz','#s30Biz','#a2Biz','#slaBiz','#rpBiz','#fcBiz']) {
     const el = $(s);
@@ -1249,6 +1310,10 @@ function initSelects() {
     }
   }
   if (typeof renderForecastConfig === 'function') renderForecastConfig();
+
+  /* ★ 所有业务线下拉 → 按钮组；初始化后再同步一次高亮 */
+  initBizSwitchers();
+  syncBizSwitchers();
 }
 
 function bindEvents() {
@@ -1358,6 +1423,28 @@ function bindEvents() {
   on('#btnFcAi', 'click', runForecastAiAnalysis);
   on('#btnFcCopy', 'click', copyForecastMd);
   on('#btnFcClear', 'click', clearForecastInputs);
+
+  /* ★ 数据看板 sub-tabs：员工视角 / 团队视角 切换 */
+  const peTabs = $('#peSubTabs');
+  if (peTabs && !peTabs._bound) {
+    peTabs._bound = true;
+    peTabs.addEventListener('click', e => {
+      const btn = e.target.closest('.sub-tab');
+      if (!btn) return;
+      const sub = btn.dataset.sub;
+
+      peTabs.querySelectorAll('.sub-tab').forEach(b => b.classList.toggle('active', b === btn));
+      const wrap = document.getElementById('view-person');
+      if (!wrap) return;
+      wrap.querySelectorAll('.sub-view').forEach(v => v.classList.remove('active'));
+      const target = document.getElementById('peSub-' + sub);
+      if (target) target.classList.add('active');
+
+      /* 首次切到该视角时主动渲染一次，避免空表 */
+      if (sub === 'team' && typeof renderTeam === 'function') renderTeam();
+      if (sub === 'emp'  && typeof renderPerson === 'function') renderPerson();
+    });
+  }
 }
 
 function init() {

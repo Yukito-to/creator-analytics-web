@@ -1627,10 +1627,10 @@ function renderScCphGrid() {
   const thBase = 'position:sticky;top:0;z-index:4;background:#F4F3EF;' +
                  'box-shadow:inset 0 -1px 0 #E7E5DE;padding:8px 10px;' +
                  'font-size:12px;font-weight:600;color:#77778A;text-align:center;white-space:nowrap';
-  const thBiz  = thBase + ';left:0;z-index:6;width:52px;min-width:52px;' +
+  const thBiz  = thBase + ';left:0;z-index:6;width:48px;min-width:48px;' +
                  'box-shadow:inset 0 -1px 0 #E7E5DE, inset -1px 0 0 #E7E5DE';
-  const thName = thBase + ';left:52px;z-index:6;min-width:82px;max-width:82px;' +
-                 'text-align:left;font-size:11.5px;padding-left:8px;' +
+  const thName = thBase + ';left:48px;z-index:6;width:1%;white-space:nowrap;' +
+                 'text-align:center;font-size:11.5px;padding:8px 10px;' +
                  'box-shadow:inset 0 -1px 0 #E7E5DE, inset -1px 0 0 #E7E5DE';
   const thVal  = thBase + ';width:88px;min-width:88px;text-align:right';
   const thTop  = thBase + ';width:76px;min-width:76px;' +
@@ -1641,10 +1641,11 @@ function renderScCphGrid() {
   const tdBase = 'padding:6px 10px;font-size:12px;border-bottom:1px solid #F5F3EE;' +
                  'white-space:nowrap;vertical-align:middle';
   const tdBiz  = tdBase + ';position:sticky;left:0;z-index:2;background:#fff;' +
-                 'box-shadow:inset -1px 0 0 #F0EEE9;text-align:center;width:52px;padding:6px 4px';
-  const tdName = tdBase + ';position:sticky;left:52px;z-index:2;background:#fff;' +
-                 'box-shadow:inset -1px 0 0 #F0EEE9;min-width:82px;max-width:82px;' +
-                 'overflow:hidden;text-overflow:ellipsis;padding-left:8px';
+                 'box-shadow:inset -1px 0 0 #F0EEE9;text-align:center;' +
+                 'width:48px;padding:6px 4px';
+  const tdName = tdBase + ';position:sticky;left:48px;z-index:2;background:#fff;' +
+                 'box-shadow:inset -1px 0 0 #F0EEE9;width:1%;white-space:nowrap;' +
+                 'text-align:center;padding:6px 10px';
   const tdTop  = tdBase + ';text-align:center;font-size:11px;' +
                  'font-variant-numeric:tabular-nums;border-left:2px solid #E0DDD5';
 

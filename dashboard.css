@@ -1078,14 +1078,21 @@ tbody tr:active td:first-child { background: #FAFAF7; }
 }
 #scGridTable thead th:nth-child(2) { z-index: 5; background: #F4F3EF; }
 
-/* 日期列头：只显示 day */
+/* 日期列头：只显示 day；周几 + 标签放在第二行，小字体 */
 .sc-date-h {
-  min-width: 62px; padding: 4px 6px 2px;
+  min-width: 46px; padding: 3px 4px 2px;
 }
-.sc-date-h .d { font-size: 13px; font-weight: 700; color: #333; }
-.sc-date-h .w { font-size: 10.5px; color: #A0A0AE; margin-left: 2px; }
+.sc-date-h .d {
+  font-size: 12px; font-weight: 700; color: #333;
+  line-height: 1.15; white-space: nowrap;
+}
+.sc-date-h .w {
+  font-size: 9.5px; color: #A0A0AE;
+  line-height: 1.25; margin-top: 1px;
+  white-space: nowrap;
+}
 .sc-date-h .tag {
-  display: block; font-size: 10px; margin-top: 1px;
+  font-size: 9px;
   color: #D9363E; font-weight: 600;
 }
 .sc-date-h.is-holiday .d { color: #D9363E; }

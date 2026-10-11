@@ -1626,10 +1626,12 @@ function renderScGrid() {
     const clsCss = cls === 'holiday' ? 'is-holiday' : (cls === 'workday' ? 'is-workday' : '');
     const isTriple = S.scTripleDates.has(d);
     const tag = isTriple ? '三倍' : (cls === 'holiday' ? '节' : (cls === 'workday' ? '班' : ''));
+    /* ★ 两行结构：第一行日期，第二行「周X（标签）」小字体 */
     headTop += '<th class="sc-date-h ' + clsCss + '">' +
-      '<span class="d">' + esc(d.slice(5)) + '</span>' +
-      '<span class="w">周' + WEEKDAY_CN[wd] + '</span>' +
-      (tag ? '<span class="tag">' + tag + '</span>' : '') +
+      '<div class="d">' + esc(d.slice(5)) + '</div>' +
+      '<div class="w">周' + WEEKDAY_CN[wd] +
+        (tag ? '（<span class="tag">' + tag + '</span>）' : '') +
+      '</div>' +
     '</th>';
   }
   headTop += '</tr>';

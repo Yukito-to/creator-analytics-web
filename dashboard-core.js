@@ -218,11 +218,16 @@ function _predictDailyTotal(stats, date, useWeekend, specialKind, biz) {
     (stats.diagnostic && stats.diagnostic.outlierDates) || []
   );
 
-  /* ① 博主特殊日 */
+  /* ① 博主特殊日：以「历史 25/28 日的量级」为锚点
+        · n >= 3 时：median × 0.6 + mean × 0.4（避免单日异常主导）
+        · n <  3 时：直接用 median */
   if (specialKind != null && stats.specialTotals) {
     const st = stats.specialTotals[String(specialKind)];
     if (st && st.n >= 1) {
-      return { value: Math.round(st.median * 1.10), source: 'special' };
+      const anchor = (st.n >= 3 && isFinite(st.mean))
+        ? (st.median * 0.6 + st.mean * 0.4)
+        : st.median;
+      return { value: Math.round(anchor * 1.10), source: 'special' };
     }
   }
 

@@ -271,9 +271,24 @@ function renderForecastConfig() {
     let regrVal = '';
     if (regrPreview && regrPreview.dailyStats && regrPreview.dailyStats.length) {
       const useWeekend = shouldUseWeekendPattern(date);
+
+      /* ★ 博主 25/28 日：走「特殊日模板」，把 dom 作为 specialKind 传进去，
+           否则普通逻辑给出的预测值和实际生成结果不一致 */
+      let specialKind = null;
+      {
+        const dom2 = parseInt(date.slice(8, 10), 10);
+        const cls2 = classifyDate(date);
+        const userHoliday2 = S.forecastHolidays && S.forecastHolidays.has(date);
+        if (biz === '博主合作' && (dom2 === 25 || dom2 === 28)
+            && cls2 !== 'holiday' && !userHoliday2) {
+          const sd = regrPreview.specialDays && regrPreview.specialDays[String(dom2)];
+          if (sd && sd.sampleCount >= 1) specialKind = dom2;
+        }
+      }
+
       let pr = null;
       try {
-        pr = _predictDailyTotal(regrPreview, date, useWeekend, null, biz);
+        pr = _predictDailyTotal(regrPreview, date, useWeekend, specialKind, biz);
       } catch (e) {
         console.warn('[renderForecastConfig] _predictDailyTotal 失败：', e);
       }
@@ -281,7 +296,13 @@ function renderForecastConfig() {
         const srcTag = pr.source === 'regression' ? '回归'
                      : pr.source === 'special'    ? '特殊日'
                      : '中位';
-        regrVal = '📈 ' + srcTag + ' ' + pr.value;
+        /* ★ 特殊日额外标注样本量，便于用户核对「历史 25/28 日量级」 */
+        let sampleTip = '';
+        if (pr.source === 'special' && specialKind != null) {
+          const sd2 = regrPreview.specialDays && regrPreview.specialDays[String(specialKind)];
+          sampleTip = '（历史 ' + specialKind + ' 日 ' + (sd2 ? sd2.sampleCount : 0) + ' 天样本）';
+        }
+        regrVal = '📈 ' + srcTag + ' ' + pr.value + sampleTip;
       }
     }
 

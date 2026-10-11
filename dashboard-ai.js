@@ -1349,7 +1349,9 @@ function bindEvents() {
   on('#fcBiz', 'change', () => { renderForecastConfig(); renderForecastResult(); });
   on('#fcStartDate', 'change', () => { renderForecastConfig(); renderForecastResult(); });
   on('#fcDays', 'change', () => { renderForecastConfig(); renderForecastResult(); });
-  on('#fcSampleWeeks', 'change', renderForecastResult);
+  /* ★ 样本周数变化 → 日度总量输入框里的预测提示也需要重算；
+       renderForecastConfig 内部会自动调用 renderForecastResult，无需重复绑定 */
+  on('#fcSampleWeeks', 'change', renderForecastConfig);
   on('#btnFcRun', 'click', renderForecastResult);
   on('#btnFcAi', 'click', runForecastAiAnalysis);
   on('#btnFcCopy', 'click', copyForecastMd);

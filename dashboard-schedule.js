@@ -1630,27 +1630,40 @@ function renderScCphGrid() {
   const thBase = 'position:sticky;top:0;z-index:4;background:#F4F3EF;' +
                  'box-shadow:inset 0 -1px 0 #E7E5DE;padding:8px 10px;' +
                  'font-size:12px;font-weight:600;color:#77778A;text-align:center;white-space:nowrap';
-  const thBiz  = thBase + ';left:0;z-index:6;width:58px;min-width:58px;' +
+  const thBiz  = thBase + ';left:0;z-index:6;width:52px;min-width:52px;' +
                  'box-shadow:inset 0 -1px 0 #E7E5DE, inset -1px 0 0 #E7E5DE';
-  const thName = thBase + ';left:58px;z-index:6;min-width:120px;text-align:left;' +
+  const thName = thBase + ';left:52px;z-index:6;min-width:82px;max-width:82px;' +
+                 'text-align:left;font-size:11.5px;padding-left:8px;' +
                  'box-shadow:inset 0 -1px 0 #E7E5DE, inset -1px 0 0 #E7E5DE';
-  const thVal  = thBase + ';width:100px;min-width:100px;text-align:right';
-  const thDay  = thBase + ';width:70px;min-width:70px';
-  const thOp   = thBase + ';width:132px;min-width:132px';
+  const thVal  = thBase + ';width:88px;min-width:88px;text-align:right';
+  const thTop  = thBase + ';width:76px;min-width:76px;' +
+                 'background:#F0EFE9;border-left:2px solid #E0DDD5';
+  const thDay  = thBase + ';width:66px;min-width:66px';
+  const thOp   = thBase + ';width:150px;min-width:150px';
 
   const tdBase = 'padding:6px 10px;font-size:12px;border-bottom:1px solid #F5F3EE;' +
                  'white-space:nowrap;vertical-align:middle';
   const tdBiz  = tdBase + ';position:sticky;left:0;z-index:2;background:#fff;' +
-                 'box-shadow:inset -1px 0 0 #F0EEE9;text-align:center;width:58px';
-  const tdName = tdBase + ';position:sticky;left:58px;z-index:2;background:#fff;' +
-                 'box-shadow:inset -1px 0 0 #F0EEE9;min-width:120px';
+                 'box-shadow:inset -1px 0 0 #F0EEE9;text-align:center;width:52px;padding:6px 4px';
+  const tdName = tdBase + ';position:sticky;left:52px;z-index:2;background:#fff;' +
+                 'box-shadow:inset -1px 0 0 #F0EEE9;min-width:82px;max-width:82px;' +
+                 'overflow:hidden;text-overflow:ellipsis;padding-left:8px';
+  const tdTop  = tdBase + ';text-align:center;font-size:11px;' +
+                 'font-variant-numeric:tabular-nums;border-left:2px solid #E0DDD5';
 
   /* ---------- 表头 ---------- */
   let html = '<table style="border-collapse:separate;border-spacing:0;width:100%;font-size:12px">' +
     '<thead><tr>' +
       '<th style="' + thBiz  + '">业务线</th>' +
       '<th style="' + thName + '">姓名</th>' +
-      '<th style="' + thVal  + '">P90 生效值</th>';
+      '<th style="' + thVal  + '">P90 生效值</th>' +
+      /* ★ 新增：日 CPD 最高的三天明细列（每列显示 CPD / CPH 两行） */
+      '<th style="' + thTop + '">MAX1<br>' +
+        '<span style="font-size:9px;color:#A0A0AE;font-weight:400">CPD/CPH</span></th>' +
+      '<th style="' + thTop + '">MAX2<br>' +
+        '<span style="font-size:9px;color:#A0A0AE;font-weight:400">CPD/CPH</span></th>' +
+      '<th style="' + thTop + '">MAX3<br>' +
+        '<span style="font-size:9px;color:#A0A0AE;font-weight:400">CPD/CPH</span></th>';
 
   for (const d of dates) {
     const wd = new Date(d + 'T00:00:00Z').getUTCDay();
@@ -1682,12 +1695,28 @@ function renderScCphGrid() {
         (ov ? ' <span style="color:#E8A33E;font-size:11px">✎</span>' : '') +
       '</td>' +
       '<td style="' + tdBase + ';text-align:right">' +
-        '<input type="number" min="0" step="0.1" style="width:78px;text-align:right;' +
+        '<input type="number" min="0" step="0.1" style="width:70px;text-align:right;' +
           'padding:5px 8px;border:1px solid var(--border-2);border-radius:6px;' +
           'font-family:inherit;font-size:12.5px;outline:none"' +
           ' data-name="' + esc(e.name) + '" value="' + curVal + '" placeholder="' + autoDisp + '"' +
           ' title="生效值（排班算法使用）：留空 = 自动值 = 日 CPD 前三均值 / 8">' +
       '</td>';
+
+    /* ★ MAX1/2/3：每列显示两行 —— 上 CPD（灰字），下 CPH（黑字粗体） */
+    const top3 = (S.employeeCphTop3 && S.employeeCphTop3[e.name]) || [];
+    for (let ti = 0; ti < 3; ti++) {
+      const t = top3[ti];
+      if (!t) {
+        html += '<td style="' + tdTop + ';color:#C0BDB5">—</td>';
+      } else {
+        html += '<td style="' + tdTop + '" title="' + esc(t.date) + '">' +
+          '<div style="color:#A0A0AE;font-size:10px;line-height:1.25">' +
+            Math.round(t.cpd) + '</div>' +
+          '<div style="color:#333;font-weight:600;line-height:1.25">' +
+            t.cph.toFixed(2) + '</div>' +
+        '</td>';
+      }
+    }
 
     for (const d of dates) {
       if (!scIsActiveOn(e, d)) {
@@ -1712,11 +1741,46 @@ function renderScCphGrid() {
   }
   html += '</tbody></table>';
 
+  /* ★ 一键应用按钮：把所有员工的当前 P90 生效值写入本周期每一天 */
+  const allCanApply = emps.length > 0 && dates.length > 0;
   el.innerHTML =
-    '<p class="muted" style="font-size:11.5px;margin:0 0 8px;line-height:1.6">' +
-      '日 CPH = 当日 CASE / 8；自动 CPH = 日 CPD 最高三天求平均后 / 8（无记录则用同组同事均值兜底）；' +
-      '点「应用」把 P90 生效值写入本周期每一天。' +
-    '</p>' + html;
+    '<div style="display:flex;align-items:center;gap:10px;margin:0 0 8px;flex-wrap:wrap">' +
+      '<p class="muted" style="font-size:11.5px;margin:0;line-height:1.6;flex:1 1 auto">' +
+        '日 CPH = 当日 CASE / 8；自动 CPH = 日 CPD 最高三天求平均后 / 8（无记录则用同组同事均值兜底）；' +
+        '点「应用」把 P90 生效值写入本周期每一天。' +
+      '</p>' +
+      '<button type="button" id="scCphApplyAll" class="btn sm"' +
+        (allCanApply ? '' : ' disabled') +
+        ' style="flex:none;padding:5px 12px;font-size:12px;background:#E7ECF5;' +
+        'color:#5C7099;border:1px solid #C9D4E8;font-weight:600">' +
+        '⚡ 一键应用全部</button>' +
+    '</div>' + html;
+
+  /* ---------- 事件：一键应用全部 ---------- */
+  const applyAllBtn = document.getElementById('scCphApplyAll');
+  if (applyAllBtn) {
+    applyAllBtn.addEventListener('click', () => {
+      if (!dates.length) { toast('请先设置排班周期'); return; }
+      let empCnt = 0, dayCnt = 0;
+      for (const e of emps) {
+        const auto = pick(S.employeeCPHAuto, e.name);
+        const inp  = el.querySelector('input[data-name="' + e.name + '"]');
+        const v    = inp ? parseFloat(inp.value) : NaN;
+        const val  = (isFinite(v) && v > 0) ? v : auto;
+        if (!(val > 0)) continue;
+        if (!S.employeeCPHDaily[e.name]) S.employeeCPHDaily[e.name] = {};
+        for (const d of dates) {
+          if (!scIsActiveOn(e, d)) continue;
+          S.employeeCPHDaily[e.name][d] = val;
+          dayCnt++;
+        }
+        empCnt++;
+      }
+      if (!empCnt) { toast('没有可应用的员工（均无 P90 生效值）'); return; }
+      renderScCphGrid();
+      toast('✓ 已把 ' + empCnt + ' 位员工的 P90 值应用到 ' + dayCnt + ' 个员工日');
+    });
+  }
 
   /* ---------- 事件：手改 P90 生效值 ---------- */
   el.querySelectorAll('input[data-name]').forEach(inp => {

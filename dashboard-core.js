@@ -1294,10 +1294,33 @@ function calcAllEmployeeCPH() {
 
   const manual = scLoadCphManual();
 
+  /* ★ 新增：缓存每位员工的「日 CPD 最高的三天」明细 */
+  S.employeeCphTop3 = {};
+
   for (const e of scActiveEmployees()) {
     /* 自动值（算法） */
     const v = calcEmployeeCPH(e.name, alpha);
     S.employeeCPHAuto[e.name] = Object.assign({}, v);
+
+    /* ★ 计算 TOP3 明细：与 calcEmployeeCPH 内部逻辑保持一致的「日 CPD 最高的三天」 */
+    (function computeTop3() {
+      const dayVol = new Map();
+      for (const r of S.records) {
+        if (r.name !== e.name || !r.date) continue;
+        dayVol.set(r.date, (dayVol.get(r.date) || 0) + (r.volume || 0));
+      }
+      const dailies = [];
+      for (const [date, vol] of dayVol.entries()) {
+        if (vol > 0) dailies.push({ date, cpd: vol });
+      }
+      dailies.sort((a, b) => b.cpd - a.cpd);
+      const top3 = dailies.slice(0, 3).map(x => ({
+        date: x.date,
+        cpd: x.cpd,
+        cph: x.cpd / 8
+      }));
+      S.employeeCphTop3[e.name] = top3;
+    })();
 
     /* 优先应用手动值 */
     const mv = parseFloat(manual[e.name]);

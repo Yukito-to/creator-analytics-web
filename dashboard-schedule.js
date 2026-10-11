@@ -1259,6 +1259,9 @@ function renderSchedulePanel() {
   renderScRulesTable();
   renderScGrid();
   renderScRulesSummary();   // ★ 渲染规则说明面板
+
+  /* ★ 排班结果子页的配置摘要（按业务线拆分） */
+  if (typeof renderScResultSummary === 'function') renderScResultSummary();
 }
 
 function renderScShiftPool() {
@@ -2785,6 +2788,92 @@ function renderScRulesSummary() {
   el.innerHTML = HTML;
 }
 
+/* ★ 排班结果 · 按业务线拆分的配置摘要（两张卡片：买手 / 博主） */
+function renderScResultSummary() {
+  const el = document.getElementById('scResultSummary');
+  if (!el) return;
+
+  const c = scGetCycle();
+  const cycleDays = (c.start && c.end) ? scDatesBetween(c.start, c.end).length : 0;
+  const allEmps = scActiveEmployees();
+
+  /* 结果条数统计 */
+  const resultRows = S.scheduleResult || [];
+  const resultDates = new Set(resultRows.map(r => r.date));
+
+  /* ★ tile 辅助函数（提到循环外，供分业务线卡片与顶层概览共用） */
+  const tile = (label, value, color) =>
+    '<div class="sc-rs-tile">' +
+      '<div class="k">' + label + '</div>' +
+      '<div class="v"' + (color ? ' style="color:' + color + '"' : '') + '>' + value + '</div>' +
+    '</div>';
+
+  /* 分业务线统计 */
+  const blocks = [];
+  for (const biz of SC_BIZ_LIST) {
+    const pool  = S.shiftPoolByBiz[biz] || [];
+    const rules = S.shiftReqRules[biz] || [];
+    const validCnt = rules.filter(r =>
+      Array.isArray(r.dates)  && r.dates.length  > 0 &&
+      Array.isArray(r.shifts) && r.shifts.length > 0).length;
+
+    /* 该业务线的人员（专属 + 弹性） */
+    let empCnt = 0;
+    for (const e of allEmps) {
+      const b = String(e.biz || '');
+      if (/买手/.test(b) && !/博主/.test(b) && biz === '买手合作') empCnt++;
+      else if (/博主/.test(b) && !/买手/.test(b) && biz === '博主合作') empCnt++;
+      else if (!/买手/.test(b) && !/博主/.test(b)) empCnt++;
+    }
+
+    /* 该业务线的排班记录数（按 biz 过滤） */
+    let slots = 0;
+    for (const r of resultRows) if (r.biz === biz) slots++;
+
+    const tiles = [
+      tile('周期天数',   cycleDays || '—'),
+      tile('在排员工',   empCnt + ' 人'),
+      tile('可排班次',   pool.length + ' 个', pool.length ? '#6EA980' : '#C98383'),
+      tile('需求规则',   rules.length + ' 条' +
+                          (validCnt < rules.length
+                            ? '（' + (rules.length - validCnt) + ' 待补全）'
+                            : ''),
+                          validCnt < rules.length ? '#C98383'
+                          : (rules.length ? '#6EA980' : '#A0A0AE')),
+      tile('排班记录',   slots + ' 条'),
+    ].join('');
+
+    blocks.push(
+      '<div class="sc-rs-card" style="margin-bottom:10px">' +
+        '<div class="sc-rs-head">' +
+          '<span class="sc-rs-title">' + esc(biz) + '</span>' +
+          (biz === S.scBizState
+            ? '<span class="sc-rs-badge">当前编辑</span>'
+            : '') +
+        '</div>' +
+        '<div class="sc-rs-tiles">' + tiles + '</div>' +
+      '</div>'
+    );
+  }
+
+  /* 顶层头 */
+  const head = '<div class="sc-rs-card">' +
+    '<div class="sc-rs-head">' +
+      '<span class="sc-rs-title">📋 排班概览</span>' +
+    '</div>' +
+    '<div class="sc-rs-tiles">' +
+      tile('排班周期',
+        c.start && c.end ? (c.start.slice(5) + ' ~ ' + c.end.slice(5)) : '—') +
+      tile('周期天数', cycleDays || '—') +
+      tile('在排员工', allEmps.length + ' 人') +
+      tile('结果记录', resultRows.length + ' 条') +
+      tile('覆盖日期', resultDates.size + ' / ' + (cycleDays || 0) + ' 天') +
+    '</div>' +
+  '</div>';
+
+  el.innerHTML = head + blocks.join('');
+}
+
 function renderScDiag() {
   const el = document.getElementById('scDiag');
   if (!el) return;
@@ -2957,9 +3046,19 @@ async function scCopyMarkdown() {
       try {
         const r = generateSchedule();
         renderSchedulePanel();
+
+        /* ★ 生成后自动切到「排班结果」子页，让用户立即看到结果或失败提示 */
+        const tabsBar = document.getElementById('scSubTabs');
+        const resultBtn = tabsBar
+          ? tabsBar.querySelector('.sub-tab[data-sub="result"]')
+          : null;
+        if (resultBtn) resultBtn.click();
+
         if (r == null && S.scheduleDiag && S.scheduleDiag.failed) {
           const n = (S.scheduleDiag.mismatches || []).length;
           toast('❌ 排班失败：' + n + ' 处班次人数不符合规则，详见诊断栏');
+        } else if (r) {
+          toast('✓ 排班已生成');
         }
       } catch (e) {
         console.error(e);

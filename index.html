@@ -235,8 +235,9 @@
 
   <section id="view-schedule" class="view">
     <div class="sub-tabs" id="scSubTabs">
-      <button type="button" class="sub-tab active" data-sub="setup">📋 排班设置与结果</button>
-      <button type="button" class="sub-tab" data-sub="coverage">📊 日度量级匹配</button>
+      <button type="button" class="sub-tab active" data-sub="setup">📋 排班设置</button>
+      <button type="button" class="sub-tab" data-sub="result">📊 排班结果</button>
+      <button type="button" class="sub-tab" data-sub="coverage">📈 日度量级匹配</button>
     </div>
 
     <div id="scSub-setup" class="sub-view active">
@@ -311,27 +312,6 @@
         </h3>
         <div id="scReqList" class="table-scroll"></div>
 
-        <!-- ========== 排班表（前置 + 新排 + 统计） ========== -->
-        <div class="sc-grid-wrap">
-          <div class="sc-grid-head">
-            <h3 class="sub-title" style="margin:0">📅 排班表</h3>
-            <div class="sc-grid-tools">
-              <button id="scToggleStats"   class="btn sm">👁 隐藏统计列</button>
-              <button id="scToggleHistory" class="btn sm">📦 折叠历史列</button>
-              <div class="sc-legend">
-                <span><i style="background:#FFA94D"></i>休（算法）</span>
-                <span><i style="background:#92D050"></i>休需（员工）</span>
-              </div>
-            </div>
-          </div>
-          <p class="sc-grid-hint">
-            💡 单击单元格手动调整；拖拽框选区域后 Ctrl+C 复制、Ctrl+V 粘贴（可一次批量修改）；Ctrl+A 全选、Esc 取消。
-          </p>
-          <div class="sc-grid-scroll">
-            <table id="scGridTable"></table>
-          </div>
-        </div>
-
         <!-- ========== 月度休假规则设置 ========== -->
         <div class="sc-rules-wrap">
           <div class="sc-grid-head">
@@ -367,8 +347,39 @@
 
         <!-- ★ 排班规则说明面板 -->
         <div id="scRulesSummary" class="sc-rules-summary"></div>
+      </div>
+    </div>
 
+    <div id="scSub-result" class="sub-view">
+      <div class="card">
+        <div class="card-head"><h2>📊 排班结果</h2></div>
+
+        <!-- 当前配置摘要（按业务线拆分） -->
+        <div id="scResultSummary"></div>
+
+        <!-- 排班失败 / 诊断信息 -->
         <div id="scDiag" class="muted" style="margin-top:10px"></div>
+
+        <!-- ========== 排班表 ========== -->
+        <div class="sc-grid-wrap" style="margin-top:14px">
+          <div class="sc-grid-head">
+            <h3 class="sub-title" style="margin:0">📅 排班表</h3>
+            <div class="sc-grid-tools">
+              <button id="scToggleStats"   class="btn sm">👁 隐藏统计列</button>
+              <button id="scToggleHistory" class="btn sm">📦 折叠历史列</button>
+              <div class="sc-legend">
+                <span><i style="background:#FFA94D"></i>休（算法）</span>
+                <span><i style="background:#92D050"></i>休需（员工）</span>
+              </div>
+            </div>
+          </div>
+          <p class="sc-grid-hint">
+            💡 单击单元格手动调整；拖拽框选区域后 Ctrl+C 复制、Ctrl+V 粘贴（可一次批量修改）；Ctrl+A 全选、Esc 取消。
+          </p>
+          <div class="sc-grid-scroll">
+            <table id="scGridTable"></table>
+          </div>
+        </div>
       </div>
     </div>
 

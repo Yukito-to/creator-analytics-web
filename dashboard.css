@@ -1269,3 +1269,52 @@ th.sc-stat.hide, td.sc-stat.hide { display: none; }
 .sc-triple-month.hidden {
   display: none;
 }
+
+/* ==================== 智能排班 · 可折叠区块标题 ==================== */
+.sc-fold {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 14px;
+  margin: 16px 0 10px;
+  border-radius: 10px;
+  border-left: 4px solid var(--sc-fold-color, #7B8FBF);
+  background: var(--sc-fold-bg, #F0F4FB);
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--sc-fold-color, #5C7099);
+  cursor: pointer;
+  user-select: none;
+  line-height: 1.5;
+  transition: background .15s ease;
+  box-shadow: 0 1px 3px rgba(60, 60, 80, .05);
+}
+.sc-fold:hover  { background: var(--sc-fold-bg-hover, #E1E9F7); }
+.sc-fold:active { transform: scale(.997); }
+
+.sc-fold .arrow {
+  display: inline-block;
+  width: 14px; text-align: center;
+  font-size: 11px;
+  flex: none;
+  color: var(--sc-fold-color, #7B8FBF);
+  transition: transform .15s ease;
+}
+.sc-fold .fold-meta {
+  margin-left: auto;
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--sc-fold-color, #7B8FBF);
+  opacity: .82;
+  white-space: nowrap;
+}
+.sc-fold .help {
+  background: rgba(255, 255, 255, .75);
+  color: var(--sc-fold-color, #7B8FBF);
+}
+.sc-fold .btn.sm {
+  padding: 3px 10px;
+  font-size: 11.5px;
+  background: rgba(255, 255, 255, .8);
+  color: var(--sc-fold-color, #7B8FBF);
+  border: 1px solid rgba(255, 255, 255, .9);
+  box-shadow: none;
+}

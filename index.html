@@ -261,11 +261,10 @@
              style="font-size:11.5px;line-height:1.7;margin:-4px 0 12px 2px;color:#7B8FBF"></div>
 
         <!-- [2-4.5] 班次规则 · 大板块（可折叠） -->
-        <h3 class="sub-title" id="scRuleBlockToggle"
-            style="cursor:pointer;user-select:none;display:flex;align-items:center;gap:6px">
-          <span id="scRuleBlockArrow" style="display:inline-block;width:12px;font-size:10px;
-                color:#7B8FBF;transition:transform .15s ease">▼</span>
-          <span>班次规则</span>
+        <h3 class="sc-fold" id="scRuleBlockToggle"
+            style="--sc-fold-color:#5C7099; --sc-fold-bg:#EFF3FA; --sc-fold-bg-hover:#E1E9F7">
+          <span id="scRuleBlockArrow" class="arrow">▼</span>
+          <span>📋 班次规则</span>
           <span class="help"
                 data-tip="包含：业务线选择、本业务线可排班次、班次每日人数、支援博主设置。整体折叠后不再占据页面空间。"
                 onclick="event.stopPropagation()">?</span>
@@ -287,14 +286,13 @@
           <div id="scShiftPool" class="chips"></div>
 
           <!-- [4] 班次每日人数 -->
-          <h4 class="sc-sub-h4" id="scReqToggle"
-              style="cursor:pointer;user-select:none;display:flex;align-items:center;gap:6px">
-            <span id="scReqArrow" style="display:inline-block;width:12px;font-size:10px;
-                  color:#7B8FBF;transition:transform .15s ease">▼</span>
-            <span>班次每日人数</span>
-          <span class="help" id="scReqHelp"
-                data-tip="每条规则 = 生效日期 + 限制班次 + 每天等于人数。多条规则同时命中同一 (日期, 班次) 时取最小值。空 = 不限制。若人数不足会在生成排班时告警。"
-                onclick="event.stopPropagation()">?</span>
+          <h4 class="sc-fold" id="scReqToggle"
+              style="--sc-fold-color:#8E68A8; --sc-fold-bg:#F6F1FA; --sc-fold-bg-hover:#EDE2F5">
+            <span id="scReqArrow" class="arrow">▼</span>
+            <span>🎯 班次每日人数</span>
+            <span class="help" id="scReqHelp"
+                  data-tip="每条规则 = 生效日期 + 限制班次 + 每天等于人数。多条规则同时命中同一 (日期, 班次) 时取最小值。空 = 不限制。若人数不足会在生成排班时告警。"
+                  onclick="event.stopPropagation()">?</span>
           </h4>
         <div id="scReqGrid"></div>
 
@@ -307,11 +305,10 @@
         </div>
 
         <!-- [5] CPH 预览 -->
-        <h3 class="sub-title" id="scCphToggle"
-            style="cursor:pointer;user-select:none;display:flex;align-items:center;gap:6px">
-          <span id="scCphArrow" style="display:inline-block;width:12px;font-size:10px;
-                color:#7B8FBF;transition:transform .15s ease">▼</span>
-          <span>员工 CPH（可手动覆盖）</span>
+        <h3 class="sc-fold" id="scCphToggle"
+            style="--sc-fold-color:#4E8A62; --sc-fold-bg:#EDF6F0; --sc-fold-bg-hover:#DDEEE3">
+          <span id="scCphArrow" class="arrow">▼</span>
+          <span>📈 员工 CPH（可手动覆盖）</span>
         </h3>
         <div id="scCphGrid"></div>
 

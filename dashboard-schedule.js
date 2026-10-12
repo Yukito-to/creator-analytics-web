@@ -447,14 +447,11 @@ function calcAllHolidayQuota() {
 function generateSchedule() {
   const c = scGetCycle();
   if (!c.start || !c.end) { toast('请先设置排班周期'); return null; }
-  /* ★ 班次来源放宽为「班次池 ∪ 规则班次」：班次池只是可选范围，
-     规则里的班次是硬约束（见 scAssignBizDay 取并集）。
-     只有两者都为空才拦截；否则即使班次池为空，也能按规则班次分配。 */
-  const hasAnyShift = (S.shiftPool || []).length > 0 ||
-    SC_BIZ_LIST.some(b =>
-      ((S.shiftReqRules && S.shiftReqRules[b]) || [])
-        .some(r => Array.isArray(r.shifts) && r.shifts.length > 0));
-  if (!hasAnyShift) { toast('请先选择可用班次或配置班次需求规则'); return null; }
+  /* ★ 只要任一业务线的班次池非空就允许生成；
+     规则是否含「生效日期 + 限制班次」由下方 hasValidRule 兜底校验。 */
+  const anyPool = SC_BIZ_LIST.some(b =>
+    ((S.shiftPoolByBiz && S.shiftPoolByBiz[b]) || []).length > 0);
+  if (!anyPool) { toast('请先为至少一个业务线选择可用班次'); return null; }
 
   /* ★ 校验：规则引用的班次必须在「班次时段」sheet 里有定义，
      否则 scIsWorkingShift / scCanAssign 会误判，分配结果无意义。 */
@@ -612,7 +609,7 @@ function scAssignBizDay(ctx, date, biz, candidates) {
   /* ★ 候选班次 = 班次池 ∪ 该业务线规则里出现的班次
      —— 规则是「必须满足」的硬约束，班次池只是「可选范围」，
         两者取并集，避免「规则里有需求、但候选班次列表里没有」的死结。 */
-  const shiftSet = new Set(S.shiftPool || []);
+  const shiftSet = new Set((S.shiftPoolByBiz && S.shiftPoolByBiz[biz]) || []);
   for (const r of ((S.shiftReqRules && S.shiftReqRules[biz]) || [])) {
     if (Array.isArray(r.shifts)) for (const s of r.shifts) shiftSet.add(s);
   }
@@ -791,8 +788,9 @@ function scAssignBuyerSurplusToBlogger(ctx, date) {
   const biz = '博主合作';
 
   /* 1. 汇总博主各班次当前缺口 */
+  const pool = (S.shiftPoolByBiz && S.shiftPoolByBiz[biz]) || [];   // ★ 按业务线取池（S.shiftPool 是当前 tab 的引用，切 tab 会指向别的业务线）
   const shiftGap = {};
-  for (const shift of S.shiftPool) {
+  for (const shift of pool) {
     const need = scGetShiftReq(biz, shift, date);
     if (need == null || !isFinite(need) || need <= 0) continue;
     let already = 0;
@@ -832,9 +830,10 @@ function scAssignBuyerSurplusToBlogger(ctx, date) {
 }
 
 function scPickBestCandidate(ctx, date, biz, cands, short) {
+  const pool = (S.shiftPoolByBiz && S.shiftPoolByBiz[biz]) || [];   // ★ 按业务线取池
   let best = null;
   for (const e of cands) {
-    for (const shift of S.shiftPool) {
+    for (const shift of pool) {
       if (!scCanAssign(ctx, e, date, shift)) continue;
       if (!scShiftHasCapacity(ctx, date, biz, shift)) continue;
       const mins = (S.shiftPeriods || {})[shift] || {};
@@ -2805,7 +2804,7 @@ function renderScCoverage() {
 
   const bizRows = [];
   for (const biz of SC_BIZ_LIST) {
-    for (const shift of S.shiftPool) {
+    for (const shift of ((S.shiftPoolByBiz && S.shiftPoolByBiz[biz]) || [])) {
       for (const d of dates) {
         const need = scGetShiftReq(biz, shift, d);
         if (need == null) continue;
@@ -3120,7 +3119,7 @@ function scExportXlsx() {
     { v: '班次', t: 's', s: 1 }, { v: '需求', t: 's', s: 1 }, { v: '实际', t: 's', s: 1 }
   ]];
   for (const biz of SC_BIZ_LIST) {
-    for (const shift of S.shiftPool) {
+    for (const shift of ((S.shiftPoolByBiz && S.shiftPoolByBiz[biz]) || [])) {
       for (const d of dates) {
         const need = scGetShiftReq(biz, shift, d);
         if (need == null) continue;
@@ -3307,9 +3306,9 @@ function scGetShiftReq(biz, shift, date) {
 
 /* ==================== 时段需求量（H6 用） ==================== */
 /* 班次池所有班次的分钟分布 → 每小时权重（把日总量拆到小时） */
-function scPoolHourWeights() {
+function scPoolHourWeights(biz) {
   const w = {};
-  for (const s of (S.shiftPool || [])) {
+  for (const s of ((S.shiftPoolByBiz && S.shiftPoolByBiz[biz]) || [])) {
     const mins = (S.shiftPeriods || {})[s] || {};
     for (const h in mins) if (mins[h] > 0) w[h] = (w[h] || 0) + mins[h];
   }
@@ -3334,7 +3333,7 @@ function scComputeDemandTable(biz, dates) {
     prof[wd][p].sum += r.volume || 0;
     prof[wd][p].cnt++;
   }
-  const weights = scPoolHourWeights();
+  const weights = scPoolHourWeights(biz);
   let wsum = 0;
   for (const h of SC_HOURS) wsum += weights[h] || 0;
   for (const d of dates) {

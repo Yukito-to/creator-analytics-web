@@ -2005,6 +2005,24 @@ function renderScReqList() {
 }
 
 /* ==================== 排班表（前置 + 新排 + 统计） ==================== */
+/* ★ 计算排班表表头在宽屏下的吸附位置（= topbar + tabs 的实际高度）。
+   topbar 与 tabs 均 position:sticky，高度随断点/滚动条变化，写死不稳，故动态测量。 */
+function scSyncGridStickyTop() {
+  const topbar = document.querySelector('.topbar');
+  const tabs   = document.querySelector('.tabs');
+  const isSticky = el => {
+    if (!el) return false;
+    return getComputedStyle(el).position === 'sticky';
+  };
+  let top = 0;
+  if (isSticky(topbar)) top += topbar.offsetHeight;
+  if (isSticky(tabs))   top += tabs.offsetHeight;
+  document.documentElement.style.setProperty('--sc-grid-sticky-top', top + 'px');
+}
+
+/* 窗口尺寸变化时重算吸附高度 */
+window.addEventListener('resize', scSyncGridStickyTop);
+
 /* 渲染前置+新排的统一表格 */
 function renderScGrid() {
   const tbl = document.getElementById('scGridTable');
@@ -2203,6 +2221,9 @@ function renderScGrid() {
   }
 
   bindScGridEvents(tbl, emps, dates);
+
+  /* ★ 宽屏表头吸附位置随 topbar/tabs 实际高度动态更新 */
+  scSyncGridStickyTop();
 }
 
 /* 拖拽是否移动过（用于抑制拖拽结束后的 click 弹窗） */

@@ -1045,14 +1045,11 @@ tbody tr:active td:first-child { background: #FAFAF7; }
 }
 
 /* 排班表格 */
-/* 排班表滚动容器：横向 + 纵向滚动；
-   纵向滚动使得表头 sticky top:0 生效（否则 sticky 无参照，视觉上"粘不住"） */
+/* 排班表滚动容器：横向滚动；★ 去掉 max-height / min-height / overflow-y，
+   让整张表自然展开，靠页面滚动查看所有员工 */
 .sc-grid-scroll {
   overflow-x: auto;
-  overflow-y: auto;
   -webkit-overflow-scrolling: touch;
-  max-height: calc(100vh - 220px);   /* 视口高度 - 顶部/卡片/工具栏预留 */
-  min-height: 320px;
 }
 #scGridTable {
   border-collapse: separate; border-spacing: 0;
@@ -1064,10 +1061,7 @@ tbody tr:active td:first-child { background: #FAFAF7; }
 #scGridTable thead th {
   background: #F4F3EF; color: var(--text-2); font-weight: 600;
   position: sticky; top: 0; z-index: 3;
-}
-#scGridTable thead tr:nth-child(2) th {
-  top: 32px; font-size: 11px; font-weight: 400; color: #77778A;
-  padding: 2px 8px 4px;
+  box-shadow: inset 0 -1px 0 #E7E5DE;
 }
 /* 第 1 列：业务线（sticky left:0 + top:0 双向固定） */
 #scGridTable tbody td:nth-child(1),
@@ -1081,10 +1075,6 @@ tbody tr:active td:first-child { background: #FAFAF7; }
   top: 0; left: 0; z-index: 5; background: #F4F3EF;
   box-shadow: inset -1px 0 0 #E7E5DE, inset 0 -1px 0 #E7E5DE;
 }
-/* ★ 第二行表头第 1 列：top:32px + left:0 */
-#scGridTable thead tr:nth-child(2) th:nth-child(1) {
-  top: 32px; left: 0;
-}
 
 /* 第 2 列：员工（sticky left:56px = 业务线列宽） */
 #scGridTable tbody td:nth-child(2),
@@ -1096,10 +1086,6 @@ tbody tr:active td:first-child { background: #FAFAF7; }
 #scGridTable thead th:nth-child(2) {
   top: 0; left: 56px; z-index: 5; background: #F4F3EF;
   box-shadow: inset -1px 0 0 #E7E5DE, inset 0 -1px 0 #E7E5DE;
-}
-/* ★ 第二行表头第 2 列：top:32px + left:56px */
-#scGridTable thead tr:nth-child(2) th:nth-child(2) {
-  top: 32px; left: 56px;
 }
 
 /* 日期列头：日期一行 + 「周 X（标签）」一行；均强制单行不换行 */
@@ -1138,6 +1124,22 @@ tbody tr:active td:first-child { background: #FAFAF7; }
 .sc-date-h.is-holiday .d { color: #D9363E; }
 .sc-date-h.is-workday .d { color: #C75C5C; }
 .sc-date-h.is-today  { outline: 2px solid #7B8FBF; outline-offset: -2px; border-radius: 4px; }
+
+/* ★ 宽屏：排班表通常能放下，关掉 overflow 让 sticky 相对 viewport，
+   表头吸附在 topbar + tabs 下方，整页滚动时永远可见。
+   注意：第 1/2 列原本用 :nth-child 定了 top:0（特异性更高），
+   宽屏下必须一并覆盖，否则这两列会停在 top:0 被 topbar 盖住。 */
+@media (min-width: 1024px) {
+  .sc-grid-scroll {
+    overflow: visible;
+  }
+  #scGridTable thead th,
+  #scGridTable thead th:nth-child(1),
+  #scGridTable thead th:nth-child(2) {
+    top: var(--sc-grid-sticky-top, 112px);
+    z-index: 30;
+  }
+}
 
 /* 统计列 */
 .sc-stat { width: 42px; min-width: 42px; max-width: 42px; font-weight: 600; }

@@ -447,7 +447,30 @@ function calcAllHolidayQuota() {
 function generateSchedule() {
   const c = scGetCycle();
   if (!c.start || !c.end) { toast('请先设置排班周期'); return null; }
-  if (!(S.shiftPool || []).length) { toast('请先选择可用班次'); return null; }
+  /* ★ 班次来源放宽为「班次池 ∪ 规则班次」：班次池只是可选范围，
+     规则里的班次是硬约束（见 scAssignBizDay 取并集）。
+     只有两者都为空才拦截；否则即使班次池为空，也能按规则班次分配。 */
+  const hasAnyShift = (S.shiftPool || []).length > 0 ||
+    SC_BIZ_LIST.some(b =>
+      ((S.shiftReqRules && S.shiftReqRules[b]) || [])
+        .some(r => Array.isArray(r.shifts) && r.shifts.length > 0));
+  if (!hasAnyShift) { toast('请先选择可用班次或配置班次需求规则'); return null; }
+
+  /* ★ 校验：规则引用的班次必须在「班次时段」sheet 里有定义，
+     否则 scIsWorkingShift / scCanAssign 会误判，分配结果无意义。 */
+  const unknownShifts = new Set();
+  for (const b of SC_BIZ_LIST) {
+    for (const r of (S.shiftReqRules[b] || [])) {
+      for (const s of (r.shifts || [])) {
+        if (!S.shiftMeta || !S.shiftMeta[s]) unknownShifts.add(s);
+      }
+    }
+  }
+  if (unknownShifts.size) {
+    toast('规则里引用了未定义的班次：' + Array.from(unknownShifts).join('、') +
+          '（请检查「班次时段」sheet）');
+    return null;
+  }
 
   /* ★ 校验：至少存在一条「有效」的规则（日期 + 班次都选了），跨所有业务线。
      判定口径与 scGetShiftReq 保持一致 —— 只要日期、班次都填了就算生效，
@@ -586,7 +609,15 @@ function scApplyLocks(ctx, date) {
 
 /* 按需求表逐班次分配（H8 由候选池保证；H2/H3/H4 由 scCanAssign 保证） */
 function scAssignBizDay(ctx, date, biz, candidates) {
-  for (const shift of S.shiftPool) {
+  /* ★ 候选班次 = 班次池 ∪ 该业务线规则里出现的班次
+     —— 规则是「必须满足」的硬约束，班次池只是「可选范围」，
+        两者取并集，避免「规则里有需求、但候选班次列表里没有」的死结。 */
+  const shiftSet = new Set(S.shiftPool || []);
+  for (const r of ((S.shiftReqRules && S.shiftReqRules[biz]) || [])) {
+    if (Array.isArray(r.shifts)) for (const s of r.shifts) shiftSet.add(s);
+  }
+
+  for (const shift of shiftSet) {
     const need = scGetShiftReq(biz, shift, date);
     if (need == null) continue;
     let already = 0;

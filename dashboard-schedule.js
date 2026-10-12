@@ -606,13 +606,9 @@ function scApplyLocks(ctx, date) {
 
 /* 按需求表逐班次分配（H8 由候选池保证；H2/H3/H4 由 scCanAssign 保证） */
 function scAssignBizDay(ctx, date, biz, candidates) {
-  /* ★ 候选班次 = 班次池 ∪ 该业务线规则里出现的班次
-     —— 规则是「必须满足」的硬约束，班次池只是「可选范围」，
-        两者取并集，避免「规则里有需求、但候选班次列表里没有」的死结。 */
+  /* ★ 候选班次 = 当前业务线的班次池（纯 per-biz，不额外并入规则里引用的班次）。
+     规则里列出的班次都已经在「可排班次」里勾选了，无需二次兜底。 */
   const shiftSet = new Set((S.shiftPoolByBiz && S.shiftPoolByBiz[biz]) || []);
-  for (const r of ((S.shiftReqRules && S.shiftReqRules[biz]) || [])) {
-    if (Array.isArray(r.shifts)) for (const s of r.shifts) shiftSet.add(s);
-  }
 
   for (const shift of shiftSet) {
     const need = scGetShiftReq(biz, shift, date);
@@ -1070,6 +1066,11 @@ function scValidateShiftCounts(ctx) {
   const mismatches = [];
   if (!ctx || !ctx.dates || !ctx.dates.length) return { ok: true, mismatches };
 
+  /* ★ hasEmpFor：辅助函数——判断指定业务线+班次在指定日期是否有员工已排 */
+  function hasEmpFor(empName, date, shift) {
+    return !!(ctx.assigned[date] && ctx.assigned[date][empName] === shift);
+  }
+
   /* 收集所有规则涉及的班次（跨业务线） */
   const shiftsInRules = new Set();
   for (const b of SC_BIZ_LIST) {
@@ -1088,7 +1089,7 @@ function scValidateShiftCounts(ctx) {
         if (need == null || !isFinite(need)) continue;   // 未命中规则 → 不校验
         let actual = 0;
         for (const n in ctx.assigned[d]) {
-          if (ctx.assigned[d][n] === shift && ctx.assignedBiz[d][n] === biz) actual++;
+          if (hasEmpFor(n, d, shift) && ctx.assignedBiz[d][n] === biz) actual++;
         }
         if (actual !== need) {
           mismatches.push({

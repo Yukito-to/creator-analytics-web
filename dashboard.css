@@ -1320,3 +1320,46 @@ th.sc-stat.hide, td.sc-stat.hide { display: none; }
   border: 1px solid rgba(255, 255, 255, .9);
   box-shadow: none;
 }
+
+/* ★ 原生 select 样式覆盖：跨浏览器统一字体、圆角、内边距和下拉箭头。 */
+.sc-native-select {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  padding: 6px 28px 6px 10px;
+  font-size: 13.5px;
+  font-family: inherit;
+  color: #333;
+  background-color: #fff;
+  border: 1px solid var(--border-2);
+  border-radius: 8px;
+  outline: none;
+  transition: border-color .15s ease, box-shadow .15s ease;
+  cursor: pointer;
+  min-height: 34px;
+}
+.sc-native-select:hover {
+  border-color: var(--primary, #7B8FBF);
+}
+.sc-native-select:focus {
+  border-color: var(--primary, #7B8FBF);
+  box-shadow: 0 0 0 2px rgba(123, 143, 191, .2);
+}
+/* 为原生 select 添加自定义下拉箭头（用背景图避免系统主题限制） */
+.sc-native-select-wrapper {
+  position: relative;
+  display: inline-block;
+}
+.sc-native-select-wrapper::after {
+  content: '';
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid #77778A;
+  pointer-events: none;
+}

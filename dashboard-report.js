@@ -901,6 +901,14 @@ function buildReport(biz, wk) {
   };
 }
 
+/* ==================== 周报 · 数字显示工具 ==================== */
+function trimNum(v, digits) {
+  if (v == null || !isFinite(v)) return '—';
+  const s = Number(v).toFixed(digits == null ? 2 : digits);
+  // 去掉尾随 0，以及可能残留的 "."
+  return s.replace(/\.?0+$/, '');
+}
+
 /* ==================== 周报 · HTML ==================== */
 function reportHTML(d) {
   const { biz, wk, prevWk, monthLabel, week, s30, byCat, schedule, aht2, targets, range, dayRows, groups, emps, att } = d;
@@ -1022,17 +1030,15 @@ function reportHTML(d) {
     const cpdTgt = (tgt && tgt.cpd != null) ? Number(tgt.cpd) : null;
     const dd = (c != null && cp != null) ? c - cp : null;
     const arrow = (dd == null || Math.abs(dd) < 1e-9) ? '' : (dd > 0 ? '🔺' : '🔻');
-    let s = '<b>①CPD：</b>' + num2(c) + '，<span class="rpt-sep">|</span> 周度WoW：' + num2(dd) + arrow;
+    let s = '<b>①CPD：</b>' + trimNum(c) + '，<span class="rpt-sep">|</span> 周度WoW：' + trimNum(dd) + arrow;
     if (cpdTgt != null && c != null) {
       const rate = c / cpdTgt;
-      const hit = c >= cpdTgt;
-      s += '（周度达成率：' + pct2(rate) + '）' + (hit ? '' : '🔴（未达成）');
+      s += '（周度达成率：' + pct2(rate) + '）' + (c >= cpdTgt ? '' : '🔴（未达成）');
     }
-    s += ' <span class="rpt-sep">|</span> ' + monthLabel + '目标：' + (cpdTgt != null ? num2(cpdTgt, 0) : '—') + '，' + monthLabel + '达成：' + num2(cm);
+    s += ' <span class="rpt-sep">|</span> ' + monthLabel + '目标：' + (cpdTgt != null ? num2(cpdTgt, 0) : '—') + '，' + monthLabel + '达成：' + trimNum(cm);
     if (cpdTgt != null && cm != null) {
       const mr = cm / cpdTgt;
-      const mhit = cm >= cpdTgt;
-      s += '（月度达成率：' + pct2(mr) + '）' + (mhit ? '' : '🔴（未达成）');
+      s += '（月度达成率：' + pct2(mr) + '）' + (cm >= cpdTgt ? '' : '🔴（未达成）');
     }
     s += '；';
     P.push('<div class="rpt-line">' + s + '</div>');
@@ -1056,7 +1062,7 @@ function reportHTML(d) {
     const schWk = Math.round(schedule.week * 100) / 100;
     const schPrev = Math.round(schedule.prev * 100) / 100;
     const dmp = Math.round((schWk - schPrev) * 100) / 100;
-    P.push('<div class="rpt-line">本周' + bizShort + '排班人力：' + schWk.toFixed(2) + '（' + schPrev.toFixed(2) + '→' + schWk.toFixed(2) + '，' + dArrow(dmp) + Math.abs(dmp).toFixed(2) + '）</div>');
+    P.push('<div class="rpt-line">本周' + bizShort + '排班人力：' + trimNum(schWk, 2) + '（' + trimNum(schPrev, 2) + '→' + trimNum(schWk, 2) + '，' + dArrow(dmp) + trimNum(Math.abs(dmp), 2) + '）</div>');
   }
 
   for (const cat of ['老人','次月','首月']) {
@@ -1072,14 +1078,14 @@ function reportHTML(d) {
     const a = cur.aht, ap = prev.aht, am = mCur.aht;
     const dd = (a != null && ap != null) ? a - ap : null;
     const arrow = (dd == null || Math.abs(dd) < 1e-9) ? '' : (dd > 0 ? '🔺' : '🔻');
-    P.push('<div class="rpt-line"><b>②AHT：</b>' + num2(a) + '，<span class="rpt-sep">|</span> 周度WoW：' + num2(dd) + arrow + ' <span class="rpt-sep">|</span> ' + monthLabel + '达成：' + num2(am) + '；</div>');
+    P.push('<div class="rpt-line"><b>②AHT：</b>' + trimNum(a) + '，<span class="rpt-sep">|</span> 周度WoW：' + trimNum(dd) + arrow + ' <span class="rpt-sep">|</span> ' + monthLabel + '达成：' + trimNum(am) + '；</div>');
   }
 
   {
     const c = cur.concurrency, cp = prev.concurrency, cm = mCur.concurrency;
     const dd = (c != null && cp != null) ? c - cp : null;
     const arrow = (dd == null || Math.abs(dd) < 1e-9) ? '' : (dd > 0 ? '🔺' : '🔻');
-    P.push('<div class="rpt-line"><b>③并发：</b>' + num2(c) + '，<span class="rpt-sep">|</span> 周度WoW：' + num2(dd) + arrow + ' <span class="rpt-sep">|</span> ' + monthLabel + '达成：' + num2(cm) + '；</div>');
+    P.push('<div class="rpt-line"><b>③并发：</b>' + trimNum(c) + '，<span class="rpt-sep">|</span> 周度WoW：' + trimNum(dd) + arrow + ' <span class="rpt-sep">|</span> ' + monthLabel + '达成：' + trimNum(cm) + '；</div>');
   }
 
   for (const cat of ['老人','次月','首月']) {
@@ -1098,13 +1104,13 @@ function reportHTML(d) {
     const s30Tgt = s30TargetPct(biz);
     const ddPct = (v) => v == null ? '—' : ((v >= 0 ? '+' : '') + (v * 100).toFixed(2) + '%');
     const disp = (v) => v == null ? '—' : (v * 100).toFixed(2) + '%';
-    let s = '<b>④30s接起率：</b>' + disp(r) + '，<span class="rpt-sep">|</span> 周度WoW：' + ddPct(dd) + arrow;
+    let s = '<b>④、30s接起率：</b>' + disp(r) + '，<span class="rpt-sep">|</span> 周度WoW：' + ddPct(dd) + arrow;
     if (s30Tgt != null && r != null) {
       const rate = r * 100 / s30Tgt;
       const hit = rate >= 100;
       s += '（周度达成率：' + rate.toFixed(2) + '%）' + (hit ? '' : '🔴（未达成）');
     }
-    s += ' <span class="rpt-sep">|</span> ' + monthLabel + '目标：' + (s30Tgt != null ? (s30Tgt * 100).toFixed(2) + '%' : '—') + '，' + monthLabel + '达成：' + disp(rm);
+    s += ' <span class="rpt-sep">|</span> ' + monthLabel + '目标：' + (s30Tgt != null ? trimNum(s30Tgt * 100, 2) + '%' : '—') + '，' + monthLabel + '达成：' + disp(rm);
     if (s30Tgt != null && rm != null) {
       const mr = rm * 100 / s30Tgt;
       const mhit = mr >= 100;
@@ -1117,7 +1123,7 @@ function reportHTML(d) {
   {
     const c = cur.cpd, cp = prev.cpd;
     const dd = (c != null && cp != null) ? c - cp : null;
-    P.push('<div class="rpt-line"><b>⑤周度：</b>' + num2(c) + '，【' + (dd == null ? '—' : (dd > 0 ? '+' : '') + dd.toFixed(2)) + '】</div>');
+    P.push('<div class="rpt-line"><b>CPD-周度</b>' + trimNum(c) + ',【' + (dd == null ? '—' : (dd > 0 ? '+' : '') + dd.toFixed(2)) + '】</div>');
   }
 
   {
@@ -1148,7 +1154,7 @@ function reportHTML(d) {
         .sort((x, y) => Math.abs(y.impact) - Math.abs(x.impact)).slice(0, 3);
     }
     const tag = ahtRose ? '负贡献' : (ahtFell ? '正贡献' : '影响值');
-    P.push('<div class="rpt-line"><b>⑥二级AHT</b>（按影响值大小排序：当周度 AHT 上升时，展示负贡献且自身 AHT 上升的二级AHT；当周度 AHT 下降时，展示正贡献且自身 AHT 下降的二级AHT；当周度 AHT 持平，则展示影响值绝对值前三的二级AHT）</div>');
+    P.push('<div class="rpt-line"><b>二级AHT</b>（按影响值大小排序：当周度 AHT 上升时，展示负贡献且自身 AHT 上升的二级AHT；当周度 AHT 下降时，展示正贡献且自身 AHT 下降的二级AHT；当周度 AHT 持平，则展示影响值绝对值前三的二级AHT）</div>');
     if (!top3.length) P.push('<div class="rpt-sub">暂无数据</div>');
     else for (const o of top3) {
       const key = 'aht2r|' + wk + '|' + o.l1 + '|' + o.l2;
@@ -1156,8 +1162,8 @@ function reportHTML(d) {
       const dv2 = o.volNow - o.volPrev;
       const da = (o.ahtNow != null && o.ahtPrev != null) ? o.ahtNow - o.ahtPrev : null;
       const imp = o.impact;
-      const impStr = imp == null ? '—' : Math.abs(imp).toFixed(2);
-      P.push('<div class="rpt-sub">【' + esc(o.l2) + '】AHT达成：' + num2(o.ahtNow) + '，周度WOW：' + (da == null ? '—' : dStr(da)) + '，咨询量：(' + fmtInt(o.volPrev) + '→' + fmtInt(o.volNow) + '，' + (dv2 > 0 ? '+' : '') + fmtInt(dv2) + ')，原因：<input class="rpt-input" type="text" data-key="' + esc(key) + '" value="' + esc(reason) + '" placeholder="填写原因">，' + tag + '：' + impStr + '；</div>');
+      const impStr = imp == null ? '—' : trimNum(Math.abs(imp), 2);
+      P.push('<div class="rpt-sub">【' + esc(o.l2) + '】AHT达成：' + trimNum(o.ahtNow) + '，周度WOW：' + (da == null ? '—' : dStr(da)) + '，咨询量：(' + fmtInt(o.volPrev) + '→' + fmtInt(o.volNow) + '，' + (dv2 > 0 ? '+' : '') + fmtInt(dv2) + ')，原因：<input class="rpt-input" type="text" data-key="' + esc(key) + '" value="' + esc(reason) + '" placeholder="填写原因">，' + tag + '：' + impStr + '；</div>');
     }
   }
 
@@ -1300,12 +1306,12 @@ function reportToText(d) {
     const cpdTgt = (tgt && tgt.cpd != null) ? Number(tgt.cpd) : null;
     const dd = (c != null && cp != null) ? c - cp : null;
     const arrow = (dd == null || Math.abs(dd) < 1e-9) ? '' : (dd > 0 ? '🔺' : '🔻');
-    let s = '①CPD：' + num2(c) + '，| 周度WoW：' + num2(dd) + arrow;
+    let s = '①CPD：' + trimNum(c) + '，| 周度WoW：' + trimNum(dd) + arrow;
     if (cpdTgt != null && c != null) {
       const rate = c / cpdTgt;
       s += '（周度达成率：' + pct2(rate) + '）' + (c >= cpdTgt ? '' : '🔴（未达成）');
     }
-    s += ' | ' + monthLabel + '目标：' + (cpdTgt != null ? num2(cpdTgt, 0) : '—') + '，' + monthLabel + '达成：' + num2(cm);
+    s += ' | ' + monthLabel + '目标：' + (cpdTgt != null ? num2(cpdTgt, 0) : '—') + '，' + monthLabel + '达成：' + trimNum(cm);
     if (cpdTgt != null && cm != null) {
       const mr = cm / cpdTgt;
       s += '（月度达成率：' + pct2(mr) + '）' + (cm >= cpdTgt ? '' : '🔴（未达成）');
@@ -1329,7 +1335,7 @@ function reportToText(d) {
     const schWk = Math.round(schedule.week * 100) / 100;
     const schPrev = Math.round(schedule.prev * 100) / 100;
     const dmp = Math.round((schWk - schPrev) * 100) / 100;
-    L.push('本周' + bizShort + '排班人力：' + schWk.toFixed(2) + '（' + schPrev.toFixed(2) + '→' + schWk.toFixed(2) + '，' + dArrow(dmp) + Math.abs(dmp).toFixed(2) + '）');
+    L.push('本周' + bizShort + '排班人力：' + trimNum(schWk, 2) + '（' + trimNum(schPrev, 2) + '→' + trimNum(schWk, 2) + '，' + dArrow(dmp) + trimNum(Math.abs(dmp), 2) + '）');
   }
 
   for (const cat of ['老人','次月','首月']) {
@@ -1345,14 +1351,14 @@ function reportToText(d) {
     const a = cur.aht, ap = prev.aht, am = mCur.aht;
     const dd = (a != null && ap != null) ? a - ap : null;
     const arrow = (dd == null || Math.abs(dd) < 1e-9) ? '' : (dd > 0 ? '🔺' : '🔻');
-    L.push('②AHT：' + num2(a) + '，| 周度WoW：' + num2(dd) + arrow + ' | ' + monthLabel + '达成：' + num2(am) + '；');
+    L.push('②AHT：' + trimNum(a) + '，| 周度WoW：' + trimNum(dd) + arrow + ' | ' + monthLabel + '达成：' + trimNum(am) + '；');
   }
 
   {
     const c = cur.concurrency, cp = prev.concurrency, cm = mCur.concurrency;
     const dd = (c != null && cp != null) ? c - cp : null;
     const arrow = (dd == null || Math.abs(dd) < 1e-9) ? '' : (dd > 0 ? '🔺' : '🔻');
-    L.push('③并发：' + num2(c) + '，| 周度WoW：' + num2(dd) + arrow + ' | ' + monthLabel + '达成：' + num2(cm) + '；');
+    L.push('③并发：' + trimNum(c) + '，| 周度WoW：' + trimNum(dd) + arrow + ' | ' + monthLabel + '达成：' + trimNum(cm) + '；');
   }
 
   for (const cat of ['老人','次月','首月']) {
@@ -1371,12 +1377,12 @@ function reportToText(d) {
     const s30Tgt = s30TargetPct(biz);
     const ddPct = (v) => v == null ? '—' : ((v >= 0 ? '+' : '') + (v * 100).toFixed(2) + '%');
     const disp = (v) => v == null ? '—' : (v * 100).toFixed(2) + '%';
-    let s = '④30s接起率：' + disp(r) + '，| 周度WoW：' + ddPct(dd) + arrow;
+    let s = '④、30s接起率：' + disp(r) + '，| 周度WoW：' + ddPct(dd) + arrow;
     if (s30Tgt != null && r != null) {
       const rate = r * 100 / s30Tgt;
       s += '（周度达成率：' + rate.toFixed(2) + '%）' + (rate >= 100 ? '' : '🔴（未达成）');
     }
-    s += ' | ' + monthLabel + '目标：' + (s30Tgt != null ? (s30Tgt * 100).toFixed(2) + '%' : '—') + '，' + monthLabel + '达成：' + disp(rm);
+    s += ' | ' + monthLabel + '目标：' + (s30Tgt != null ? trimNum(s30Tgt * 100, 2) + '%' : '—') + '，' + monthLabel + '达成：' + disp(rm);
     if (s30Tgt != null && rm != null) {
       const mr = rm * 100 / s30Tgt;
       s += '（月度达成率：' + mr.toFixed(2) + '%）' + (mr >= 100 ? '' : '🔴（未达成）');
@@ -1388,7 +1394,7 @@ function reportToText(d) {
   {
     const c = cur.cpd, cp = prev.cpd;
     const dd = (c != null && cp != null) ? c - cp : null;
-    L.push('⑤周度：' + num2(c) + '，【' + (dd == null ? '—' : (dd > 0 ? '+' : '') + dd.toFixed(2)) + '】');
+    L.push('CPD-周度' + trimNum(c) + ',【' + (dd == null ? '—' : (dd > 0 ? '+' : '') + dd.toFixed(2)) + '】');
   }
 
   {
@@ -1408,16 +1414,16 @@ function reportToText(d) {
     else if (ahtFell) top3 = list.filter(o => o.impact != null && o.impact > 0 && o.ahtNow != null && o.ahtPrev != null && o.ahtNow < o.ahtPrev).sort((x, y) => y.impact - x.impact).slice(0, 3);
     else top3 = list.filter(o => o.impact != null).sort((x, y) => Math.abs(y.impact) - Math.abs(x.impact)).slice(0, 3);
     const tag = ahtRose ? '负贡献' : (ahtFell ? '正贡献' : '影响值');
-    L.push('⑥二级AHT（按影响值大小排序：当周度 AHT 上升时，展示负贡献且自身 AHT 上升的二级AHT；当周度 AHT 下降时，展示正贡献且自身 AHT 下降的二级AHT；当周度 AHT 持平，则展示影响值绝对值前三的二级AHT）');
+    L.push('二级AHT（按影响值大小排序：当周度 AHT 上升时，展示负贡献且自身 AHT 上升的二级AHT；当周度 AHT 下降时，展示正贡献且自身 AHT 下降的二级AHT；当周度 AHT 持平，则展示影响值绝对值前三的二级AHT）');
     if (!top3.length) L.push('暂无数据');
     else for (const o of top3) {
       const key = 'aht2r|' + wk + '|' + o.l1 + '|' + o.l2;
-      const reason = reasons[key] || '（待填写）';
+      const reason = reasons[key] || '填写原因';
       const dv2 = o.volNow - o.volPrev;
       const da = (o.ahtNow != null && o.ahtPrev != null) ? o.ahtNow - o.ahtPrev : null;
       const imp = o.impact;
-      const impStr = imp == null ? '—' : Math.abs(imp).toFixed(2);
-      L.push('- 【' + o.l2 + '】AHT达成：' + num2(o.ahtNow) + '，周度WOW：' + (da == null ? '—' : dStr(da)) + '，咨询量：(' + fmtInt(o.volPrev) + '→' + fmtInt(o.volNow) + '，' + (dv2 > 0 ? '+' : '') + fmtInt(dv2) + ')，原因：' + reason + '，' + tag + '：' + impStr + '；');
+      const impStr = imp == null ? '—' : trimNum(Math.abs(imp), 2);
+      L.push('- 【' + o.l2 + '】AHT达成：' + trimNum(o.ahtNow) + '，周度WOW：' + (da == null ? '—' : dStr(da)) + '，咨询量：(' + fmtInt(o.volPrev) + '→' + fmtInt(o.volNow) + '，' + (dv2 > 0 ? '+' : '') + fmtInt(dv2) + ')，原因：' + reason + '，' + tag + '：' + impStr + '；');
     }
   }
   L.push('');

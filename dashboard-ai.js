@@ -1269,64 +1269,82 @@ function initBizSwitchers() {
 }
 
 /* ★ 周次下拉改造：原生 <select> 展开列表高度不可控，
-   这里隐藏原 select（保留为数据源），在其旁边创建自定义触发器 + 浮层，
-   浮层 max-height 限制为约 4 项高度（4 × 36px ≈ 144px），其余滚动查看。
+   这里隐藏原 select（保留为数据源），在其旁边创建自定义触发器 + 浮层。
+   浮层用 position:fixed 定位（脱离祖先 overflow / flex 挤压，压过 topbar/tabs），
+   打开时按 getBoundingClientRect 动态算位置，空间不足自动上翻；滚动/resize 时关闭。
    与 initBizSwitchers 思路一致：点选项 → 更新 select.value + 派发 change。 */
 function initWeekPicker() {
   const sel = document.getElementById('rpWK');
   if (!sel) return;
 
-  /* ---------- 首次：隐藏 select + 创建触发器 + 浮层 + 绑定事件 ---------- */
   if (!sel._wpInited) {
     sel._wpInited = true;
     sel.style.display = 'none';
 
     const wrap = document.createElement('div');
     wrap.id = 'rpWKPicker';
-    wrap.style.cssText = 'position:relative;display:inline-block;' +
-      'flex:1 1 auto;min-width:0';
+    wrap.style.cssText = 'position:relative;display:inline-flex;' +
+      'align-items:center;flex:1 1 auto;min-width:0;width:100%';
 
     wrap.innerHTML =
       '<div id="rpWKTrigger" style="display:flex;align-items:center;' +
-        'justify-content:space-between;gap:8px;padding:9px 10px;' +
+        'justify-content:space-between;gap:8px;padding:9px 12px;' +
         'border:1px solid var(--border-2);border-radius:8px;' +
         'background:#fff;cursor:pointer;font-size:13.5px;' +
         'font-family:inherit;color:#33333D;user-select:none;' +
-        'min-height:40px;box-sizing:border-box">' +
+        'width:100%;min-height:40px;box-sizing:border-box;' +
+        'transition:border-color .15s ease, box-shadow .15s ease">' +
         '<span id="rpWKLabel" style="flex:1;overflow:hidden;' +
-          'text-overflow:ellipsis;white-space:nowrap">—</span>' +
+          'text-overflow:ellipsis;white-space:nowrap;text-align:left">—</span>' +
         '<span style="color:#77778A;font-size:10px;flex:none">▼</span>' +
       '</div>' +
-      '<div id="rpWKList" style="display:none;position:absolute;' +
-        'top:calc(100% + 4px);left:0;right:0;z-index:100;' +
-        'background:#fff;border:1px solid var(--border-2);' +
-        'border-radius:8px;box-shadow:0 6px 20px rgba(60,60,80,.15);' +
-        'max-height:144px;overflow-y:auto;padding:4px;' +
-        'box-sizing:border-box">' +
-      '</div>';
+      /* ★ 改成 position:fixed，脱离所有祖先 overflow 与 flex 挤压 */
+      '<div id="rpWKList" style="display:none;position:fixed;' +
+        'z-index:9999;background:#fff;border:1px solid var(--border-2);' +
+        'border-radius:8px;box-shadow:0 6px 20px rgba(60,60,80,.18);' +
+        'max-height:200px;overflow-y:auto;padding:4px;' +
+        'box-sizing:border-box"></div>';
 
-    /* 插到 select 之前，确保在 label 的 flex 布局中占位 */
     sel.parentNode.insertBefore(wrap, sel);
 
     const trigger = wrap.querySelector('#rpWKTrigger');
     const listEl  = wrap.querySelector('#rpWKList');
     const labelEl = wrap.querySelector('#rpWKLabel');
 
-    /* 触发器点击 → 开关浮层 */
+    const closeList = () => { listEl.style.display = 'none'; };
+
+    /* 触发器点击 → 定位 + 显示/隐藏 */
     trigger.addEventListener('click', (e) => {
       e.stopPropagation();
-      listEl.style.display = (listEl.style.display === 'none') ? 'block' : 'none';
+      if (listEl.style.display === 'block') { closeList(); return; }
+
+      /* 定位：贴在触发器正下方，与触发器等宽
+         空间不够时向上翻，右侧空间不够时左对齐 */
+      const r = trigger.getBoundingClientRect();
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      listEl.style.display = 'block';        /* 先显示才能拿到 offsetHeight */
+      const listH = listEl.offsetHeight || 200;
+      listEl.style.width = Math.max(r.width, 180) + 'px';
+      listEl.style.left  = Math.min(r.left, vw - r.width - 8) + 'px';
+      listEl.style.top   = (r.bottom + 4 + listH <= vh - 8)
+        ? (r.bottom + 4) + 'px'
+        : Math.max(8, r.top - listH - 4) + 'px';
     });
 
-    /* 点击外部 / Esc → 关闭浮层 */
+    /* 点击外部 → 关闭（listEl 虽是 fixed 定位，DOM 上仍在 wrap 内，
+       所以用 contains 判断依然有效） */
     document.addEventListener('click', (e) => {
-      if (!wrap.contains(e.target)) listEl.style.display = 'none';
+      if (wrap.contains(e.target)) return;
+      closeList();
     });
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') listEl.style.display = 'none';
+      if (e.key === 'Escape') closeList();
     });
+    /* fixed 定位不跟随滚动 / resize → 直接关掉，避免视觉错位 */
+    window.addEventListener('resize', closeList);
+    window.addEventListener('scroll', closeList, true);
 
-    /* 每次调用时刷新：选项 + 触发器文字 */
     sel._wpRefresh = function () {
       const opts = Array.from(sel.options);
       const cur  = sel.value;
@@ -1339,7 +1357,7 @@ function initWeekPicker() {
         return '<div data-v="' + esc(o.value) + '" data-cur="' + (on ? '1' : '') + '" ' +
           'style="padding:7px 10px;font-size:12.5px;border-radius:6px;' +
           'cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;' +
-          (on ? 'background:#E7ECF5;font-weight:600' : '') + '">' +
+          (on ? 'background:#E7ECF5;font-weight:600;color:#5C7099' : '') + '">' +
           esc(o.textContent) + '</div>';
       }).join('');
 
@@ -1351,7 +1369,7 @@ function initWeekPicker() {
             sel.value = v;
             sel.dispatchEvent(new Event('change', { bubbles: true }));
           }
-          listEl.style.display = 'none';
+          closeList();
           sel._wpRefresh();
         });
         item.addEventListener('mouseenter', () => {
@@ -1364,7 +1382,6 @@ function initWeekPicker() {
     };
   }
 
-  /* ---------- 每次调用：刷新选项与触发器文字 ---------- */
   if (sel._wpRefresh) sel._wpRefresh();
 }
 

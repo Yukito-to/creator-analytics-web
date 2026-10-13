@@ -293,6 +293,57 @@ function s30AnalysisData(biz, wk) {
   };
 }
 
+/* ★ 预估月度达成：月度缺口单数 + 按月度日均进线量、假定后续接起率 100% 推算达成日期
+   缺口公式：设缺口 g，满足 (N+g)/(D+g) = th
+            => g = (th*D - N) / (1 - th)
+   天数公式：设还需 x 天，未来每天新增 v 单、接起率 100%
+            (N + v*x) / (D + v*x) >= th
+            => x >= (th*D - N) / (v*(1 - th))
+   前置条件：月度未达标，否则返回 null
+   说明：假定后续接起率 100% 是「理论最快」下限，仅作参考。 */
+function s30EstimateAchieveDate(biz, wk) {
+  const month = S.month;
+  if (!month) return null;
+  const th = s30Threshold(biz);
+
+  /* 月度累计 */
+  const m30 = calcByL1(biz, { monthSet: new Set([month]) });
+  if (!m30 || m30.s30Den <= 0) return null;
+  if (m30.s30Rate != null && m30.s30Rate >= th) return null;   // 月度已达标
+
+  const rawGap = (th * m30.s30Den - m30.s30Num) / (1 - th);
+  if (!(rawGap > 0) || !isFinite(rawGap)) return null;
+  const gapMonth = Math.ceil(rawGap - 1e-9);
+  if (!(gapMonth > 0)) return null;
+
+  /* 月度有数据的天数 → 日均进线量 */
+  const monthDays = new Set();
+  for (const r of S.records) {
+    if (r.biz === biz && r.month === month) monthDays.add(r.date);
+  }
+  const nDays = monthDays.size;
+  if (nDays <= 0) return null;
+  const avgDaily = m30.s30Den / nDays;
+  if (!(avgDaily > 0)) return null;
+
+  /* 假定后续接起率 100%（理论最快） */
+  const assumedRate = 1.0;
+  const needDays = Math.ceil(rawGap / (avgDaily * (assumedRate - th)));
+  if (!isFinite(needDays) || needDays <= 0 || needDays > 3650) return null;
+
+  const targetDate = dateAdd(S.latestDate, needDays);
+  if (!targetDate) return null;
+
+  return {
+    avgDaily,
+    assumedRate,
+    gapMonth,
+    targetRate: th,
+    needDays,
+    targetDate,
+  };
+}
+
 function computeOverForecastImpactDetail(cur) {
   const th = cur.th;
   const totNum = cur.totNum, totDen = cur.totDen, totRate = cur.totRate;
@@ -532,6 +583,19 @@ function s30AnalysisHTML(biz, wk, prevWk) {
       if (badFc) s += '（本周已出现超预测，扩容需以偏差率为基准，避免按预测值安排。）';
       sg.push(s);
     }
+    /* ★ 第 5 条：月度缺口 + 假定后续接起率 100% 推算达成日期 */
+    const est = s30EstimateAchieveDate(biz, wk);
+    if (est) {
+      const dM = parseInt(est.targetDate.slice(5, 7), 10);
+      const dD = parseInt(est.targetDate.slice(8, 10), 10);
+      sg.push(
+        '按「（接起量 + 缺口）/（服务量 + 缺口）= ' + (est.targetRate * 100).toFixed(2) +
+        '%」测算，月度需至少多接起 <b>' + est.gapMonth + ' 单</b>才能达标；' +
+        '按月度日均进线量 <b>' + fmtInt(est.avgDaily) + '</b> 单、假定后续接起率 <b>100%</b>（理论最快）测算，' +
+        '预计 <b>' + dM + '月' + dD + '日</b>（还需 <b>' + est.needDays +
+        '</b> 天）月度累计接起率可达成目标 <b>' + (est.targetRate * 100).toFixed(2) + '%</b>。'
+      );
+    }
     sg.forEach((s, i) => P.push('<div class="rpt-sub">' + (i + 1) + '. ' + s + '</div>'));
   }
 
@@ -709,6 +773,19 @@ function s30AnalysisText(biz, wk, prevWk) {
       let s = '按「（接起量 + 缺口）/（服务量 + 缺口）= ' + thPct + '%」测算，需至少多接起 **' + cur.gapNum + ' 单**才能达标；若服务量继续增长，需同步扩大接起能力。';
       if (badFc) s += '（本周已出现超预测，扩容需以偏差率为基准，避免按预测值安排。）';
       sg.push(s);
+    }
+    /* ★ 第 5 条：月度缺口 + 假定后续接起率 100% 推算达成日期 */
+    const est = s30EstimateAchieveDate(biz, wk);
+    if (est) {
+      const dM = parseInt(est.targetDate.slice(5, 7), 10);
+      const dD = parseInt(est.targetDate.slice(8, 10), 10);
+      sg.push(
+        '按「（接起量 + 缺口）/（服务量 + 缺口）= ' + (est.targetRate * 100).toFixed(2) +
+        '%」测算，月度需至少多接起 **' + est.gapMonth + ' 单**才能达标；' +
+        '按月度日均进线量 **' + fmtInt(est.avgDaily) + '** 单、假定后续接起率 **100%**（理论最快）测算，' +
+        '预计 **' + dM + '月' + dD + '日**（还需 **' + est.needDays +
+        '** 天）月度累计接起率可达成目标 **' + (est.targetRate * 100).toFixed(2) + '%**。'
+      );
     }
     sg.forEach((s, i) => L.push((i + 1) + '. ' + s));
     L.push('');

@@ -1018,15 +1018,15 @@ function reportHTML(d) {
     const cpdTgt = (tgt && tgt.cpd != null) ? Number(tgt.cpd) : null;
     const dd = (c != null && cp != null) ? c - cp : null;
     const arrow = (dd == null || Math.abs(dd) < 1e-9) ? '' : (dd > 0 ? '🔺' : '🔻');
-    let s = '<b>①CPD：</b>' + trimNum(c) + '，<span class="rpt-sep">|</span> 周度WoW：' + trimNum(dd) + arrow;
+    let s = '<b>①、CPD：</b>' + trimNum(c) + '，<span class="rpt-sep">|</span> 周度WoW：' + trimNum(dd) + arrow;
     if (cpdTgt != null && c != null) {
       const rate = c / cpdTgt;
-      s += '（周度达成率：' + pct2(rate) + '）' + (c >= cpdTgt ? '' : '🔴（未达成）');
+      s += '（周度达成率：' + pct2(rate) + '）' + (c >= cpdTgt ? '🟢 （达成）' : '🔴（未达成）');
     }
     s += ' <span class="rpt-sep">|</span> ' + monthLabel + '目标：' + (cpdTgt != null ? num2(cpdTgt, 0) : '—') + '，' + monthLabel + '达成：' + trimNum(cm);
     if (cpdTgt != null && cm != null) {
       const mr = cm / cpdTgt;
-      s += '（月度达成率：' + pct2(mr) + '）' + (cm >= cpdTgt ? '' : '🔴（未达成）');
+      s += '（月度达成率：' + pct2(mr) + '）' + (cm >= cpdTgt ? '🟢 （达成）' : '🔴（未达成）');
     }
     s += '；';
     P.push('<div class="rpt-line">' + s + '</div>');
@@ -1062,63 +1062,13 @@ function reportHTML(d) {
     P.push('<div class="rpt-line">' + cat + 'CPD：' + num2(cc) + '（' + num2(pc) + '→' + num2(cc) + '，' + arrow + num2(Math.abs(dd || 0)) + '）</div>');
   }
 
+  P.push('<div style="height:8px"></div>');
+
   {
     const a = cur.aht, ap = prev.aht, am = mCur.aht;
     const dd = (a != null && ap != null) ? a - ap : null;
     const arrow = (dd == null || Math.abs(dd) < 1e-9) ? '' : (dd > 0 ? '🔺' : '🔻');
-    P.push('<div class="rpt-line"><b>②AHT：</b>' + trimNum(a) + '，<span class="rpt-sep">|</span> 周度WoW：' + trimNum(dd) + arrow + ' <span class="rpt-sep">|</span> ' + monthLabel + '达成：' + trimNum(am) + '；</div>');
-  }
-
-  {
-    const c = cur.concurrency, cp = prev.concurrency, cm = mCur.concurrency;
-    const dd = (c != null && cp != null) ? c - cp : null;
-    const arrow = (dd == null || Math.abs(dd) < 1e-9) ? '' : (dd > 0 ? '🔺' : '🔻');
-    P.push('<div class="rpt-line"><b>③并发：</b>' + trimNum(c) + '，<span class="rpt-sep">|</span> 周度WoW：' + trimNum(dd) + arrow + ' <span class="rpt-sep">|</span> ' + monthLabel + '达成：' + trimNum(cm) + '；</div>');
-  }
-
-  for (const cat of ['老人','次月','首月']) {
-    const b = byCat[cat];
-    if (!b) continue;
-    const cc = b.weekCur.concurrency, pc = b.weekPrev.concurrency;
-    const dd = (cc != null && pc != null) ? cc - pc : null;
-    const arrow = (dd == null || Math.abs(dd) < 1e-9) ? '' : (dd > 0 ? '↑' : '↓');
-    P.push('<div class="rpt-line">' + cat + '并发：' + num2(cc) + '（' + num2(pc) + '→' + num2(cc) + '，' + arrow + num2(Math.abs(dd || 0)) + '）</div>');
-  }
-
-  {
-    const r = s30.week.cur.s30Rate, rp = s30.week.prev.s30Rate, rm = s30.month.cur.s30Rate;
-    const dd = (r != null && rp != null) ? r - rp : null;
-    const arrow = (dd == null || Math.abs(dd) < 1e-9) ? '' : (dd > 0 ? '🔺' : '🔻');
-    const s30Tgt = s30TargetPct(biz);
-    const ddPct = (v) => v == null ? '—' : ((v >= 0 ? '+' : '') + (v * 100).toFixed(2) + '%');
-    const disp = (v) => v == null ? '—' : (v * 100).toFixed(2) + '%';
-    let s = '<b>④、30s接起率：</b>' + disp(r) + '，<span class="rpt-sep">|</span> 周度WoW：' + ddPct(dd) + arrow;
-    if (s30Tgt != null && r != null) {
-      const rate = r * 100 / s30Tgt;
-      const hit = rate >= 100;
-      s += '（周度达成率：' + rate.toFixed(2) + '%）' + (hit ? '' : '🔴（未达成）');
-    }
-    s += ' <span class="rpt-sep">|</span> ' + monthLabel + '目标：' + (s30Tgt != null ? trimNum(s30Tgt * 100, 2) + '%' : '—') + '，' + monthLabel + '达成：' + disp(rm);
-    if (s30Tgt != null && rm != null) {
-      const mr = rm * 100 / s30Tgt;
-      const mhit = mr >= 100;
-      s += '（月度达成率：' + mr.toFixed(2) + '%）' + (mhit ? '' : '🔴（未达成）');
-    }
-    s += '；';
-    P.push('<div class="rpt-line">' + s + '</div>');
-  }
-
-  {
-    const c = cur.cpd, cp = prev.cpd;
-    const dd = (c != null && cp != null) ? c - cp : null;
-    P.push('<div class="rpt-line"><b>CPD-周度</b>' + trimNum(c) + ',【' + (dd == null ? '—' : (dd > 0 ? '+' : '') + dd.toFixed(2)) + '】</div>');
-  }
-
-  {
-    const u = cur.utilization, up = prev.utilization;
-    const du = (u != null && up != null) ? u - up : null;
-    const arrow = (du == null || Math.abs(du) < 1e-9) ? '' : (du > 0 ? '↑' : '↓');
-    P.push('<div class="rpt-line">本周工时利用率：' + (u != null ? (u*100).toFixed(2) + '%' : '—') + '（' + (up != null ? (up*100).toFixed(2) + '%' : '—') + '→' + (u != null ? (u*100).toFixed(2) + '%' : '—') + '，' + arrow + (du != null ? (Math.abs(du)*100).toFixed(2) + '%' : '—') + '）</div>');
+    P.push('<div class="rpt-line"><b>②、AHT：</b>' + trimNum(a) + '，<span class="rpt-sep">|</span> 周度WoW：' + trimNum(dd) + arrow + ' <span class="rpt-sep">|</span> ' + monthLabel + '达成：' + trimNum(am) + '；</div>');
   }
 
   {
@@ -1153,6 +1103,61 @@ function reportHTML(d) {
       const impStr = imp == null ? '—' : trimNum(Math.abs(imp), 2);
       P.push('<div class="rpt-sub">【' + esc(o.l2) + '】AHT达成：' + trimNum(o.ahtNow) + '，周度WOW：' + (da == null ? '—' : dStr(da)) + '，咨询量：(' + fmtInt(o.volPrev) + '→' + fmtInt(o.volNow) + '，' + (dv2 > 0 ? '+' : '') + fmtInt(dv2) + ')，原因：<input class="rpt-input" type="text" data-key="' + esc(key) + '" value="' + esc(reason) + '" placeholder="填写原因">，' + tag + '：' + impStr + '；</div>');
     }
+  }
+  P.push('<div style="height:8px"></div>');
+
+  {
+    const c = cur.concurrency, cp = prev.concurrency, cm = mCur.concurrency;
+    const dd = (c != null && cp != null) ? c - cp : null;
+    const arrow = (dd == null || Math.abs(dd) < 1e-9) ? '' : (dd > 0 ? '🔺' : '🔻');
+    P.push('<div class="rpt-line"><b>③、并发：</b>' + trimNum(c) + '，<span class="rpt-sep">|</span> 周度WoW：' + trimNum(dd) + arrow + ' <span class="rpt-sep">|</span> ' + monthLabel + '达成：' + trimNum(cm) + '；</div>');
+  }
+
+  for (const cat of ['老人','次月','首月']) {
+    const b = byCat[cat];
+    if (!b) continue;
+    const cc = b.weekCur.concurrency, pc = b.weekPrev.concurrency;
+    const dd = (cc != null && pc != null) ? cc - pc : null;
+    const arrow = (dd == null || Math.abs(dd) < 1e-9) ? '' : (dd > 0 ? '↑' : '↓');
+    P.push('<div class="rpt-line">' + cat + '并发：' + num2(cc) + '（' + num2(pc) + '→' + num2(cc) + '，' + arrow + num2(Math.abs(dd || 0)) + '）</div>');
+  }
+
+  {
+    const r = s30.week.cur.s30Rate, rp = s30.week.prev.s30Rate, rm = s30.month.cur.s30Rate;
+    const dd = (r != null && rp != null) ? r - rp : null;
+    const arrow = (dd == null || Math.abs(dd) < 1e-9) ? '' : (dd > 0 ? '🔺' : '🔻');
+    const s30Tgt = s30TargetPct(biz);
+    const ddPct = (v) => v == null ? '—' : ((v >= 0 ? '+' : '') + (v * 100).toFixed(2) + '%');
+    const disp = (v) => v == null ? '—' : (v * 100).toFixed(2) + '%';
+    let s = '<b>④、30s接起率：</b>' + disp(r) + '，<span class="rpt-sep">|</span> 周度WoW：' + ddPct(dd) + arrow;
+    if (s30Tgt != null && r != null) {
+      const rate = r * 100 / s30Tgt;
+      const hit = rate >= 100;
+      s += '（周度达成率：' + rate.toFixed(2) + '%）' + (hit ? '🟢 （达成）' : '🔴（未达成）');
+    }
+    s += ' <span class="rpt-sep">|</span> ' + monthLabel + '目标：' + (s30Tgt != null ? trimNum(s30Tgt * 100, 2) + '%' : '—') + '，' + monthLabel + '达成：' + disp(rm);
+    if (s30Tgt != null && rm != null) {
+      const mr = rm * 100 / s30Tgt;
+      const mhit = mr >= 100;
+      s += '（月度达成率：' + mr.toFixed(2) + '%）' + (mhit ? '🟢 （达成）' : '🔴（未达成）');
+    }
+    s += '；';
+    P.push('<div class="rpt-line">' + s + '</div>');
+  }
+
+  P.push('<div style="height:8px"></div>');
+
+  {
+    const c = cur.cpd, cp = prev.cpd;
+    const dd = (c != null && cp != null) ? c - cp : null;
+    P.push('<div class="rpt-line"><b>CPD-周度</b>' + trimNum(c) + ',【' + (dd == null ? '—' : (dd > 0 ? '+' : '') + dd.toFixed(2)) + '】</div>');
+  }
+
+  {
+    const u = cur.utilization, up = prev.utilization;
+    const du = (u != null && up != null) ? u - up : null;
+    const arrow = (du == null || Math.abs(du) < 1e-9) ? '' : (du > 0 ? '↑' : '↓');
+    P.push('<div class="rpt-line">本周工时利用率：' + (u != null ? (u*100).toFixed(2) + '%' : '—') + '（' + (up != null ? (up*100).toFixed(2) + '%' : '—') + '→' + (u != null ? (u*100).toFixed(2) + '%' : '—') + '，' + arrow + (du != null ? (Math.abs(du)*100).toFixed(2) + '%' : '—') + '）</div>');
   }
 
   P.push('</div></div>');
@@ -1294,15 +1299,15 @@ function reportToText(d) {
     const cpdTgt = (tgt && tgt.cpd != null) ? Number(tgt.cpd) : null;
     const dd = (c != null && cp != null) ? c - cp : null;
     const arrow = (dd == null || Math.abs(dd) < 1e-9) ? '' : (dd > 0 ? '🔺' : '🔻');
-    let s = '①CPD：' + trimNum(c) + '，| 周度WoW：' + trimNum(dd) + arrow;
+    let s = '①、CPD：' + trimNum(c) + '，| 周度WoW：' + trimNum(dd) + arrow;
     if (cpdTgt != null && c != null) {
       const rate = c / cpdTgt;
-      s += '（周度达成率：' + pct2(rate) + '）' + (c >= cpdTgt ? '' : '🔴（未达成）');
+      s += '（周度达成率：' + pct2(rate) + '）' + (c >= cpdTgt ? '🟢 （达成）' : '🔴（未达成）');
     }
     s += ' | ' + monthLabel + '目标：' + (cpdTgt != null ? num2(cpdTgt, 0) : '—') + '，' + monthLabel + '达成：' + trimNum(cm);
     if (cpdTgt != null && cm != null) {
       const mr = cm / cpdTgt;
-      s += '（月度达成率：' + pct2(mr) + '）' + (cm >= cpdTgt ? '' : '🔴（未达成）');
+      s += '（月度达成率：' + pct2(mr) + '）' + (cm >= cpdTgt ? '🟢 （达成）' : '🔴（未达成）');
     }
     s += '；';
     L.push(s);
@@ -1335,61 +1340,13 @@ function reportToText(d) {
     L.push(cat + 'CPD：' + num2(cc) + '（' + num2(pc) + '→' + num2(cc) + '，' + arrow + num2(Math.abs(dd || 0)) + '）');
   }
 
+  L.push('');
+
   {
     const a = cur.aht, ap = prev.aht, am = mCur.aht;
     const dd = (a != null && ap != null) ? a - ap : null;
     const arrow = (dd == null || Math.abs(dd) < 1e-9) ? '' : (dd > 0 ? '🔺' : '🔻');
-    L.push('②AHT：' + trimNum(a) + '，| 周度WoW：' + trimNum(dd) + arrow + ' | ' + monthLabel + '达成：' + trimNum(am) + '；');
-  }
-
-  {
-    const c = cur.concurrency, cp = prev.concurrency, cm = mCur.concurrency;
-    const dd = (c != null && cp != null) ? c - cp : null;
-    const arrow = (dd == null || Math.abs(dd) < 1e-9) ? '' : (dd > 0 ? '🔺' : '🔻');
-    L.push('③并发：' + trimNum(c) + '，| 周度WoW：' + trimNum(dd) + arrow + ' | ' + monthLabel + '达成：' + trimNum(cm) + '；');
-  }
-
-  for (const cat of ['老人','次月','首月']) {
-    const b = byCat[cat];
-    if (!b) continue;
-    const cc = b.weekCur.concurrency, pc = b.weekPrev.concurrency;
-    const dd = (cc != null && pc != null) ? cc - pc : null;
-    const arrow = (dd == null || Math.abs(dd) < 1e-9) ? '' : (dd > 0 ? '↑' : '↓');
-    L.push(cat + '并发：' + num2(cc) + '（' + num2(pc) + '→' + num2(cc) + '，' + arrow + num2(Math.abs(dd || 0)) + '）');
-  }
-
-  {
-    const r = s30.week.cur.s30Rate, rp = s30.week.prev.s30Rate, rm = s30.month.cur.s30Rate;
-    const dd = (r != null && rp != null) ? r - rp : null;
-    const arrow = (dd == null || Math.abs(dd) < 1e-9) ? '' : (dd > 0 ? '🔺' : '🔻');
-    const s30Tgt = s30TargetPct(biz);
-    const ddPct = (v) => v == null ? '—' : ((v >= 0 ? '+' : '') + (v * 100).toFixed(2) + '%');
-    const disp = (v) => v == null ? '—' : (v * 100).toFixed(2) + '%';
-    let s = '④、30s接起率：' + disp(r) + '，| 周度WoW：' + ddPct(dd) + arrow;
-    if (s30Tgt != null && r != null) {
-      const rate = r * 100 / s30Tgt;
-      s += '（周度达成率：' + rate.toFixed(2) + '%）' + (rate >= 100 ? '' : '🔴（未达成）');
-    }
-    s += ' | ' + monthLabel + '目标：' + (s30Tgt != null ? trimNum(s30Tgt * 100, 2) + '%' : '—') + '，' + monthLabel + '达成：' + disp(rm);
-    if (s30Tgt != null && rm != null) {
-      const mr = rm * 100 / s30Tgt;
-      s += '（月度达成率：' + mr.toFixed(2) + '%）' + (mr >= 100 ? '' : '🔴（未达成）');
-    }
-    s += '；';
-    L.push(s);
-  }
-
-  {
-    const c = cur.cpd, cp = prev.cpd;
-    const dd = (c != null && cp != null) ? c - cp : null;
-    L.push('CPD-周度' + trimNum(c) + ',【' + (dd == null ? '—' : (dd > 0 ? '+' : '') + dd.toFixed(2)) + '】');
-  }
-
-  {
-    const u = cur.utilization, up = prev.utilization;
-    const du = (u != null && up != null) ? u - up : null;
-    const arrow = (du == null || Math.abs(du) < 1e-9) ? '' : (du > 0 ? '↑' : '↓');
-    L.push('本周工时利用率：' + (u != null ? (u*100).toFixed(2) + '%' : '—') + '（' + (up != null ? (up*100).toFixed(2) + '%' : '—') + '→' + (u != null ? (u*100).toFixed(2) + '%' : '—') + '，' + arrow + (du != null ? (Math.abs(du)*100).toFixed(2) + '%' : '—') + '）');
+    L.push('②、AHT：' + trimNum(a) + '，| 周度WoW：' + trimNum(dd) + arrow + ' | ' + monthLabel + '达成：' + trimNum(am) + '；');
   }
 
   {
@@ -1411,9 +1368,63 @@ function reportToText(d) {
       const da = (o.ahtNow != null && o.ahtPrev != null) ? o.ahtNow - o.ahtPrev : null;
       const imp = o.impact;
       const impStr = imp == null ? '—' : trimNum(Math.abs(imp), 2);
-      L.push('- 【' + o.l2 + '】AHT达成：' + trimNum(o.ahtNow) + '，周度WOW：' + (da == null ? '—' : dStr(da)) + '，咨询量：(' + fmtInt(o.volPrev) + '→' + fmtInt(o.volNow) + '，' + (dv2 > 0 ? '+' : '') + fmtInt(dv2) + ')，原因：' + reason + '，' + tag + '：' + impStr + '；');
+      L.push('【' + o.l2 + '】AHT达成：' + trimNum(o.ahtNow) + '，周度WOW：' + (da == null ? '—' : dStr(da)) + '，咨询量：(' + fmtInt(o.volPrev) + '→' + fmtInt(o.volNow) + '，' + (dv2 > 0 ? '+' : '') + fmtInt(dv2) + ')，原因：' + reason + '，' + tag + '：' + impStr + '；');
     }
   }
+  L.push('');
+
+  {
+    const c = cur.concurrency, cp = prev.concurrency, cm = mCur.concurrency;
+    const dd = (c != null && cp != null) ? c - cp : null;
+    const arrow = (dd == null || Math.abs(dd) < 1e-9) ? '' : (dd > 0 ? '🔺' : '🔻');
+    L.push('③、并发：' + trimNum(c) + '，| 周度WoW：' + trimNum(dd) + arrow + ' | ' + monthLabel + '达成：' + trimNum(cm) + '；');
+  }
+
+  for (const cat of ['老人','次月','首月']) {
+    const b = byCat[cat];
+    if (!b) continue;
+    const cc = b.weekCur.concurrency, pc = b.weekPrev.concurrency;
+    const dd = (cc != null && pc != null) ? cc - pc : null;
+    const arrow = (dd == null || Math.abs(dd) < 1e-9) ? '' : (dd > 0 ? '↑' : '↓');
+    L.push(cat + '并发：' + num2(cc) + '（' + num2(pc) + '→' + num2(cc) + '，' + arrow + num2(Math.abs(dd || 0)) + '）');
+  }
+
+  {
+    const r = s30.week.cur.s30Rate, rp = s30.week.prev.s30Rate, rm = s30.month.cur.s30Rate;
+    const dd = (r != null && rp != null) ? r - rp : null;
+    const arrow = (dd == null || Math.abs(dd) < 1e-9) ? '' : (dd > 0 ? '🔺' : '🔻');
+    const s30Tgt = s30TargetPct(biz);
+    const ddPct = (v) => v == null ? '—' : ((v >= 0 ? '+' : '') + (v * 100).toFixed(2) + '%');
+    const disp = (v) => v == null ? '—' : (v * 100).toFixed(2) + '%';
+    let s = '④、30s接起率：' + disp(r) + '，| 周度WoW：' + ddPct(dd) + arrow;
+    if (s30Tgt != null && r != null) {
+      const rate = r * 100 / s30Tgt;
+      s += '（周度达成率：' + rate.toFixed(2) + '%）' + (rate >= 100 ? '🟢 （达成）' : '🔴（未达成）');
+    }
+    s += ' | ' + monthLabel + '目标：' + (s30Tgt != null ? trimNum(s30Tgt * 100, 2) + '%' : '—') + '，' + monthLabel + '达成：' + disp(rm);
+    if (s30Tgt != null && rm != null) {
+      const mr = rm * 100 / s30Tgt;
+      s += '（月度达成率：' + mr.toFixed(2) + '%）' + (mr >= 100 ? '🟢 （达成）' : '🔴（未达成）');
+    }
+    s += '；';
+    L.push(s);
+  }
+
+  L.push('');
+
+  {
+    const c = cur.cpd, cp = prev.cpd;
+    const dd = (c != null && cp != null) ? c - cp : null;
+    L.push('CPD-周度' + trimNum(c) + ',【' + (dd == null ? '—' : (dd > 0 ? '+' : '') + dd.toFixed(2)) + '】');
+  }
+
+  {
+    const u = cur.utilization, up = prev.utilization;
+    const du = (u != null && up != null) ? u - up : null;
+    const arrow = (du == null || Math.abs(du) < 1e-9) ? '' : (du > 0 ? '↑' : '↓');
+    L.push('本周工时利用率：' + (u != null ? (u*100).toFixed(2) + '%' : '—') + '（' + (up != null ? (up*100).toFixed(2) + '%' : '—') + '→' + (u != null ? (u*100).toFixed(2) + '%' : '—') + '，' + arrow + (du != null ? (Math.abs(du)*100).toFixed(2) + '%' : '—') + '）');
+  }
+
   L.push('');
 
   L.push('## 三、质量部分'); L.push('');

@@ -373,8 +373,22 @@ function scHasLeaveOn(name, date) {
 }
 
 /* 返回某员工某日期的「有效班次」：
-   优先 scheduleDraft；无则看 leave_on 诉求；都无则空字符串 */
+   优先 scheduleDraft；无则看 leave_on 诉求；都无则空字符串。
+   ★ 关键：如果 date >= 当前周期起始日，则【忽略】scheduleDraft 里的记录——
+       前置排班只能用于周期之前，不应占用周期内的格子。
+       周期内仅保留 leave_on 诉求（把诉求日期锁定为"休"）。 */
 function scEffectiveShift(name, date) {
+  const cycle = (typeof scGetCycle === 'function') ? scGetCycle() : (S.scheduleCycle || {});
+  const inCycle = !!(cycle && cycle.start && cycle.end
+                 && date >= cycle.start && date <= cycle.end);
+
+  /* 周期内：忽略草稿，只处理 leave_on */
+  if (inCycle) {
+    if (scHasLeaveOn(name, date)) return scDefaultRestShift();
+    return '';
+  }
+
+  /* 周期之前（前置排班）：按草稿 → leave_on → 空的优先级 */
   const draft = S.scheduleDraft.find(x => x.name === name && x.date === date);
   if (draft && draft.shift) return draft.shift;
   if (scHasLeaveOn(name, date)) return scDefaultRestShift();
@@ -689,14 +703,18 @@ function scForceRestLongStreak(ctx, date) {
       if (n != null && isFinite(n) && n > 0) totalNeed += n;
     }
 
-    /* 剩余可分配候选人（排除该员工本人、已分配、已锁定、离职） */
-    const remaining = scActiveEmployees().filter(x =>
-      x.name !== e.name &&
-      scIsActiveOn(x, date) &&
-      !(ctx.assigned[date] && ctx.assigned[date][x.name])
-    ).length;
+    /* ★ 剩余可分配候选人：只统计【同业务线】的员工
+         （修复 bug：原来统计全局，导致跨业务线的博主人数被算进买手的"人力充足"判断） */
+    const remaining = scActiveEmployees().filter(x => {
+      if (x.name === e.name) return false;
+      if (!scIsActiveOn(x, date)) return false;
+      if (ctx.assigned[date] && ctx.assigned[date][x.name]) return false;
+      const xBiz = empBiz(x.name) || '买手合作';
+      const xKey = (xBiz === '博主合作') ? '博主合作' : '买手合作';
+      return xKey === bizKey;   // 只统计同一业务线
+    }).length;
 
-    /* 人力充足：剩余人数 > 需求总人数（至少多 1 人） */
+    /* 人力充足：本业务线剩余人数 > 本业务线需求总人数（至少多 1 人） */
     if (remaining > totalNeed) {
       ctx.assigned[date][e.name] = def;
       ctx.assignedBiz[date][e.name] = '';

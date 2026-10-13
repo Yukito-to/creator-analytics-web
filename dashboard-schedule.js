@@ -137,6 +137,30 @@ function scIsLateShift(shift) {
   const meta = S.shiftMeta && S.shiftMeta[shift];
   return !!(meta && meta.isLate);
 }
+
+/* ★ 判断班次是否「晚班下班」——用于 H10「晚班后禁止接早班」
+   判定：结束时间 >= 22:00 或 == 00:00（次日）
+   与 scIsLateShift 口径一致，避免两套逻辑。 */
+function scIsLateEndShift(shift) {
+  const meta = S.shiftMeta && S.shiftMeta[shift];
+  if (!meta || !meta.endTime) return false;
+  const m = /^(\d{1,2}):/.exec(meta.endTime);
+  if (!m) return false;
+  const h = parseInt(m[1], 10);
+  return h >= 22 || h === 0;
+}
+
+/* ★ 判断班次是否「早班上班」——用于 H10
+   判定：开始时间 <= 10:00 且 > 0（即 9 点或 10 点上班） */
+function scIsEarlyStartShift(shift) {
+  const meta = S.shiftMeta && S.shiftMeta[shift];
+  if (!meta || !meta.startTime) return false;
+  const m = /^(\d{1,2}):/.exec(meta.startTime);
+  if (!m) return false;
+  const h = parseInt(m[1], 10);
+  return h > 0 && h <= 10;
+}
+
 /* ★ 判断是否为「休息」班次（出勤计数优先，与 scIsWorkingShift 对称）：
      ① 权威：S.shiftAttn[shift] === 0 且 restDays > 0
      ② 回退：S.shiftMeta[shift] 里 !isWorking 且 restDays > 0
@@ -533,6 +557,7 @@ function generateSchedule() {
     ctx.assigned[d] = {};
     ctx.assignedBiz[d] = {};
     scApplyLocks(ctx, d);
+    scForceRestLongStreak(ctx, d);           /* ★ H11：连班 ≥7 天 + 人力充足 → 强制休息 */
     scAssignBizDay(ctx, d, '买手合作', ctx.buyerOnly);
     scAssignBizDay(ctx, d, '博主合作', ctx.bloggerOnly);
     scFillShortage(ctx, d, '买手合作');
@@ -605,6 +630,57 @@ function scApplyLocks(ctx, date) {
   }
 }
 
+/* ★ H11：连续工作 >= 7 天 + 人力充足 → 强制安排休息一天
+   判定「人力充足」的简化口径：
+     剩余可分配员工数 > 该员工所属业务线当日所有规则班次的需求总人数
+   注意：只处理「今天还未被分配」的员工，已锁定 / 已分配的格子不动。 */
+function scForceRestLongStreak(ctx, date) {
+  if (!ctx.dates || !ctx.dates.length) return;
+  const def = scDefaultRestShift();
+
+  /* 1. 收集候选：streak >= 7 且今天尚未分配 */
+  const cands = [];
+  for (const e of scActiveEmployees()) {
+    if (!scIsActiveOn(e, date)) continue;
+    if (ctx.locked[e.name] && ctx.locked[e.name][date]) continue;   // 已锁定
+    if (ctx.assigned[date] && ctx.assigned[date][e.name]) continue; // 已分配
+    const streak = ctx.workStreak[e.name] || 0;
+    if (streak >= 7) cands.push({ e, streak });
+  }
+  if (!cands.length) return;
+
+  /* 2. 按 streak 降序：连班越久越优先安排休息 */
+  cands.sort((a, b) => b.streak - a.streak);
+
+  /* 3. 逐个判断是否「人力充足」 */
+  for (const { e } of cands) {
+    /* 该员工所属业务线 */
+    const eBiz = empBiz(e.name) || '买手合作';
+    const bizKey = (eBiz === '博主合作') ? '博主合作' : '买手合作';
+
+    /* 该业务线当日所有规则班次的需求总人数 */
+    let totalNeed = 0;
+    const pool = (S.shiftPoolByBiz && S.shiftPoolByBiz[bizKey]) || [];
+    for (const s of pool) {
+      const n = scGetShiftReq(bizKey, s, date);
+      if (n != null && isFinite(n) && n > 0) totalNeed += n;
+    }
+
+    /* 剩余可分配候选人（排除该员工本人、已分配、已锁定、离职） */
+    const remaining = scActiveEmployees().filter(x =>
+      x.name !== e.name &&
+      scIsActiveOn(x, date) &&
+      !(ctx.assigned[date] && ctx.assigned[date][x.name])
+    ).length;
+
+    /* 人力充足：剩余人数 > 需求总人数（至少多 1 人） */
+    if (remaining > totalNeed) {
+      ctx.assigned[date][e.name] = def;
+      ctx.assignedBiz[date][e.name] = '';
+    }
+  }
+}
+
 /* 按需求表逐班次分配（H8 由候选池保证；H2/H3/H4 由 scCanAssign 保证） */
 function scAssignBizDay(ctx, date, biz, candidates) {
   /* ★ 候选班次 = 当前业务线的班次池（纯 per-biz，不额外并入规则里引用的班次）。
@@ -640,6 +716,16 @@ function scCanAssign(ctx, e, date, shift) {
   /* ★ H4「连续工作 ≤ 6 天」已从硬约束降级为软约束：
        不再硬性拦截，由 scScoreCandidate 通过打分自然排序。 */
   if (scIsWorkingShift(shift) && scHasLeaveOn(e.name, date)) return false;
+
+  /* ★ H10：晚班后禁止马上接早班
+       · 若昨天排了「晚班下班」的班次（结束 >= 22:00 或 00:00）
+       · 今天不得排「早班上班」的班次（开始 <= 10:00）
+       注：ctx.lastShift 在 scUpdateStreak 里于每天结束后更新，
+           因此此处读到的是「昨天」的实际班次；
+           前置排班也已由 scInitStreakFromPre 初始化。 */
+  const lastS = ctx.lastShift && ctx.lastShift[e.name];
+  if (lastS && scIsLateEndShift(lastS) && scIsEarlyStartShift(shift)) return false;
+
   return true;
 }
 
@@ -808,8 +894,14 @@ function scAssignBuyerSurplusToBlogger(ctx, date) {
     .filter(e => scIsActiveOn(e, date));
   if (!candidates.length) return;
 
-  /* 3. 逐班次分配 */
-  for (const shift of Object.keys(shiftGap)) {
+  /* 3. 逐班次分配：B 开头的班次优先（用户诉求：富裕买手优先排 B 班支援博主） */
+  const shiftOrder = Object.keys(shiftGap).sort((a, b) => {
+    const aB = /^B/.test(String(a)) ? 0 : 1;
+    const bB = /^B/.test(String(b)) ? 0 : 1;
+    if (aB !== bB) return aB - bB;
+    return String(a).localeCompare(String(b));
+  });
+  for (const shift of shiftOrder) {
     let gap = shiftGap[shift];
     if (gap <= 0) continue;
     const sorted = candidates
@@ -2272,13 +2364,11 @@ function renderScGrid() {
       const isPre = preSet.has(e.name + '|' + d);
       const style = bg ? ' style="background:' + bg + '"' : '';
       const cls = 'sc-grid-cell' + (isPre ? ' pre' : '') + (s ? '' : ' empty');
-      /* ★ 支援博主的班次 → 加一枚「博主」小徽章（不改 s 本体） */
+      /* ★ 支援博主的班次 → 班次下方小字备注「支援」 */
       const cellText = s
         ? (isSupport
-            ? esc(s) + '<span style="display:inline-block;margin-left:3px;' +
-              'padding:0 3px;font-size:9px;line-height:1.4;border-radius:3px;' +
-              'background:#7B8FBF;color:#fff;vertical-align:middle;' +
-              'font-weight:400;letter-spacing:.2px">博主</span>'
+            ? esc(s) + '<div style="font-size:9px;color:#7B8FBF;' +
+              'line-height:1.1;margin-top:1px;font-weight:400">支援</div>'
             : esc(s))
         : '';
 

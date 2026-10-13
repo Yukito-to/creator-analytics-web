@@ -324,8 +324,20 @@ function computeOverForecastImpactDetail(cur) {
       miss, bias, rate, dayImpact, weekImpact
     });
   }
-  rows.sort((a, b) => a.weekImpact - b.weekImpact);
+  rows.sort((a, b) => {
+    if (a.date !== b.date) return a.date < b.date ? -1 : 1;
+    const pa = parseInt(a.period, 10), pb = parseInt(b.period, 10);
+    if (isFinite(pa) && isFinite(pb) && pa !== pb) return pa - pb;
+    return String(a.period).localeCompare(String(b.period));
+  });
   return rows;
+}
+
+function circledNum(i) {
+  // i 从 1 开始
+  const CIRCLED = '①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳';
+  if (i >= 1 && i <= 20) return CIRCLED[i - 1];
+  return '(' + i + ')';
 }
 
 function s30AnalysisHTML(biz, wk, prevWk) {
@@ -403,44 +415,25 @@ function s30AnalysisHTML(biz, wk, prevWk) {
   if (cur.hasFc && cur.fcSlices && cur.fcSlices.length) {
     const impacts = computeOverForecastImpactDetail(cur);
     if (impacts.length) {
-      const totalMiss = impacts.reduce((s, x) => s + x.miss, 0);
       P.push('<div class="rpt-sub" style="margin-top:8px">🎯 <b>日度时段超预测影响值</b>（仅统计超预测 &gt;120% 且时段接起率不达标的切片；将 Miss 回补至 30S 接起量后重算日 / 周接起率，影响值 = 回补后接起率 − 实际接起率）</div>');
-      P.push('<div class="rpt-sub">符合条件时段共 <b>' + impacts.length + '</b> 个，累计 Miss <b>' + totalMiss + '</b> 单。负值表示该时段拉低整体接起率。</div>');
 
-      const rows = impacts.map((x, i) => {
-        const dayColor = x.dayImpact < 0 ? '#D9363E' : '#6EA980';
-        const weekColor = x.weekImpact < 0 ? '#D9363E' : '#6EA980';
-        const dayDisp = (x.dayImpact >= 0 ? '+' : '') + (x.dayImpact * 100).toFixed(2) + 'pp';
-        const weekDisp = (x.weekImpact >= 0 ? '+' : '') + (x.weekImpact * 100).toFixed(2) + 'pp';
-        return '<tr>' +
-          '<td class="c-rank">' + (i + 1) + '</td>' +
-          '<td class="c-fix">' + esc(x.date.slice(5)) + ' ' + esc(x.period) + '时</td>' +
-          '<td style="text-align:center">' + Math.round(x.forecast) + '</td>' +
-          '<td style="text-align:center">' + Math.round(x.den) + '</td>' +
-          '<td style="text-align:center">' + (x.bias * 100).toFixed(1) + '%</td>' +
-          '<td style="text-align:center">' + x.miss + '</td>' +
-          '<td style="text-align:center;color:#D9363E;font-weight:600">' + (x.rate * 100).toFixed(2) + '%</td>' +
-          '<td style="text-align:center;color:' + dayColor + ';font-weight:600">' + dayDisp + '</td>' +
-          '<td style="text-align:center;color:' + weekColor + ';font-weight:600">' + weekDisp + '</td>' +
-        '</tr>';
-      }).join('');
-      P.push('<div class="table-scroll-x"><table class="rp-table rp-sticky2"><thead><tr>' +
-        '<th class="c-rank">排名</th><th class="c-fix">日期 × 时段</th><th>预测量</th><th>实际量</th><th>超预测率</th><th>Miss</th><th>时段接起率</th><th>日度影响值</th><th>周度影响值</th>' +
-        '</tr></thead><tbody>' + rows + '</tbody></table></div>');
+      for (let i = 0; i < impacts.length; i++) {
+        const x = impacts[i];
+        P.push('<div class="rpt-sub">' + circledNum(i + 1) + esc(x.date.slice(5)) + ' ' + esc(x.period) + ' 时 · 预测 ' +
+          Math.round(x.forecast) + ' / 实际 ' + Math.round(x.den) + '（偏差 ' + (x.bias * 100).toFixed(0) +
+          '%）· Miss ' + x.miss + '，周度影响值：' + (x.weekImpact * 100).toFixed(2) + '%；</div>');
+      }
 
-      const totalMissAll = impacts.reduce((s, x) => s + x.miss, 0);
-      const newWeekRate  = (cur.totNum + totalMissAll) / cur.totDen;
-      const totalImpact  = newWeekRate - cur.totRate;
-      const worst        = impacts[0];
-      const top3Miss     = impacts.slice(0, 3).reduce((s, x) => s + x.miss, 0);
-      const top3Pct      = totalMissAll > 0 ? (top3Miss / totalMissAll * 100).toFixed(1) : '0';
-      P.push('<div class="rpt-sub" style="margin-top:8px;padding:10px 14px;background:#FAF9F7;border-radius:8px;border-left:3px solid #98A8CE;line-height:1.9">' +
-        '📌 <b>一句话总结：</b>本周共 <b>' + impacts.length + '</b> 个「超预测且接起不达标」的时段（累计 Miss <b>' + totalMissAll + '</b> 单，其中 TOP3 时段贡献 <b>' + top3Pct + '%</b>）；' +
-        '若将这些 Miss 全部回补至接起量，周度 30S 接起率将从 <b>' + (cur.totRate * 100).toFixed(2) + '%</b> 提升至 <b>' + (newWeekRate * 100).toFixed(2) + '%</b>，' +
-        '即超预测对周度接起率的拖累约 <b style="color:#D9363E">' + (totalImpact * 100).toFixed(2) + 'pp</b>；' +
-        '影响最大的时段为 <b>' + esc(worst.date.slice(5)) + ' ' + esc(worst.period) + '时</b>' +
-        '（偏差 ' + (worst.bias * 100).toFixed(0) + '%，Miss ' + worst.miss + '，周度影响 <b style="color:#D9363E">' + (worst.weekImpact * 100).toFixed(2) + 'pp</b>）。' +
-      '</div>');
+      const missAll = impacts.reduce((s, x) => s + x.miss, 0);
+      const rateX = (cur.totRate * 100).toFixed(2) + '%';
+      const rateY = ((cur.totNum + missAll) / cur.totDen * 100).toFixed(2) + '%';
+      const liftZ = (((cur.totNum + missAll) / cur.totDen) - cur.totRate) * 100;
+      const verdict = ((cur.totNum + missAll) / cur.totDen) >= 0.95
+        ? '✅ 回补后可达标'
+        : '❌ 回补后仍差 ' + (95 - Number(rateY.slice(0, -1))).toFixed(2) + ' pp';
+      P.push('<div class="rpt-sub" style="margin-top:8px"><b>合计：</b>共 <b>' + impacts.length + '</b> 个时段，累计 Miss <b>' + missAll +
+        '</b> 单；若全部回补，30S 接起率可由 <b>' + rateX + '</b> 提升至 <b>' + rateY + '</b>，提升 <b>' + liftZ.toFixed(2) +
+        ' pp</b>（目标 95%）；' + verdict + '；</div>');
     }
   }
 
@@ -644,31 +637,26 @@ function s30AnalysisText(biz, wk, prevWk) {
   if (cur.hasFc && cur.fcSlices && cur.fcSlices.length) {
     const impacts = computeOverForecastImpactDetail(cur);
     if (impacts.length) {
-      const totalMiss = impacts.reduce((s, x) => s + x.miss, 0);
-      L.push('**🎯 日度时段超预测影响值**（仅统计超预测 >120% 且时段接起率不达标的切片；将 Miss 回补至 30S 接起量后重算日 / 周接起率，影响值 = 回补后接起率 − 实际接起率）');
+      L.push('🎯 日度时段超预测影响值（仅统计超预测 >120% 且时段接起率不达标的切片；将 Miss 回补至 30S 接起量后重算日 / 周接起率，影响值 = 回补后接起率 − 实际接起率）');
       L.push('');
-      L.push('- 符合条件时段共 **' + impacts.length + '** 个，累计 Miss **' + totalMiss + '** 单');
-      L.push('- 负值表示该时段拉低整体接起率');
-      L.push('');
-      L.push('| 排名 | 日期 × 时段 | 预测量 | 实际量 | 超预测率 | Miss | 时段接起率 | 日度影响值 | 周度影响值 |');
-      L.push('| ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |');
       for (let i = 0; i < impacts.length; i++) {
         const x = impacts[i];
-        const dayDisp = (x.dayImpact >= 0 ? '+' : '') + (x.dayImpact * 100).toFixed(2) + 'pp';
-        const weekDisp = (x.weekImpact >= 0 ? '+' : '') + (x.weekImpact * 100).toFixed(2) + 'pp';
-        L.push('| ' + (i + 1) + ' | ' + x.date.slice(5) + ' ' + x.period + '时 | ' + Math.round(x.forecast) +
-          ' | ' + Math.round(x.den) + ' | ' + (x.bias * 100).toFixed(1) + '% | ' + x.miss +
-          ' | ' + (x.rate * 100).toFixed(2) + '% | ' + dayDisp + ' | ' + weekDisp + ' |');
+        L.push(circledNum(i + 1) + x.date.slice(5) + ' ' + x.period + ' 时 · 预测 ' + Math.round(x.forecast) +
+          ' / 实际 ' + Math.round(x.den) + '（偏差 ' + (x.bias * 100).toFixed(0) +
+          '%）· Miss ' + x.miss + '，周度影响值：' + (x.weekImpact * 100).toFixed(2) + '%；');
       }
       L.push('');
 
-      const totalMissAll = impacts.reduce((s, x) => s + x.miss, 0);
-      const newWeekRate  = (cur.totNum + totalMissAll) / cur.totDen;
-      const totalImpact  = newWeekRate - cur.totRate;
-      const worst        = impacts[0];
-      const top3Miss     = impacts.slice(0, 3).reduce((s, x) => s + x.miss, 0);
-      const top3Pct      = totalMissAll > 0 ? (top3Miss / totalMissAll * 100).toFixed(1) : '0';
-      L.push('📌 **一句话总结：** 本周共 **' + impacts.length + '** 个「超预测且接起不达标」的时段（累计 Miss **' + totalMissAll + '** 单，其中 TOP3 时段贡献 **' + top3Pct + '%**）；若将这些 Miss 全部回补至接起量，周度 30S 接起率将从 **' + (cur.totRate * 100).toFixed(2) + '%** 提升至 **' + (newWeekRate * 100).toFixed(2) + '%**，即超预测对周度接起率的拖累约 **' + (totalImpact * 100).toFixed(2) + 'pp**；影响最大的时段为 **' + worst.date.slice(5) + ' ' + worst.period + '时**（偏差 ' + (worst.bias * 100).toFixed(0) + '%，Miss ' + worst.miss + '，周度影响 **' + (worst.weekImpact * 100).toFixed(2) + 'pp**）。');
+      const missAll = impacts.reduce((s, x) => s + x.miss, 0);
+      const rateX = (cur.totRate * 100).toFixed(2) + '%';
+      const rateY = ((cur.totNum + missAll) / cur.totDen * 100).toFixed(2) + '%';
+      const liftZ = (((cur.totNum + missAll) / cur.totDen) - cur.totRate) * 100;
+      const verdict = ((cur.totNum + missAll) / cur.totDen) >= 0.95
+        ? '✅ 回补后可达标'
+        : '❌ 回补后仍差 ' + (95 - Number(rateY.slice(0, -1))).toFixed(2) + ' pp';
+      L.push('**合计：**共 **' + impacts.length + '** 个时段，累计 Miss **' + missAll +
+        '** 单；若全部回补，30S 接起率可由 **' + rateX + '** 提升至 **' + rateY + '**，提升 **' + liftZ.toFixed(2) +
+        ' pp**（目标 95%）；' + verdict + '；');
       L.push('');
     }
   }

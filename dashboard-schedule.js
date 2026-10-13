@@ -125,6 +125,23 @@ function scSaveReqCollapsed() {
   }
 })();
 
+/* ★ 「排班规则」说明面板折叠状态（默认展开） */
+(function initScRulesSummaryCollapsed() {
+  if (typeof S.scRulesSummaryCollapsed !== 'boolean') {
+    try {
+      const raw = localStorage.getItem('creator_sc_rules_summary_collapsed');
+      S.scRulesSummaryCollapsed = raw === '1';
+    } catch (_) { S.scRulesSummaryCollapsed = false; }
+  }
+})();
+
+function scSaveRulesSummaryCollapsed() {
+  try {
+    localStorage.setItem('creator_sc_rules_summary_collapsed',
+      S.scRulesSummaryCollapsed ? '1' : '0');
+  } catch (_) {}
+}
+
 function scSaveRuleBlockCollapsed() {
   try {
     localStorage.setItem('creator_sc_rule_block_collapsed',
@@ -3146,51 +3163,86 @@ function renderScRulesSummary() {
   ];
 
   /* ---------- 五、渲染 ---------- */
-  const HTML = [
-    '<div class="sc-rs-card">',
-      '<div class="sc-rs-head">',
-        '<span class="sc-rs-title">📋 当前配置摘要</span>',
-      '</div>',
-      '<div class="sc-rs-tiles">' + summaryTiles + '</div>',
-    '</div>',
+  const collapsed = !!S.scRulesSummaryCollapsed;
 
-    '<div class="sc-rs-card">',
-      '<div class="sc-rs-head">',
-        '<span class="sc-rs-title">🔒 硬约束（保证执行）</span>',
-        '<span class="sc-rs-badge">违反则不排</span>',
-      '</div>',
-      '<ul class="sc-rs-list">',
-        hardRules.map(r =>
-          '<li><code>' + r.code + '</code><span>' + r.text + '</span></li>'
-        ).join(''),
-      '</ul>',
-    '</div>',
+  /* ★ 折叠头：标题 + 规则计数摘要 */
+  const toggleHTML =
+    '<div class="sc-fold" id="scRulesSummaryToggle" ' +
+      'style="--sc-fold-color:#5C7099; --sc-fold-bg:#EFF3FA; ' +
+      '--sc-fold-bg-hover:#E1E9F7; margin-bottom:12px">' +
+      '<span class="arrow" style="transform:rotate(' +
+        (collapsed ? '-90deg' : '0deg') + ')">▼</span>' +
+      '<span>📖 排班规则</span>' +
+      '<span class="fold-meta">硬约束 ' + hardRules.length +
+        ' 条 · 软约束 ' + softRules.length +
+        ' 条 · 局部搜索 ' + searchRules.length + ' 条</span>' +
+    '</div>';
 
-    '<div class="sc-rs-card">',
-      '<div class="sc-rs-head">',
-        '<span class="sc-rs-title">⚖️ 软约束（打分排序）</span>',
-        '<span class="sc-rs-badge">用于候选优先级</span>',
+  /* ★ 折叠体：只有展开时才渲染三张卡片，省 DOM */
+  let bodyHTML = '';
+  if (!collapsed) {
+    bodyHTML = [
+      '<div class="sc-rs-card">',
+        '<div class="sc-rs-head">',
+          '<span class="sc-rs-title">📋 当前配置摘要</span>',
+        '</div>',
+        '<div class="sc-rs-tiles">' + summaryTiles + '</div>',
       '</div>',
-      '<ul class="sc-rs-list sc-rs-list-soft">',
-        softRules.map(r =>
-          '<li><code>' + r.code + '</code>' +
-            '<span class="sc-rs-score">' + r.score + '</span>' +
-            '<span>' + r.text + '</span></li>'
-        ).join(''),
-      '</ul>',
-    '</div>',
 
-    '<div class="sc-rs-card">',
-      '<div class="sc-rs-head">',
-        '<span class="sc-rs-title">🔁 生成后局部搜索优化</span>',
+      '<div class="sc-rs-card">',
+        '<div class="sc-rs-head">',
+          '<span class="sc-rs-title">🔒 硬约束（保证执行）</span>',
+          '<span class="sc-rs-badge">违反则不排</span>',
+        '</div>',
+        '<ul class="sc-rs-list">',
+          hardRules.map(r =>
+            '<li><code>' + r.code + '</code><span>' + r.text + '</span></li>'
+          ).join(''),
+        '</ul>',
       '</div>',
-      '<ul class="sc-rs-list">',
-        searchRules.map(r => '<li><span>' + r.text + '</span></li>').join(''),
-      '</ul>',
-    '</div>'
-  ].join('');
 
-  el.innerHTML = HTML;
+      '<div class="sc-rs-card">',
+        '<div class="sc-rs-head">',
+          '<span class="sc-rs-title">⚖️ 软约束（打分排序）</span>',
+          '<span class="sc-rs-badge">用于候选优先级</span>',
+        '</div>',
+        '<ul class="sc-rs-list sc-rs-list-soft">',
+          softRules.map(r =>
+            '<li><code>' + r.code + '</code>' +
+              '<span class="sc-rs-score">' + r.score + '</span>' +
+              '<span>' + r.text + '</span></li>'
+          ).join(''),
+        '</ul>',
+      '</div>',
+
+      '<div class="sc-rs-card">',
+        '<div class="sc-rs-head">',
+          '<span class="sc-rs-title">🔁 生成后局部搜索优化</span>',
+        '</div>',
+        '<ul class="sc-rs-list">',
+          searchRules.map(r => '<li><span>' + r.text + '</span></li>').join(''),
+        '</ul>',
+      '</div>'
+    ].join('');
+  }
+
+  /* ★ 包裹层需继承容器的 column flex + gap，否则卡片间距会丢失
+       （.sc-rules-summary 的 gap:10px 只作用于直接子元素） */
+  el.innerHTML = toggleHTML +
+    '<div id="scRulesSummaryBody" style="display:flex;' +
+      'flex-direction:column;gap:10px">' + bodyHTML + '</div>';
+
+  /* ★ 折叠交互绑定（每次重渲后重新绑定；用 _scBound 防止多次叠加） */
+  const toggle = document.getElementById('scRulesSummaryToggle');
+  if (toggle && !toggle._scBound) {
+    toggle._scBound = true;
+    toggle.addEventListener('click', (e) => {
+      if (e.target.closest('.help')) return;   /* 点问号不折叠 */
+      S.scRulesSummaryCollapsed = !S.scRulesSummaryCollapsed;
+      scSaveRulesSummaryCollapsed();
+      renderScRulesSummary();
+    });
+  }
 }
 
 function renderScDiag() {

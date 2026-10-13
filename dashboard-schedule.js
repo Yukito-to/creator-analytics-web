@@ -574,6 +574,7 @@ function generateSchedule() {
       totalSlots: 0,
       failed: true,
       mismatches: countCheck.mismatches,
+      failInfo: scDiagFailInfo(ctx),   // ★ 新增：诊断信息
       warnings: ['❌ 班次人数不符合规则，排班已取消'],
     };
     return null;
@@ -1101,6 +1102,82 @@ function scValidateShiftCounts(ctx) {
     }
   }
   return { ok: mismatches.length === 0, mismatches };
+}
+
+/* ★ 排班失败诊断：收集「为什么没人可排」的关键信息
+   返回结构：
+     {
+       cycle:      { start, end, days },
+       activeEmp:  number,
+       pools:      { buyerOnly, bloggerOnly, flex },       // 分池人数
+       shiftPool:  { buyer, blogger },                    // 各班次池的班次数
+       rules:      { buyer, blogger },                    // 各业务线规则条数
+       locked:     { [name]: count },                     // 周期内被锁定的格子数
+       leaveOn:    { [name]: count },                     // 周期内 leave_on 天数
+       lockedByBiz: { buyer, blogger, unknown },          // 按业务线统计锁定格数
+       leaveOnByBiz:{ buyer, blogger, unknown },
+     } */
+function scDiagFailInfo(ctx) {
+  const dates = ctx.dates || [];
+  const dateSet = new Set(dates);
+  const out = {
+    cycle: { start: dates[0] || '', end: dates[dates.length - 1] || '', days: dates.length },
+    activeEmp: scActiveEmployees().length,
+    pools: {
+      buyerOnly:   (ctx.buyerOnly   || []).length,
+      bloggerOnly: (ctx.bloggerOnly || []).length,
+      flex:        (ctx.flex        || []).length,
+    },
+    shiftPool: {
+      buyer:   ((S.shiftPoolByBiz && S.shiftPoolByBiz['买手合作']) || []).length,
+      blogger: ((S.shiftPoolByBiz && S.shiftPoolByBiz['博主合作']) || []).length,
+    },
+    rules: {
+      buyer:   ((S.shiftReqRules && S.shiftReqRules['买手合作']) || []).length,
+      blogger: ((S.shiftReqRules && S.shiftReqRules['博主合作']) || []).length,
+    },
+    locked: {},
+    leaveOn: {},
+    lockedByBiz:  { buyer: 0, blogger: 0, unknown: 0 },
+    leaveOnByBiz: { buyer: 0, blogger: 0, unknown: 0 },
+  };
+
+  /* 员工业务线归属：买手 / 博主 / 未知 */
+  const bizOf = name => {
+    const e = getEmp(name);
+    if (!e) return 'unknown';
+    const b = String(e.biz || '');
+    if (/买手/.test(b) && !/博主/.test(b)) return 'buyer';
+    if (/博主/.test(b) && !/买手/.test(b)) return 'blogger';
+    return 'unknown';
+  };
+
+  /* 锁定格子数（按人 + 按业务线汇总） */
+  for (const n in (ctx.locked || {})) {
+    const cnt = Object.keys(ctx.locked[n] || {}).filter(d => dateSet.has(d)).length;
+    if (cnt > 0) {
+      out.locked[n] = cnt;
+      out.lockedByBiz[bizOf(n)] += cnt;
+    }
+  }
+
+  /* leave_on 天数（周期内）（按人 + 按业务线汇总） */
+  for (const n in (S.parsedRequests || {})) {
+    const req = S.parsedRequests[n];
+    if (!req || !req.items) continue;
+    let cnt = 0;
+    for (const it of req.items) {
+      if (it.type === 'leave_on' && Array.isArray(it.dates)) {
+        for (const d of it.dates) if (dateSet.has(d)) cnt++;
+      }
+    }
+    if (cnt > 0) {
+      out.leaveOn[n] = cnt;
+      out.leaveOnByBiz[bizOf(n)] += cnt;
+    }
+  }
+
+  return out;
 }
 
 /* 诊断信息 */
@@ -3020,6 +3097,63 @@ function renderScDiag() {
       '</tr>';
     }).join('');
 
+    /* ★ 诊断卡片：根据 failInfo 生成原因推断 */
+    const info = diag.failInfo || {};
+    let diagCard = '';
+    if (info.pools) {
+      const bizRows = [];
+      for (const [biz, label] of [['buyer', '买手合作'], ['blogger', '博主合作']]) {
+        const own = info.pools[biz === 'buyer' ? 'buyerOnly' : 'bloggerOnly'] || 0;
+        const flex = info.pools.flex || 0;
+        const pool = (info.shiftPool && info.shiftPool[biz]) || 0;
+        const lockedBiz  = (info.lockedByBiz  && info.lockedByBiz[biz])  || 0;
+        const leaveOnBiz = (info.leaveOnByBiz && info.leaveOnByBiz[biz]) || 0;
+        const hasRule = ((info.rules && info.rules[biz]) || 0) > 0;
+        if (!hasRule) continue;
+
+        const reasons = [];
+        if (pool === 0) reasons.push('该业务线<b>可排班次池为空</b>（请到「班次规则」勾选本业务线可排班次）');
+        if (own === 0 && flex === 0) reasons.push('该业务线<b>专属 + 弹性员工池为空</b>（花名册中无对应业务线的一线员工）');
+        if (own + flex > 0 && lockedBiz + leaveOnBiz >= own + flex) {
+          reasons.push('所有候选员工在周期内都被<b>锁定</b>或<b>请假</b>（锁定 ' + lockedBiz + ' 格 / 请假 ' + leaveOnBiz + ' 天）');
+        }
+        if (!reasons.length && own > 0 && pool > 0) {
+          reasons.push('候选池与班次池均非空，可能是<b>锁定/请假/诉求冲突</b>共同导致（见下方明细）');
+        }
+
+        bizRows.push(
+          '<div style="margin-top:6px">' +
+            '<b>' + esc(label) + '</b>：专属 ' + own + ' + 弹性 ' + flex +
+            ' 人 / 可排班次 ' + pool + ' 个 / 规则 ' + ((info.rules && info.rules[biz]) || 0) + ' 条' +
+            (lockedBiz ? ' / 锁定 ' + lockedBiz + ' 格' : '') +
+            (leaveOnBiz ? ' / 请假 ' + leaveOnBiz + ' 天' : '') +
+            (reasons.length ? '<br><span style="color:#B33">→ ' + reasons.join('；') + '</span>' : '') +
+          '</div>'
+        );
+      }
+
+      const lockedNames = Object.keys(info.locked || {});
+      const leaveOnNames = Object.keys(info.leaveOn || {});
+      diagCard =
+        '<div style="margin-top:10px;padding:10px 14px;background:#FFF7E6;border-radius:10px;' +
+          'border-left:3px solid #E8A33E;color:#8A5A00;line-height:1.9;font-size:12.5px">' +
+          '🔍 <b>原因诊断</b>' +
+          '<div style="margin-top:4px;color:#4A4A56">' +
+            '周期 ' + esc(info.cycle.start) + ' ~ ' + esc(info.cycle.end) +
+            '（' + info.cycle.days + ' 天），在排员工 ' + info.activeEmp + ' 人。' +
+          '</div>' +
+          bizRows.join('') +
+          (lockedNames.length
+            ? '<div style="margin-top:6px"><b>周期内被锁定（前置草稿）：</b>' +
+              lockedNames.map(n => esc(n) + '（' + info.locked[n] + ' 格）').join('、') + '</div>'
+            : '') +
+          (leaveOnNames.length
+            ? '<div style="margin-top:6px"><b>周期内请假（AI 诉求）：</b>' +
+              leaveOnNames.map(n => esc(n) + '（' + info.leaveOn[n] + ' 天）').join('、') + '</div>'
+            : '') +
+        '</div>';
+    }
+
     el.innerHTML =
       '<div style="padding:10px 14px;background:#F5E5E5;border-radius:10px;' +
         'border-left:3px solid #C98383;color:#A64A4A;line-height:1.85;font-size:12.5px">' +
@@ -3030,6 +3164,7 @@ function renderScDiag() {
         '<span style="color:#B36A00">' + esc(baseLine) + '（未更新排班表，保留上次结果）</span><br>' +
         '<span style="color:#B36A00">请调小规则人数、增加可用员工、或放宽员工诉求/离职限制后重试。</span>' +
       '</div>' +
+      diagCard +
       '<details style="margin-top:10px">' +
         '<summary style="cursor:pointer;font-size:12.5px;color:#B36A00;' +
           'user-select:none;outline:none;padding:4px 0">' +

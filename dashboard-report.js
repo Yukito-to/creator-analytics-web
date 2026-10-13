@@ -326,9 +326,9 @@ function s30EstimateAchieveDate(biz, wk) {
   const avgDaily = m30.s30Den / nDays;
   if (!(avgDaily > 0)) return null;
 
-  /* 假定后续接起率 100%（理论最快） */
-  const assumedRate = 1.0;
-  const needDays = Math.ceil(rawGap / (avgDaily * (assumedRate - th)));
+  /* ★ 假定后续接起率 100%，每天新增 v 单全部接起
+       需要天数 x = 缺口单数 / 日均进线量 */
+  const needDays = Math.ceil(rawGap / avgDaily);
   if (!isFinite(needDays) || needDays <= 0 || needDays > 3650) return null;
 
   const targetDate = dateAdd(S.latestDate, needDays);
@@ -336,7 +336,6 @@ function s30EstimateAchieveDate(biz, wk) {
 
   return {
     avgDaily,
-    assumedRate,
     gapMonth,
     targetRate: th,
     needDays,

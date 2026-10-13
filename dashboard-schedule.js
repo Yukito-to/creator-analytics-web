@@ -593,13 +593,19 @@ function generateSchedule() {
   const countCheck = scValidateShiftCounts(ctx);
 
   if (!countCheck.ok) {
+    /* ★ 为每个 mismatch 附加候选人逐人拦截原因 */
+    const mismatchesWithReasons = countCheck.mismatches.map(mm =>
+      Object.assign({}, mm, {
+        reasons: scWhyNotAssign(ctx, mm.date, mm.biz, mm.shift),
+      })
+    );
     S.scheduleDiag = {
       dateCount: ctx.dates.length,
       employeeCount: scActiveEmployees().length,
       totalSlots: 0,
       failed: true,
-      mismatches: countCheck.mismatches,
-      failInfo: scDiagFailInfo(ctx),   // ★ 新增：诊断信息
+      mismatches: mismatchesWithReasons,
+      failInfo: scDiagFailInfo(ctx),
       warnings: ['❌ 班次人数不符合规则，排班已取消'],
     };
     return null;
@@ -1269,6 +1275,35 @@ function scDiagFailInfo(ctx) {
     }
   }
 
+  return out;
+}
+
+/* ★ 诊断：对某个 (date, biz, shift)，列出候选池中每个员工被拦截的原因
+   返回：[{ name, reasons: [string, ...] }, ...]
+   reasons 为空数组时表示「可用但未被选中」（说明是被评分排序挤掉的） */
+function scWhyNotAssign(ctx, date, biz, shift) {
+  const out = [];
+  const bizKey = (biz === '博主合作') ? '博主合作' : '买手合作';
+  const pool = (bizKey === '买手合作')
+    ? (ctx.buyerOnly || []).concat(ctx.flex || [])
+    : (ctx.bloggerOnly || []).concat(ctx.flex || []);
+  for (const e of pool) {
+    const r = [];
+    if (!scIsActiveOn(e, date)) r.push('离职日之后');
+    if (ctx.locked[e.name] && ctx.locked[e.name][date])
+      r.push('已锁定（前置草稿=' + ctx.locked[e.name][date] + '）');
+    if (ctx.assigned[date] && ctx.assigned[date][e.name])
+      r.push('已分配到 ' + ctx.assigned[date][e.name]);
+    if (scHasLeaveOn(e.name, date)) r.push('请假诉求（leave_on）');
+    if (!scRequestsAllow(ctx, e.name, shift)) r.push('only/not 诉求冲突');
+    /* H10 晚班后禁早班 */
+    const lastS = ctx.lastShift && ctx.lastShift[e.name];
+    if (lastS && scIsLateEndShift(lastS) && scIsEarlyStartShift(shift)) {
+      r.push('H10：昨日 ' + lastS + '（晚班）→ 今日 ' + shift + '（早班）');
+    }
+    if (!r.length) r.push('✓ 可用但未被选中');
+    out.push({ name: e.name, reasons: r });
+  }
   return out;
 }
 
@@ -3177,7 +3212,7 @@ function renderScDiag() {
     const rows = list.map(x => {
       const gapColor = x.diff < 0 ? '#D9363E' : '#C98383';
       const gapTxt   = (x.diff > 0 ? '+' : '') + x.diff;
-      return '<tr>' +
+      const mainRow = '<tr>' +
         '<td>' + esc(x.date) + '</td>' +
         '<td>' + esc(x.biz) + '</td>' +
         '<td>' + esc(x.shift) + '</td>' +
@@ -3185,6 +3220,24 @@ function renderScDiag() {
         '<td style="text-align:right;color:' + gapColor + ';font-weight:600">' + x.actual + '</td>' +
         '<td style="text-align:right;color:' + gapColor + ';font-weight:600">' + gapTxt + '</td>' +
       '</tr>';
+      /* ★ 候选人拦截原因行（横跨所有列） */
+      let reasonRow = '';
+      if (Array.isArray(x.reasons) && x.reasons.length) {
+        const items = x.reasons.map(r => {
+          const isOk = r.reasons.length === 1 && r.reasons[0].indexOf('✓') === 0;
+          const color = isOk ? '#6EA980' : '#A64A4A';
+          return '<span style="display:inline-block;margin-right:10px;white-space:nowrap">' +
+            '<b style="color:#33333D">' + esc(r.name) + '</b>：' +
+            '<span style="color:' + color + '">' + r.reasons.map(esc).join('；') + '</span>' +
+          '</span>';
+        }).join('');
+        reasonRow = '<tr><td colspan="6" style="font-size:11px;color:#77778A;' +
+          'background:#FCFBF9;padding:6px 10px;line-height:1.9;' +
+          'border-bottom:1px dashed #E5E1DA;white-space:normal;text-align:left">' +
+          '↳ <b>候选池拦截原因：</b>' + items +
+        '</td></tr>';
+      }
+      return mainRow + reasonRow;
     }).join('');
 
     /* ★ 诊断卡片：根据 failInfo 生成原因推断 */

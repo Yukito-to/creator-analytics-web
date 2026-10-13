@@ -135,12 +135,12 @@ function metricLineHTML(label, curRaw, prevRaw, monthRaw, m, tgt, monthLabel) {
   const p = metricLineParts(curRaw, prevRaw, monthRaw, m, tgt, monthLabel);
   let s = '<b>' + esc(label) + '</b><span class="rpt-v">' + p.curDisp + '</span>';
   s += '<span class="rpt-sep">|</span>周度WoW' + p.wowDisp + p.arrow;
-  if (p.weekHit != null) s += (p.weekHit ? '' : '🔴') + '（' + (p.weekHit ? '已达成' : '未达成') + '）（周度达成率' + pct2(p.weekRate) + '）';
+  if (p.weekHit != null) s += (p.weekHit ? '🟢 （达成）' : '🔴（未达成）') + '（周度达成率' + pct2(p.weekRate) + '）';
   s += '，';
   if (p.tw != null) {
     s += '<span class="rpt-sep">|</span>' + p.monthLabel + '目标：' + p.twDisp + p.unit;
     s += '，' + p.monthLabel + '达成：' + p.monthDisp;
-    if (p.monthHit != null) s += '（月度达成率' + pct2(p.monthRate) + '）' + (p.monthHit ? '' : '🔴（未达成）');
+    if (p.monthHit != null) s += '（月度达成率' + pct2(p.monthRate) + '）' + (p.monthHit ? '🟢 （达成）' : '🔴（未达成）');
   } else {
     s += '<span class="rpt-sep">|</span>' + p.monthLabel + '达成：' + p.monthDisp;
   }
@@ -151,12 +151,12 @@ function metricLineText(label, curRaw, prevRaw, monthRaw, m, tgt, monthLabel) {
   const p = metricLineParts(curRaw, prevRaw, monthRaw, m, tgt, monthLabel);
   let s = label + p.curDisp;
   s += ' | 周度WoW' + p.wowDisp + p.arrow;
-  if (p.weekHit != null) s += (p.weekHit ? '' : '🔴') + '（' + (p.weekHit ? '已达成' : '未达成') + '）（周度达成率' + pct2(p.weekRate) + '）';
+  if (p.weekHit != null) s += (p.weekHit ? '🟢 （达成）' : '🔴（未达成）') + '（周度达成率' + pct2(p.weekRate) + '）';
   s += '，';
   if (p.tw != null) {
     s += ' | ' + p.monthLabel + '目标：' + p.twDisp + p.unit;
     s += '，' + p.monthLabel + '达成：' + p.monthDisp;
-    if (p.monthHit != null) s += '（月度达成率' + pct2(p.monthRate) + '）' + (p.monthHit ? '' : '🔴（未达成）');
+    if (p.monthHit != null) s += '（月度达成率' + pct2(p.monthRate) + '）' + (p.monthHit ? '🟢 （达成）' : '🔴（未达成）');
   } else { s += ' | ' + p.monthLabel + '达成：' + p.monthDisp; }
   s += ' |';
   return s;
@@ -477,36 +477,6 @@ function s30AnalysisHTML(biz, wk, prevWk) {
     }
   }
 
-  if (cur.emps.length) {
-    P.push('<div class="rpt-sub" style="margin-top:8px">👤 <b>员工维度</b>（按 Miss 量降序 TOP5）</div>');
-    const totalMiss = cur.emps.reduce((s, e) => s + e.miss, 0);
-    const top5 = cur.emps.slice(0, 5);
-    const top5Miss = top5.reduce((s, e) => s + e.miss, 0);
-    const top5Pct = totalMiss > 0 ? (top5Miss / totalMiss * 100).toFixed(1) : '0';
-    const rows = top5.map((e, i) => {
-      const emp = getEmp(e.name);
-      const grp = emp ? (emp.group || '—') : '—';
-      const color = e.rate >= th ? '#6EA980' : '#D9363E';
-      const weight = e.rate >= th ? '400' : '600';
-      return '<tr>' +
-        '<td class="c-rank">' + (i + 1) + '</td>' +
-        '<td class="c-fix">' + esc(e.name) + ' <span style="color:#A0A0AE;font-size:11px">' + esc(grp) + '</span></td>' +
-        '<td style="text-align:center">' + fmtInt(e.den) + '</td>' +
-        '<td style="text-align:center">' + fmtInt(e.miss) + '</td>' +
-        '<td style="text-align:center;color:' + color + ';font-weight:' + weight + '">' + (e.rate * 100).toFixed(2) + '%</td>' +
-      '</tr>';
-    }).join('');
-    P.push('<div class="table-scroll-x"><table class="rp-table rp-sticky2"><thead><tr>' +
-      '<th class="c-rank">排名</th><th class="c-fix">员工</th><th>人工服务量</th><th>Miss 量</th><th>接起率</th>' +
-      '</tr></thead><tbody>' + rows + '</tbody></table></div>');
-    P.push('<div class="rpt-sub">→ TOP5 员工贡献了 <b>' + top5Pct + '%</b> 的 Miss 量（' + top5Miss + '/' + totalMiss + ' 单）。</div>');
-    const lowEmps = cur.emps.filter(e => e.den >= 30 && e.rate < th).sort((a, b) => a.rate - b.rate).slice(0, 5);
-    if (lowEmps.length) {
-      P.push('<div class="rpt-sub">服务量 ≥30 单且未达标员工：' +
-        lowEmps.map(e => esc(e.name) + '（' + (e.rate * 100).toFixed(2) + '%）').join('、') + '</div>');
-    }
-  }
-
   const prev = s30AnalysisData(biz, prevWk);
   if (prev && prev.totDen > 0) {
     const dRate = cur.totRate - prev.totRate;
@@ -685,18 +655,6 @@ function s30AnalysisText(biz, wk, prevWk) {
         ' | ' + (p.hasFc ? Math.round(p.forecast) : '—') +
         ' | ' + (p.bias != null ? (p.bias * 100).toFixed(0) + '%' : '—') + ' |');
     }
-    L.push('');
-  }
-
-  if (cur.emps.length) {
-    L.push('**👤 员工维度**（按 Miss 量降序 TOP5）'); L.push('');
-    L.push('| 排名 | 员工 | 人工服务量 | Miss 量 | 接起率 |');
-    L.push('| ---: | --- | ---: | ---: | ---: |');
-    cur.emps.slice(0, 5).forEach((e, i) => {
-      const emp = getEmp(e.name);
-      const grp = emp ? (emp.group || '—') : '—';
-      L.push('| ' + (i + 1) + ' | ' + e.name + '（' + grp + '） | ' + e.den + ' | ' + e.miss + ' | ' + (e.rate * 100).toFixed(2) + '% |');
-    });
     L.push('');
   }
 

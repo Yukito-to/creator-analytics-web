@@ -50,7 +50,11 @@ function rowHTMLSrcToggle(label, src, metric, opts, rowBg, toggleKey, expanded, 
       '</div>' +
     '</td>';
   } else {
-    firstTd = '<td' + tdStyle + '><span class="row-toggle" data-key="' + esc(toggleKey) + '">' + arrow + '</span>' + esc(label) + '</td>';
+    let labelWithTip = esc(label);
+    if (metric && metric.tip) {
+      labelWithTip += ' <span class="help" data-tip="' + esc(metric.tip) + '">?</span>';
+    }
+    firstTd = '<td' + tdStyle + '><span class="row-toggle" data-key="' + esc(toggleKey) + '">' + arrow + '</span>' + labelWithTip + '</td>';
   }
   const tds = [firstTd, '<td' + tdStyle + '>' + fmtVal(m[metric.key], metric) + '</td>'];
   for (const w of wkA) tds.push('<td' + tdStyle + '>' + fmtVal(w[metric.key], metric) + '</td>');
@@ -66,7 +70,11 @@ function rowHTMLByL1(label, src, bizL1, metric, opts, rowBg) {
   const wkA = cols.wks.map(w => calcBySrcAndL1(src, bizL1, Object.assign({}, opts || {}, { wkSet: new Set([w]) })));
   const dayA = cols.last7.map(d => calcBySrcAndL1(src, bizL1, Object.assign({}, opts || {}, { dateSet: new Set([d]) })));
   const tdStyle = rowBg ? ' style="background:' + rowBg + '"' : '';
-  const tds = ['<td' + tdStyle + '>' + esc(label) + '</td>', '<td' + tdStyle + '>' + fmtVal(m[metric.key], metric) + '</td>'];
+  let labelWithTip = esc(label);
+  if (metric && metric.tip) {
+    labelWithTip += ' <span class="help" data-tip="' + esc(metric.tip) + '">?</span>';
+  }
+  const tds = ['<td' + tdStyle + '>' + labelWithTip + '</td>', '<td' + tdStyle + '>' + fmtVal(m[metric.key], metric) + '</td>'];
   for (const w of wkA) tds.push('<td' + tdStyle + '>' + fmtVal(w[metric.key], metric) + '</td>');
   tds.push('<td' + tdStyle + '>' + diffHTML(wkA[1][metric.key], wkA[0][metric.key], metric) + '</td>');
   tds.push('<td' + tdStyle + '>' + diffHTML(wkA[2][metric.key], wkA[1][metric.key], metric) + '</td>');
@@ -147,7 +155,8 @@ function rowHTMLS30(label, biz, metric) {
   const wkA = cols.wks.map(w => calc({ wkSet: new Set([w]) }));
   const dayA = cols.last7.map(d => calc({ dateSet: new Set([d]) }));
   const cell = v => (metric.key === 's30Rate') ? rateSpan(v, biz) : fmtVal(v, metric);
-  const tds = ['<td>' + esc(label) + '</td>', '<td>' + cell(m[metric.key]) + '</td>'];
+  const labelWithTip = esc(label) + (metric.tip ? ' <span class="help" data-tip="' + esc(metric.tip) + '">?</span>' : '');
+  const tds = ['<td>' + labelWithTip + '</td>', '<td>' + cell(m[metric.key]) + '</td>'];
   for (const w of wkA) tds.push('<td>' + cell(w[metric.key]) + '</td>');
   tds.push('<td>' + diffHTML(wkA[1][metric.key], wkA[0][metric.key], metric) + '</td>');
   tds.push('<td>' + diffHTML(wkA[2][metric.key], wkA[1][metric.key], metric) + '</td>');
@@ -164,8 +173,6 @@ function switchView(name) {
   const el = document.getElementById('view-' + name);
   if (el) el.classList.add('active');
   $$('#tabs button').forEach(b => b.classList.toggle('active', b.dataset.view === name));
-  /* 智能排班：切到该页时渲染面板（函数在 dashboard-schedule.js） */
-  if (name === 'schedule' && typeof renderSchedulePanel === 'function') renderSchedulePanel();
 }
 function afterLoad() {
   renderImportSummary();
@@ -189,11 +196,6 @@ function refreshAll() {
   if (fcView && fcView.classList.contains('active') && typeof renderForecastConfig === 'function') {
     renderForecastConfig();
     if (typeof renderForecastResult === 'function') renderForecastResult();
-  }
-  /* 智能排班若当前可见，也刷新（函数在 dashboard-schedule.js） */
-  const scView = document.getElementById('view-schedule');
-  if (scView && scView.classList.contains('active') && typeof renderSchedulePanel === 'function') {
-    renderSchedulePanel();
   }
 }
 
@@ -451,7 +453,9 @@ function renderPersonBody(src, emps) {
       const opts = { nameSet: new Set([n]) };
       const labelHtml =
         '<span class="row-name">' + esc(n) + '</span>' +
-        '<span class="row-metric">' + esc(metricLabel(metric)) + '</span>';
+        '<span class="row-metric">' + esc(metricLabel(metric)) + 
+        (metric.tip ? ' <span class="help" data-tip="' + esc(metric.tip) + '">?</span>' : '') + 
+        '</span>';
       rows.push(rowHTMLSrcToggle(n + ' · ' + metricLabel(metric), src, metric, opts, bg, key, expanded, labelHtml));
       if (expanded) { const ex = renderExpandRows(src, opts, mk, key); for (const r of ex) rows.push(r); }
     }
@@ -667,7 +671,9 @@ function renderTeamBody(src, allEmps) {
     const overallExpanded = S.expandedRows.has(overallKey);
     const overallLabelHtml =
       '<span class="row-name">整体</span>' +
-      '<span class="row-metric">' + esc(metricLabel(metric)) + '</span>';
+      '<span class="row-metric">' + esc(metricLabel(metric)) + 
+      (metric.tip ? ' <span class="help" data-tip="' + esc(metric.tip) + '">?</span>' : '') + 
+      '</span>';
     rows.push(rowHTMLSrcToggle('整体 · ' + metricLabel(metric), src, metric, null, bg, overallKey, overallExpanded, overallLabelHtml));
     if (overallExpanded) { const ex = renderExpandRows(src, null, mk, overallKey); for (const r of ex) rows.push(r); }
     for (const gr of groups) {
@@ -677,7 +683,9 @@ function renderTeamBody(src, allEmps) {
       const opts = { nameSet: new Set(gr.names) };
       const grLabelHtml =
         '<span class="row-name">' + esc(gr.label) + '</span>' +
-        '<span class="row-metric">' + esc(metricLabel(metric)) + '</span>';
+        '<span class="row-metric">' + esc(metricLabel(metric)) + 
+        (metric.tip ? ' <span class="help" data-tip="' + esc(metric.tip) + '">?</span>' : '') + 
+        '</span>';
       rows.push(rowHTMLSrcToggle(gr.label + ' · ' + metricLabel(metric), src, metric, opts, bg, key, expanded, grLabelHtml));
       if (expanded) { const ex = renderExpandRows(src, opts, mk, key); for (const r of ex) rows.push(r); }
     }
@@ -732,10 +740,10 @@ function renderS30() {
   }
   const cols = timeCols();
   const subMetrics = [
-    { key:'s30Rate', label:'30s接起率', digits:2, pct:true, better:'up' },
-    { key:'s30Num', label:'30S接起率-分子', digits:0, pct:false, better:'up' },
-    { key:'s30Den', label:'30S接起率-分母', digits:0, pct:false, better:'up' },
-    { key:'s30Miss', label:'30sMiss量', digits:0, pct:false, better:'down' },
+    { key:'s30Rate', label:'30s接起率', digits:2, pct:true, better:'up', tip:'30S接起量 / 人工服务量' },
+    { key:'s30Num', label:'30S接起率-分子', digits:0, pct:false, better:'up', tip:'30秒内接起的电话量' },
+    { key:'s30Den', label:'30S接起率-分母', digits:0, pct:false, better:'up', tip:'人工服务量（总进线）' },
+    { key:'s30Miss', label:'30sMiss量', digits:0, pct:false, better:'down', tip:'分母 - 分子（未在30秒内接起的量）' },
   ];
   top.innerHTML = '<div class="table-scroll"><table><thead><tr>' + buildHeaderHTML(cols) + '</tr></thead><tbody>' +
     subMetrics.map(m => rowHTMLS30(m.label, biz, m)).join('') + '</tbody></table></div>';
@@ -912,8 +920,14 @@ function renderS30Body(biz) {
     }
   }
 
-  const head = '<tr><th>日期 | 时段</th><th>30s接起率</th><th>30S接起率-分子</th><th>30S接起率-分母</th><th>30sMiss量</th>' +
-    (hasFc ? '<th>时段预测量</th><th>预测偏差</th>' : '') + '</tr>';
+  const head = '<tr><th>日期 | 时段</th>' +
+    '<th>30s接起率 <span class="help" data-tip="30S接起量 / 人工服务量">?</span></th>' +
+    '<th>30S接起率-分子 <span class="help" data-tip="30秒内接起的电话量">?</span></th>' +
+    '<th>30S接起率-分母 <span class="help" data-tip="人工服务量（总进线）">?</span></th>' +
+    '<th>30sMiss量 <span class="help" data-tip="分母 - 分子（未在30秒内接起的量）">?</span></th>' +
+    (hasFc ? '<th>时段预测量 <span class="help" data-tip="导入的预测量表（按小时插值）">?</span></th>' +
+             '<th>预测偏差 <span class="help" data-tip="实际分母 / 预测量。>120% 标记为红色（超预测）">?</span></th>' : '') + 
+    '</tr>';
 
   const renderFc = (forecast, den) => {
     let fcDisp = '—', biasDisp = '—', biasCls = '';
@@ -1045,8 +1059,11 @@ function renderAHT2() {
   const header = '<tr><th>二级打点</th>' +
     '<th>WK' + wkPrev + ' 处理时长</th><th>WK' + wkNow + ' 处理时长</th>' +
     '<th>WK' + wkPrev + ' 服务量</th><th>WK' + wkNow + ' 服务量</th>' +
-    '<th>WK' + wkPrev + ' AHT</th><th>WK' + wkNow + ' AHT</th>' +
-    '<th>AHT 环比</th><th>服务量 环比</th><th>影响值</th></tr>';
+    '<th>WK' + wkPrev + ' AHT <span class="help" data-tip="处理时长 / 服务量">?</span></th>' +
+    '<th>WK' + wkNow + ' AHT <span class="help" data-tip="处理时长 / 服务量">?</span></th>' +
+    '<th>AHT 环比 <span class="help" data-tip="本周 AHT - 上周 AHT">?</span></th>' +
+    '<th>服务量 环比 <span class="help" data-tip="本周服务量 - 上周服务量">?</span></th>' +
+    '<th>影响值 <span class="help" data-tip="剔除该二级打点后，业务线整体 AHT 的提升/下降幅度">?</span></th></tr>';
   const list = Array.from(combos.values());
   if (fixedOrder) {
     const orderIdx = new Map(fixedOrder.map(([l1, l2], i) => [aht2Key(l1, l2), i]));
@@ -1304,8 +1321,12 @@ function renderSLA() {
   el.innerHTML = headInfo + scoreCard +
     '<div class="table-scroll"><table class="rp-table"><thead><tr>' +
       '<th>指标</th><th>分类</th><th>权重</th>' +
-      '<th>目标</th><th>实际</th><th>达成率</th>' +
-      '<th>档位分</th><th>最终得分</th><th>状态</th>' +
+      '<th>目标 <span class="help" data-tip="从 SLA 表读取的 100% 得分档位目标">?</span></th>' +
+      '<th>实际 <span class="help" data-tip="根据当前数据计算的指标当前值">?</span></th>' +
+      '<th>达成率 <span class="help" data-tip="正向指标：实际/目标；逆向指标：目标/实际">?</span></th>' +
+      '<th>档位分 <span class="help" data-tip="实际命中 SLA 档位所对应的基础分">?</span></th>' +
+      '<th>最终得分 <span class="help" data-tip="档位分 × 权重">?</span></th>' +
+      '<th>状态 <span class="help" data-tip="当前命中的档位及距离上一档的差距">?</span></th>' +
     '</tr></thead><tbody>' + rows + '</tbody></table></div>';
 }
 

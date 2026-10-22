@@ -977,7 +977,13 @@ function reportHTML(d) {
       const c = x.cur;
       return '<tr><td>' + x.day.slice(5) + ' 周' + weekdayOf(x.day) + '</td><td>' + fmtInt(c.caseVolume) + '</td><td>' + fmtVal(c.cpd, METRIC_MAP.cpd) + '</td><td>' + fmtVal(c.aht, METRIC_MAP.aht) + '</td><td>' + fmtVal(c.solveRate, METRIC_MAP.solveRate) + '</td><td>' + fmtVal(c.satisfaction, METRIC_MAP.satisfaction) + '</td></tr>';
     }).join('');
-    P.push('<div class="table-scroll-x"><table class="rp-table"><thead><tr><th>日期</th><th>CASE</th><th>CPD</th><th>AHT</th><th>解决率</th><th>满意度</th></tr></thead><tbody>' + rows + '</tbody></table></div>');
+    P.push('<div class="table-scroll-x"><table class="rp-table"><thead><tr><th>日期</th>' +
+      '<th>CASE <span class="help" data-tip="人工服务量">?</span></th>' +
+      '<th>CPD <span class="help" data-tip="CASE处理量 / 出勤天数">?</span></th>' +
+      '<th>AHT <span class="help" data-tip="处理总时长 / CASE处理量">?</span></th>' +
+      '<th>解决率 <span class="help" data-tip="已解决量 / 解决评价量">?</span></th>' +
+      '<th>满意度 <span class="help" data-tip="满意量 / 满意评价量">?</span></th>' +
+      '</tr></thead><tbody>' + rows + '</tbody></table></div>');
   }
   if (groups && groups.length) {
     P.push('<h4 class="sub-title">👥 团队表现</h4>');
@@ -985,7 +991,15 @@ function reportHTML(d) {
       const c = g.cur;
       return '<tr><td>' + esc(g.name) + '</td><td>' + g.count + '</td><td>' + fmtInt(c.caseVolume) + '</td><td>' + fmtVal(c.cpd, METRIC_MAP.cpd) + '</td><td>' + fmtVal(c.aht, METRIC_MAP.aht) + '</td><td>' + fmtVal(c.concurrency, METRIC_MAP.concurrency) + '</td><td>' + fmtVal(c.solveRate, METRIC_MAP.solveRate) + '</td><td>' + fmtVal(c.satisfaction, METRIC_MAP.satisfaction) + '</td><td>' + fmtVal(c.qualityPassRate, METRIC_MAP.qualityPassRate) + '</td></tr>';
     }).join('');
-    P.push('<div class="table-scroll-x"><table class="rp-table"><thead><tr><th>组别</th><th>人数</th><th>CASE</th><th>CPD</th><th>AHT</th><th>并发</th><th>解决率</th><th>满意度</th><th>质检合格率</th></tr></thead><tbody>' + rows + '</tbody></table></div>');
+    P.push('<div class="table-scroll-x"><table class="rp-table"><thead><tr><th>组别</th><th>人数</th>' +
+      '<th>CASE <span class="help" data-tip="人工服务量">?</span></th>' +
+      '<th>CPD <span class="help" data-tip="CASE处理量 / 出勤天数">?</span></th>' +
+      '<th>AHT <span class="help" data-tip="处理总时长 / CASE处理量">?</span></th>' +
+      '<th>并发 <span class="help" data-tip="CASE处理总时长 / (在线时长 * 60)">?</span></th>' +
+      '<th>解决率 <span class="help" data-tip="已解决量 / 解决评价量">?</span></th>' +
+      '<th>满意度 <span class="help" data-tip="满意量 / 满意评价量">?</span></th>' +
+      '<th>质检合格率 <span class="help" data-tip="质检合格量 / 质检抽检量">?</span></th>' +
+      '</tr></thead><tbody>' + rows + '</tbody></table></div>');
   }
   if (emps && emps.length) {
     P.push('<h4 class="sub-title">🏆 员工榜单</h4>');

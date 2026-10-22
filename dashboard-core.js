@@ -4,21 +4,6 @@
    ============================================================ */
 'use strict';
 
-/* ---- 工具函数兜底：防止脚本被缓存成旧版导致未定义 ---- */
-if (typeof window._avg !== 'function') {
-  window._avg = function (arr) {
-    if (!arr || !arr.length) return 0;
-    return arr.reduce(function (s, x) { return s + x; }, 0) / arr.length;
-  };
-}
-if (typeof window._med !== 'function') {
-  window._med = function (arr) {
-    if (!arr || !arr.length) return 0;
-    var n = arr.length;
-    return n % 2 ? arr[(n - 1) / 2] : (arr[n / 2 - 1] + arr[n / 2]) / 2;
-  };
-}
-
 /* ==================== 基础工具 ==================== */
 const $  = s => document.querySelector(s);
 const $$ = s => Array.from(document.querySelectorAll(s));
@@ -36,17 +21,17 @@ const S30_THRESHOLD = { '买手合作': 0.97, '博主合作': 0.95 };
 const WEEKDAY_CN = ['日','一','二','三','四','五','六'];
 
 const METRICS = [
-  { key:'caseVolume', label:'CASE处理量', icon:'📊', digits:0, pct:false, better:'up' },
-  { key:'cpd', label:'CPD', icon:'📈', digits:2, pct:false, better:'up' },
-  { key:'aht', label:'AHT', icon:'⏱️', digits:2, pct:false, better:'down' },
-  { key:'concurrency', label:'并发', icon:'🔀', digits:2, pct:false, better:'up' },
-  { key:'utilization', label:'工时利用率', icon:'⚙️', digits:2, pct:true, better:'up' },
-  { key:'solveRate', label:'解决率', icon:'✅', digits:2, pct:true, better:'up' },
-  { key:'satisfaction', label:'满意度', icon:'⭐', digits:2, pct:true, better:'up' },
-  { key:'escalateRate', label:'升级率', icon:'⚠️', digits:2, pct:true, better:'down' },
-  { key:'fcr', label:'FCR', icon:'🔁', digits:2, pct:true, better:'down' },
-  { key:'qualityPassRate', label:'质检合格率', icon:'🎯', digits:2, pct:true, better:'up' },
-  { key:'s30Rate', label:'30S接起率', icon:'📞', digits:2, pct:true, better:'up' },
+  { key:'caseVolume', label:'CASE处理量', icon:'📊', digits:0, pct:false, better:'up', tip:'员工处理的人工服务量总和' },
+  { key:'cpd', label:'CPD', icon:'📈', digits:2, pct:false, better:'up', tip:'CASE处理量 / 出勤天数' },
+  { key:'aht', label:'AHT', icon:'⏱️', digits:2, pct:false, better:'down', tip:'平均处理时长 = CASE处理总时长 / CASE处理量' },
+  { key:'concurrency', label:'并发', icon:'🔀', digits:2, pct:false, better:'up', tip:'CASE处理总时长 / (在线时长 * 60)' },
+  { key:'utilization', label:'工时利用率', icon:'⚙️', digits:2, pct:true, better:'up', tip:'(在线时长 + 后处理时长) / 总登录时长' },
+  { key:'solveRate', label:'解决率', icon:'✅', digits:2, pct:true, better:'up', tip:'已解决量 / 解决评价量' },
+  { key:'satisfaction', label:'满意度', icon:'⭐', digits:2, pct:true, better:'up', tip:'满意量 / 满意评价量' },
+  { key:'escalateRate', label:'升级率', icon:'⚠️', digits:2, pct:true, better:'down', tip:'升级二线工单数 / CASE处理量' },
+  { key:'fcr', label:'FCR', icon:'🔁', digits:2, pct:true, better:'down', tip:'1 - (72H重复进线量 / FCR分母)' },
+  { key:'qualityPassRate', label:'质检合格率', icon:'🎯', digits:2, pct:true, better:'up', tip:'质检合格量 / 质检抽检量' },
+  { key:'s30Rate', label:'30S接起率', icon:'📞', digits:2, pct:true, better:'up', tip:'30S接起量 / 人工服务量' },
 ];
 const METRIC_MAP = Object.fromEntries(METRICS.map(m => [m.key, m]));
 const metricLabel = m => (m.icon ? m.icon + ' ' : '') + m.label;
@@ -62,9 +47,6 @@ const MAP_DEF = {
   business2: { l1:'一级打点', l2:'二级打点', biz:'业务线' },
   buyerSla:   {},
   bloggerSla: {},
-  /* 智能排班：两张特殊 sheet，结构特殊，不走通用字段映射，由专用函数手工解析 */
-  scheduleDraft: {},
-  shiftPeriods:  {},
 };
 const FIELD_LABEL = { name:'姓名', date:'日期', period:'时段', l1:'一级打点', l2:'二级打点', volume:'CASE处理量（人工服务量）', s30Num:'30S接起率-分子', s30Den:'30S接起率-分母', aht:'CASE处理时长（分钟）', solved:'已解决量', solveEval:'解决评价量', satisfy:'满意量', satisfyEval:'满意评价量', escalate:'升级二线工单数', repeat72:'全渠道72H重复进线量（T-3）', fcrDen:'全渠道72HFCR分母（T-3）', online:'在线时长', after:'后处理时长', official:'公务时长', train:'培训时长', mentor:'带教时长', rest:'小休时长（含busy）', meal:'就餐时长', total:'总登录时长（不含就餐）', biz:'业务线', id:'质检对象id', pass:'是否合格' };
 const MAP_TITLE = { buyer:'买手员工数据', blogger:'博主员工数据', inspectionBuyer:'买手员工质检', inspectionBlogger:'博主员工质检', worktime:'工时', business:'业务线映射', business2:'二级打点映射', buyerSla:'买手员工SLA', bloggerSla:'博主员工SLA' };
@@ -155,258 +137,82 @@ function _statOf(arr) {
   const mean = s.reduce((x, y) => x + y, 0) / n;
   const median = n % 2 ? s[(n - 1) / 2] : (s[n / 2 - 1] + s[n / 2]) / 2;
   const q = p => s[Math.min(n - 1, Math.max(0, Math.round((n - 1) * p)))];
-  /* ★ 截尾均值（10%）：剔除最高/最低 10% 后求均值，降低极端值影响 */
-  const k = Math.floor(n * 0.1);
-  const core = (k > 0 && n - 2 * k > 0) ? s.slice(k, n - k) : s;
-  const trimmedMean = core.length ? core.reduce((a, b) => a + b, 0) / core.length : mean;
-  return { mean, median, trimmedMean, min: s[0], max: s[n - 1], p10: q(0.1), p90: q(0.9), n };
-}
-
-/* 从 dailyStats 里筛出同星期几、非异常日的总量数组 */
-function _sameDowTotals(dailyStats, weekday, outlierDates) {
-  const out = [];
-  for (const d of dailyStats) {
-    if (outlierDates && outlierDates.has(d.date)) continue;
-    const wd = new Date(d.date + 'T00:00:00Z').getUTCDay();
-    if (wd === weekday) out.push(d.total);
-  }
-  return out.sort((a, b) => a - b);
-}
-
-/* 从 dailyStats 里筛出同类型（工作日/周末）、非异常日的总量数组 */
-function _sameTypeTotals(dailyStats, isWeekend, outlierDates) {
-  const out = [];
-  for (const d of dailyStats) {
-    if (outlierDates && outlierDates.has(d.date)) continue;
-    if (d.isWeekend === isWeekend) out.push(d.total);
-  }
-  return out.sort((a, b) => a - b);
-}
-
-/* 中位数 */
-function _med(arr) {
-  if (!arr || !arr.length) return 0;
-  const n = arr.length;
-  return n % 2 ? arr[(n - 1) / 2] : (arr[n / 2 - 1] + arr[n / 2]) / 2;
-}
-
-/* 均值 */
-function _avg(arr) {
-  if (!arr || !arr.length) return 0;
-  return arr.reduce((s, x) => s + x, 0) / arr.length;
+  return { mean, median, min: s[0], max: s[n - 1], p10: q(0.1), p90: q(0.9), n };
 }
 
 /**
- * 日总量预测（排班安全版）
- *
- * 设计原则：宁可高估不可低估 —— 排班少人会导致接起率暴跌，多人只是成本略增。
- *
- * 决策链：
- *  ① 博主特殊日（25/28）→ 特殊日历史中位数 × 1.10
- *  ② 锚点 = max(同星期几加权均值, 同星期几 P60 分位数)
- *     - 同星期几样本 ≥ 2 → 用同星期几
- *     - 否则 → 同类型（工作日/周末）
- *     - 再否则 → 全样本
- *  ③ 趋势修正：7 天 + 14 天双窗口，上限 ±35%；
- *     负趋势只吃 50%（防误判下滑导致排班不足）；
- *     外推越远修正越弱（horizon=0 → 100%，horizon=14 → 0%）
- *  ④ 回归叠加：R² ≥ 0.5 才给权重（.5/0.4/0.3/0.15/0），
- *     结果硬约束到锚点 0.7~1.3 倍
- *  ⑤ 排班 buffer：最终值 × 1.10
- *  ⑥ 硬 clamp：同类型历史 [P10×0.85, max×1.30]
+ * 日总量预测（R² 加权混合 + 历史锚点 + 区间约束 + 外推衰减）
+ * - 特殊日（博主 25/28）：直接用历史中位数
+ * - 普通日：regrPred 与历史同类型中位数按 R² 混合
+ * - R² 权重：>=0.70 → 70%；0.50~0.70 → 50%；0.30~0.50 → 30%；<0.30 → 0%（纯中位数）
+ * - 外推超过样本末 7 天后，回归权重线性衰减（最低 20%）
+ * - 结果 clamp 到历史同类型 [p10*0.7, p90*1.3]
  */
 function _predictDailyTotal(stats, date, useWeekend, specialKind, biz) {
-  if (!stats || !stats.dailyStats || !stats.dailyStats.length) return null;
+  if (!stats) return null;
 
-  const outlierDates = new Set(
-    (stats.diagnostic && stats.diagnostic.outlierDates) || []
-  );
-
-  /* ① 博主特殊日：以「历史 25/28 日的量级」为锚点
-        · n >= 3 时：median × 0.6 + mean × 0.4（避免单日异常主导）
-        · n <  3 时：直接用 median */
+  /* ① 特殊日优先 */
   if (specialKind != null && stats.specialTotals) {
     const st = stats.specialTotals[String(specialKind)];
     if (st && st.n >= 1) {
-      /* ★ 特殊日样本少（2~5 天），用 median 为主；
-           原 mean 换 trimmedMean，权重从 0.4 降到 0.3，降低单日尖峰影响 */
-      const anchor = (st.n >= 3 && isFinite(st.trimmedMean))
-        ? (st.median * 0.7 + st.trimmedMean * 0.3)
-        : st.median;
-      return { value: Math.round(anchor * 1.10), source: 'special' };
+      return { value: Math.round(st.median), source: 'special' };
     }
   }
 
-  const latest = stats.sampleRange.end;
-  const horizon = Math.max(0, _dateDiffDays(latest, date));
+  /* ② 取历史同类型统计；样本不足回退到 all */
+  const ts = stats.totalStats || {};
+  const typeStat = useWeekend ? ts.weekend : ts.weekday;
+  const fallbackStat = ts.all;
+  let hist = null;
+  if (typeStat && typeStat.n >= 3) hist = typeStat;
+  else if (fallbackStat && fallbackStat.n >= 2) hist = fallbackStat;
+  else hist = typeStat || fallbackStat;
+  if (!hist || hist.n < 1) return null;
 
-  /* ② 锚点 */
-  const dow = new Date(date + 'T00:00:00Z').getUTCDay();
-  const dowRows = stats.dailyStats
-    .filter(d => !outlierDates.has(d.date))
-    .filter(d => new Date(d.date + 'T00:00:00Z').getUTCDay() === dow)
-    .sort((a, b) => b.date.localeCompare(a.date));
+  /* ③ 回归选择（工作日 / 周末，样本不足回退到 all） */
+  const regrW = stats.totalRegression && stats.totalRegression.weekend;
+  const regrD = stats.totalRegression && stats.totalRegression.weekday;
+  const regrAll = stats.totalRegression && stats.totalRegression.all;
+  const primary = useWeekend ? regrW : regrD;
+  const useRegr = (primary && primary.n >= 3 && isFinite(primary.slope) && isFinite(primary.intercept))
+    ? primary
+    : ((regrAll && regrAll.n >= 3 && isFinite(regrAll.slope) && isFinite(regrAll.intercept)) ? regrAll : null);
 
-  const typeRows = stats.dailyStats
-    .filter(d => !outlierDates.has(d.date))
-    .filter(d => d.isWeekend === useWeekend)
-    .sort((a, b) => b.date.localeCompare(a.date));
-
-  const allRows = stats.dailyStats
-    .filter(d => !outlierDates.has(d.date))
-    .sort((a, b) => b.date.localeCompare(a.date));
-
-  const quantile = (rows, q) => {
-    if (!rows.length) return 0;
-    const vals = rows.map(d => d.total).sort((a, b) => a - b);
-    const n = vals.length;
-    const pos = (n - 1) * q;
-    const lo = Math.floor(pos), hi = Math.ceil(pos);
-    if (lo === hi) return vals[lo];
-    return vals[lo] + (vals[hi] - vals[lo]) * (pos - lo);
-  };
-
-  const WEIGHTS = [5, 3, 2, 1.5, 1, 1, 1, 1, 1, 1];
-  const _quantileVals = (vals, q) => {
-    if (!vals.length) return 0;
-    const s = vals.slice().sort((a, b) => a - b);
-    const pos = (s.length - 1) * q;
-    const lo = Math.floor(pos), hi = Math.ceil(pos);
-    return lo === hi ? s[lo] : s[lo] + (s[hi] - s[lo]) * (pos - lo);
-  };
-  const wAvg = (rows, cap) => {
-    if (!rows.length) return 0;
-    const limit = Math.min(rows.length, cap || 10);
-    const slice = rows.slice(0, limit);
-    let vals = slice.map(r => r.total);
-    /* ★ winsorize 到 [P10, P90]（样本 ≥5 时生效），防止单日尖峰主导加权均值 */
-    if (vals.length >= 5) {
-      const p10 = _quantileVals(vals, 0.10);
-      const p90 = _quantileVals(vals, 0.90);
-      vals = vals.map(v => Math.min(p90, Math.max(p10, v)));
-    }
-    let wSum = 0, vSum = 0;
-    for (let i = 0; i < vals.length; i++) {
-      const w = WEIGHTS[i] || 1;
-      wSum += w;
-      vSum += vals[i] * w;
-    }
-    return wSum > 0 ? vSum / wSum : 0;
-  };
-
-  let anchor = 0;
-  if (dowRows.length >= 2) {
-    anchor = Math.max(wAvg(dowRows, 6), quantile(dowRows, 0.60));
-  } else if (typeRows.length >= 3) {
-    anchor = Math.max(wAvg(typeRows, 10), quantile(typeRows, 0.60));
-  } else if (allRows.length >= 1) {
-    anchor = Math.max(wAvg(allRows, 10), quantile(allRows, 0.60));
-  }
-  if (!(anchor > 0)) return null;
-
-  /* ③ 趋势 */
-  const c1 = dateAdd(latest, -6);
-  const c2 = dateAdd(latest, -13);
-  const c3 = dateAdd(latest, -27);
-
-  const recent7  = stats.dailyStats.filter(d => d.date >= c1 && !outlierDates.has(d.date)).map(d => d.total);
-  const prev7    = stats.dailyStats.filter(d => d.date >= c2 && d.date < c1 && !outlierDates.has(d.date)).map(d => d.total);
-  const recent14 = stats.dailyStats.filter(d => d.date >= c2 && !outlierDates.has(d.date)).map(d => d.total);
-  const prev14   = stats.dailyStats.filter(d => d.date >= c3 && d.date < c2 && !outlierDates.has(d.date)).map(d => d.total);
-
-  const clampTrend = t => {
-    if (t >  0.35) return  0.35;
-    if (t < -0.35) return -0.35;
-    return t;
-  };
-  /* ★ 10% 截尾均值：避免单个极端值把趋势方向拉反 */
-  const _trimmedMean = (arr, trimRatio) => {
-    if (!arr || !arr.length) return 0;
-    const r = trimRatio == null ? 0.1 : trimRatio;
-    if (arr.length <= 2) return arr.reduce((a, b) => a + b, 0) / arr.length;
-    const s = arr.slice().sort((a, b) => a - b);
-    const k = Math.floor(s.length * r);
-    const core = (k > 0 && s.length - 2 * k > 0) ? s.slice(k, s.length - k) : s;
-    return core.reduce((a, b) => a + b, 0) / core.length;
-  };
-
-  let trend = 0, trendParts = 0;
-  if (recent7.length >= 3 && prev7.length >= 3) {
-    const p7 = _trimmedMean(prev7);
-    if (p7 > 0) { trend += clampTrend((_trimmedMean(recent7) - p7) / p7) * 0.6; trendParts += 0.6; }
-  }
-  if (recent14.length >= 5 && prev14.length >= 5) {
-    const p14 = _trimmedMean(prev14);
-    if (p14 > 0) { trend += clampTrend((_trimmedMean(recent14) - p14) / p14) * 0.4; trendParts += 0.4; }
-  }
-  if (trendParts > 0) trend = trend / trendParts;
-  else trend = 0;
-
-  /* 负趋势只吃 50%，防排班不足 */
-  if (trend < 0) trend *= 0.5;
-
-  const trendWeight = horizon <= 7
-    ? (1 - horizon * 0.08)
-    : Math.max(0, 0.44 * (1 - (horizon - 7) / 14));
-  const trendFactor = 1 + trend * trendWeight;
-
-  let pred = anchor * trendFactor;
+  let pred = hist.median;
   let source = 'history';
 
-  /* ④ 回归叠加 */
-  if (horizon <= 14) {
-    const regrW   = stats.totalRegression && stats.totalRegression.weekend;
-    const regrD   = stats.totalRegression && stats.totalRegression.weekday;
-    const regrAll = stats.totalRegression && stats.totalRegression.all;
-    const primary = useWeekend ? regrW : regrD;
-    const useRegr = (primary && primary.n >= 5 && isFinite(primary.slope) && isFinite(primary.intercept))
-      ? primary
-      : ((regrAll && regrAll.n >= 5 && isFinite(regrAll.slope) && isFinite(regrAll.intercept)) ? regrAll : null);
+  if (useRegr) {
+    const x = _dateDiffDays(stats.sampleRange.start, date);
+    const regrPred = useRegr.slope * x + useRegr.intercept;
+    const r2 = Number(useRegr.r2) || 0;
 
-    if (useRegr) {
-      const r2 = Number(useRegr.r2) || 0;
-      let wRegr = 0;
-      if      (r2 >= 0.70) wRegr = 0.50;
-      else if (r2 >= 0.60) wRegr = 0.40;
-      else if (r2 >= 0.50) wRegr = 0.30;
-      else if (r2 >= 0.40) wRegr = 0.15;
-      else                 wRegr = 0.00;
+    let wRegr;
+    if      (r2 >= 0.70) wRegr = 0.70;
+    else if (r2 >= 0.50) wRegr = 0.50;
+    else if (r2 >= 0.30) wRegr = 0.30;
+    else                 wRegr = 0.00;
 
-      if (horizon > 7) wRegr *= 0.5;
+    const lastX = _dateDiffDays(stats.sampleRange.start, stats.sampleRange.end);
+    const horizon = x - lastX;
+    if (horizon > 7) {
+      const decay = Math.max(0.2, 1 - (horizon - 7) / 30);
+      wRegr *= decay;
+    }
 
-      if (wRegr > 0) {
-        const x = _dateDiffDays(stats.sampleRange.start, date);
-        const regrPred = useRegr.slope * x + useRegr.intercept;
-        if (isFinite(regrPred) && regrPred > 0) {
-          const hardLo = pred * 0.7;
-          const hardHi = pred * 1.3;
-          let capped = regrPred;
-          if (capped < hardLo) capped = hardLo;
-          if (capped > hardHi) capped = hardHi;
-          pred = (1 - wRegr) * pred + wRegr * capped;
-          source = 'regression';
-        }
-      }
+    if (wRegr > 0 && isFinite(regrPred) && regrPred > 0) {
+      pred = wRegr * regrPred + (1 - wRegr) * hist.median;
+      source = 'regression';
+    } else {
+      pred = hist.median;
+      source = 'history';
     }
   }
 
-  /* ⑤ 排班安全 buffer */
-  pred = pred * 1.10;
-
-  /* ⑥ 硬 clamp */
-  const clampSource = (typeRows.length >= 3) ? typeRows : (allRows.length >= 3) ? allRows : null;
-  if (clampSource) {
-    const vals = clampSource.map(d => d.total).sort((a, b) => a - b);
-    const p10 = _quantileVals(vals, 0.10);
-    const p95 = _quantileVals(vals, 0.95);
-    /* ★ 上界从「max×1.30」改为「P95×1.25」：
-         单个历史极值（如大促日）不再把上界撑得过宽，
-         排班安全 buffer 仍保留（×1.10 已在下一步，这里是 clamp 上界） */
-    const lo = p10 * 0.85;
-    const hi = p95 * 1.25;
-    if (pred < lo) pred = lo;
-    if (pred > hi) pred = hi;
-  }
+  /* ④ 合理性约束：clamp 到历史同类型区间 */
+  const lo = Math.max(0, (hist.p10 != null ? hist.p10 : hist.min) * 0.7);
+  const hi = (hist.p90 != null ? hist.p90 : hist.max) * 1.3;
+  if (isFinite(lo) && pred < lo) pred = lo;
+  if (isFinite(hi) && pred > hi) pred = hi;
 
   return { value: Math.round(pred), source };
 }
@@ -484,25 +290,8 @@ async function initHolidayData() {
     ? 'API（' + years.join('/') + '，共 ' + total + ' 条）'
     : '内置（API 不可用）';
 
-  /* ★ 并行加载 timor 三倍日（写入 S.scTripleDates） */
-  try {
-    await initTimorTripleDays();
-  } catch (e) {
-    console.warn('[timor API] 初始化失败：', e);
-  }
-
   if (typeof renderForecastResult === 'function') { try { renderForecastResult(); } catch (_) {} }
   if (typeof renderForecastConfig === 'function') { try { renderForecastConfig(); } catch (_) {} }
-
-  /* 三倍日数据已就绪 → 若排班页当前可见，刷新网格以显示「三倍」标签
-     （加 _cnHolidayVersion 守卫：避免 renderScTripleGrid → initHolidayData → renderScTripleGrid 递归） */
-  if (typeof renderScTripleGrid === 'function' &&
-      !(typeof _cnHolidayVersion === 'string' && _cnHolidayVersion.indexOf('未加载') >= 0)) {
-    const scView = document.getElementById('view-schedule');
-    if (scView && scView.classList.contains('active')) {
-      try { renderScTripleGrid(); } catch (_) {}
-    }
-  }
 }
 
 const CN_HOLIDAY_FALLBACK = {
@@ -534,84 +323,6 @@ const CN_HOLIDAY_FALLBACK = {
   '2026-10-04': 'holiday', '2026-10-05': 'holiday', '2026-10-06': 'holiday',
   '2026-10-07': 'holiday'
 };
-
-/* ====================================================================
-   timor.tech 免费节假日 API —— 提供 wage 字段（1=调休 2=双休 3=三倍）
-   接口文档：https://timor.tech/api/holiday
-   ==================================================================== */
-const TIMOR_API_BASE = 'https://timor.tech/api/holiday';
-const TIMOR_TRIPLE_CACHE_KEY = 'creator_timor_triple_cache';
-const TIMOR_CACHE_DAYS = 7;
-
-/* 从 timor 年度接口提取 wage=3 的日期集合 */
-async function loadTimorTripleDays(year) {
-  const url = TIMOR_API_BASE + '/year/' + year + '/';
-  try {
-    const resp = await fetch(url, { cache: 'no-cache' });
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
-    const json = await resp.json();
-    if (json.code !== 0) throw new Error('API code=' + json.code);
-    const tripleDays = new Set();
-    const holiday = json.holiday || {};
-    for (const key in holiday) {
-      const item = holiday[key];
-      if (item && item.wage === 3 && item.date) tripleDays.add(item.date);
-    }
-    return tripleDays;
-  } catch (e) {
-    console.warn('[timor API] ' + year + ' 年拉取失败：', e.message);
-    return null;
-  }
-}
-
-/* 加载多年三倍日，带 localStorage 缓存（7 天有效） */
-async function initTimorTripleDays() {
-  if (!S || !S.scTripleDates) {
-    console.warn('[timor API] S.scTripleDates 尚未初始化，跳过');
-    return;
-  }
-  const now = new Date();
-  const years = [now.getFullYear() - 1, now.getFullYear(), now.getFullYear() + 1];
-
-  /* 1. 先读缓存 */
-  let cache = null;
-  try {
-    const raw = localStorage.getItem(TIMOR_TRIPLE_CACHE_KEY);
-    if (raw) {
-      const c = JSON.parse(raw);
-      const ageDays = (Date.now() - c.timestamp) / 86400000;
-      if (ageDays <= TIMOR_CACHE_DAYS && c.data) cache = c.data;
-    }
-  } catch (_) {}
-
-  /* 2. 缓存命中 → 直接写入 S.scTripleDates */
-  if (cache) {
-    for (const y of years) {
-      if (cache[y]) cache[y].forEach(d => S.scTripleDates.add(d));
-    }
-    console.log('[timor API] 使用缓存，三倍日 ' + S.scTripleDates.size + ' 天');
-    return;
-  }
-
-  /* 3. 缓存未命中 → 拉取 */
-  const result = {};
-  const fetched = await Promise.all(years.map(y => loadTimorTripleDays(y)));
-  years.forEach((y, i) => { if (fetched[i]) result[y] = Array.from(fetched[i]); });
-
-  const total = Object.values(result).reduce((s, arr) => s + arr.length, 0);
-  if (total > 0) {
-    for (const y of years) {
-      if (result[y]) result[y].forEach(d => S.scTripleDates.add(d));
-    }
-    try {
-      localStorage.setItem(TIMOR_TRIPLE_CACHE_KEY, JSON.stringify({ timestamp: Date.now(), data: result }));
-    } catch (_) {}
-    console.log('[timor API] 已加载三倍日 ' + total + ' 天');
-  } else {
-    console.warn('[timor API] 未获取到三倍日数据，回退到 holiday-cn 兜底');
-  }
-}
-
 function getHolidayMap() {
   if (_cnHolidayMap && Object.keys(_cnHolidayMap).length > 0) return _cnHolidayMap;
   return CN_HOLIDAY_FALLBACK;
@@ -657,11 +368,11 @@ const S = {
   roster:[], records:[], wtRecords:[], inspections:[],
   slaBuyer:[], slaBlogger:[],
   businessMap:{}, business2Map:{},
-  shiftMap:{}, shiftAttn:{}, shiftColor:{}, schedule:{}, scheduleDates:[],
+  shiftMap:{}, schedule:{}, scheduleDates:[],
   month:'', latestDate:'', latestWK:0, hidden:false,
   attOverride:{}, personSel:new Set(),
   teamSel:{ group:new Set(), batch:new Set(), category:new Set() },
-  s30Dates:new Set(), s30ShowSummary:false, s30MonthOpen:new Set(),
+  s30Dates:new Set(), s30ShowSummary:true, s30MonthOpen:new Set(),
   s30MonthInitialized:false,
   unknownShifts:new Set(),
   expandedRows:new Set(),
@@ -669,44 +380,7 @@ const S = {
   volumeForecast:{},
   forecastInputs:{},
   forecastHolidays:new Set(),
-  forecastWorkdays:new Set(),
-  /* ==================== 智能排班 ==================== */
-  scheduleDraft:  [],   // [{name, date, shift, requestText}]
-  shiftPeriods:   {},   // {shift: {'9':60, '10':0, ...}}   只在分钟数>0 时写入，缺省=0
-  shiftMeta:      {},   // {shift: {totalMin, restDays, startTime, endTime, mealTime}}
-  scheduleCycle:  { start:'', end:'', reqStart:'', reqEnd:'' },
-  scCycleLocked:  false,          // ★ 用户是否手动改过排班周期
-  scBizState:     '买手合作',     // ★ 当前正在配置的业务线
-  shiftPoolByBiz: { '买手合作': [], '博主合作': [] },  // ★ 按业务线独立保存的班次池
-  shiftPool:      [],   // 兼容字段：始终指向 shiftPoolByBiz[scBizState]（见下方 IIFE 初始化）
-  shiftReqs:      {},   // 旧结构，保留兼容；新逻辑用 shiftReqRules
-  shiftReqRules:  { '买手合作': [], '博主合作': [] },  // ★ 新结构：规则列表（见下方注释）
-  /*
-    shiftReqRules[biz] = [
-      { dates: ['2026-10-12', ...],   // 生效日期
-        shifts: ['B1','B2', ...],      // 限制班次
-        max: 3 | null,                 // 每天最多人数；null = 无限制
-        confirmed: false }             // 是否已点"确认"（仅影响警告条显示）
-    ]
-  */
-  employeeCPH:    {},   // {name: {'9':cph, '10':cph, ...}}
-  employeeCPHAuto: {},   // 默认自动 CPH（供 CPH 表与「恢复」复位使用） /* 推断 */
-  employeeCPHDaily: {},   // 记录每个员工每天的实际 CPH（当日 CASE / 8） /* 推断 */
-  parsedRequests: {},   // {name: {items:[{type, target_shift, target_shifts, target_person, raw, confidence}], error}}
-  holidayQuota:   {},   // {name: {base:null, tripleDays, used, remain, total|null}}
-  /* 智能排班 · 前置排班表 & 月度休假规则 */
-  scShowStats:    true,          // 是否显示统计列
-  scCollapseHist: false,         // 是否折叠历史列（周期起始日之前）
-  scTripleDates:  new Set(),     // 用户勾选的三倍工资日
-  scHolidayRules: [              // 三倍天数 → 可休天数 规则
-    { enabled: true, triple: 3, rest: 6 },
-    { enabled: true, triple: 2, rest: 6 },
-    { enabled: true, triple: 1, rest: 7 },
-    { enabled: true, triple: 0, rest: 7 },
-  ],
-  scGridSel: { startR: -1, startC: -1, endR: -1, endC: -1 },  // 拖拽选区
-  scheduleResult: [],   // [{date, name, shift, biz}]
-  scheduleDiag:   {}    // 算法诊断信息
+  forecastWorkdays:new Set()
 };
 
 /* ==================== 格式化工具 ==================== */
@@ -778,9 +452,6 @@ function toast(msg) {
 /* ==================== 工作表识别 ==================== */
 function identify(name) {
   const n = String(name);
-  /* 智能排班：必须放在通用规则之前——否则「班次时段」会被 /班次/ 截胡、「排班草稿」会被 /班表|排班/ 截胡 */
-  if (/排班草稿|排班诉求|草稿.*诉求/.test(n))   return 'scheduleDraft';
-  if (/班次时段|班次.*分钟|时段表/.test(n))     return 'shiftPeriods';
   if (/^预测量$|预测总量|日度总量表|volumeForecast/i.test(n)) return 'volumeForecast';
   if (/花名册|名单|员工表|人员表|人员信息/.test(n)) return 'roster';
   if (/班次/.test(n)) return 'shift';
@@ -865,9 +536,8 @@ async function handleFile(file) {
     }
   } catch (err) {
     console.error(err);
-    const stage = (S.records.length === 0 && S.roster.length === 0) ? '解析' : '渲染';
-    setProgress(0, '❌ ' + stage + '失败：' + err.message);
-    alert(stage + '失败：' + err.message + '\n\n（如为渲染失败，数据其实已导入成功，可强制刷新页面 Cmd/Ctrl+Shift+R 重试）');
+    setProgress(0, '❌ ' + err.message);
+    alert('解析失败：' + err.message);
   }
 }
 function parseCSV(text) {
@@ -1047,10 +717,8 @@ function parseVolumeSheet() {
 }
 function parseDateFlexible(v, refYear, refMonth) {
   if (v === '' || v == null) return '';
-  if (typeof v === 'number') return parseDate(v);
   const s = String(v).trim();
   if (!s) return '';
-  if (/^\d{5}(\.\d+)?$/.test(s)) return parseDate(parseFloat(s));
   let m = /^(\d{4})[\/\-年.](\d{1,2})[\/\-月.](\d{1,2})/.exec(s);
   if (m) return m[1]+'-'+pad2(m[2])+'-'+pad2(m[3]);
   m = /^(\d{1,2})[\/\-月.](\d{1,2})/.exec(s);
@@ -1064,326 +732,6 @@ function parseDateFlexible(v, refYear, refMonth) {
   return parseDate(s);
 }
 
-/* ==================== 智能排班 · sheet 解析 ==================== */
-/* 「排班草稿及诉求」：第 1 行 B 列起为日期；第 2 行起每行一个员工，
-   A 列 = 姓名，日期列 = 当日班次，含「诉求」的列 = 诉求文本（只在首条挂载一次） */
-function parseScheduleDraftSheet() {
-  S.scheduleDraft = [];
-  const sheet = S.sheets.scheduleDraft;
-  if (!sheet) return;
-  const rows = sheet.rows || [];
-  if (rows.length < 2) return;
-  const refYear  = S.latestDate ? parseInt(S.latestDate.slice(0, 4), 10) : new Date().getFullYear();
-  const refMonth = S.latestDate ? parseInt(S.latestDate.slice(5, 7), 10) : (new Date().getMonth() + 1);
-
-  /* 第 1 行：从 B 列起扫描日期 */
-  const head = rows[0] || [];
-  const dateCols = [];
-  for (let c = 1; c < head.length; c++) {
-    const d = parseDateFlexible(head[c], refYear, refMonth);
-    if (d) dateCols.push({ idx: c, date: d });
-  }
-  if (!dateCols.length) return;
-
-  /* 诉求列：优先取表头含「诉求」的最后一列，否则取最后一个有内容的非日期列兜底 */
-  let reqCol = -1;
-  const isDateCol = c => dateCols.some(dc => dc.idx === c);
-  for (let c = head.length - 1; c > 0; c--) {
-    if (isDateCol(c)) continue;
-    if (/诉求/.test(String(head[c] || ''))) { reqCol = c; break; }
-  }
-  if (reqCol < 0) {
-    for (let c = head.length - 1; c > 0; c--) {
-      if (isDateCol(c)) continue;
-      const hasText = rows.slice(1, Math.min(rows.length, 6)).some(r => String((r || [])[c] || '').trim());
-      if (hasText) { reqCol = c; break; }
-    }
-  }
-
-  const reqByName = {};
-  for (let r = 1; r < rows.length; r++) {
-    const row = rows[r] || [];
-    const name = String(row[0] || '').trim();
-    if (!name) continue;
-    if (reqCol >= 0) {
-      const t = String(row[reqCol] || '').trim();
-      if (t && reqByName[name] == null) reqByName[name] = t;
-    }
-    for (const dc of dateCols) {
-      const shift = String(row[dc.idx] || '').trim();
-      if (!shift) continue;
-      S.scheduleDraft.push({ name, date: dc.date, shift, requestText: '' });
-    }
-  }
-  /* 诉求文本只在每位员工的首条记录上挂载一次 */
-  for (const rec of S.scheduleDraft) {
-    if (reqByName[rec.name]) { rec.requestText = reqByName[rec.name]; delete reqByName[rec.name]; }
-  }
-}
-
-/* 「班次时段」sheet：A 列 = 班次名；B–P 列(idx1-15) = 9–23 时分钟数；
-   Q 列 = 总计；R 列 = 休；S/T/U = 上班/下班/就餐时间。
-   ★ 从 sheet 派生 isWorking / isLate / color，代码侧不再硬编码班次名。 */
-function parseShiftPeriodsSheet() {
-  S.shiftPeriods = {};
-  S.shiftMeta = {};
-  const sheet = S.sheets.shiftPeriods;
-  if (!sheet) return;
-  const rows = sheet.rows || [];
-  const colors = sheet.cellColors || [];
-  if (!rows.length) return;
-
-  const head = rows[0] || [];
-  const findCol = (re, fallback) => {
-    for (let i = 0; i < head.length; i++) {
-      if (re.test(String(head[i] || '').trim())) return i;
-    }
-    return fallback;
-  };
-  const idxTotal = findCol(/^总计$/, 16);
-  const idxRest  = findCol(/^休$/, 17);
-  const idxStart = findCol(/上班时间/, 18);
-  const idxEnd   = findCol(/下班时间/, 19);
-  const idxMeal  = findCol(/就餐时间/, 20);
-  /* ★ 新增：出勤计数（V 列，用于三倍判定）
-           人力计数（W 列，用于 CPD 分母） */
-  const idxAttn    = findCol(/出勤计数/, 21);
-  const idxManpower = findCol(/人力计数/, 22);
-
-  for (let r = 1; r < rows.length; r++) {
-    const row = rows[r] || [];
-    const shift = String(row[0] || '').trim();
-    if (!shift) continue;
-
-    const periods = {};
-    let sumMin = 0;
-    for (let i = 1; i <= 15; i++) {
-      const m = num(row[i]);
-      if (m > 0) { periods[String(i + 8)] = m; sumMin += m; }
-    }
-    S.shiftPeriods[shift] = periods;
-
-    /* ★ 色值：优先 A 列，其次该行任意有颜色的单元格 */
-    let color = (colors[r] && colors[r][0]) || null;
-    if (!color && colors[r]) {
-      for (let i = 1; i < colors[r].length; i++) {
-        if (colors[r][i]) { color = colors[r][i]; break; }
-      }
-    }
-
-    const rawTotal = num(row[idxTotal]);
-    const effectiveMin = rawTotal > 0 ? rawTotal : sumMin;
-    const restDays = num(row[idxRest]);
-    const startTime = String(row[idxStart] || '').trim();
-    const endTime   = String(row[idxEnd]   || '').trim();
-    const mealTime  = String(row[idxMeal]  || '').trim();
-
-    const isWorking = effectiveMin > 0;
-
-    let isLate = false;
-    const eM = /^(\d{1,2}):/.exec(endTime);
-    if (eM) {
-      const h = parseInt(eM[1], 10);
-      isLate = (h >= 22) || (h === 0);
-    }
-
-    let startHour = null;
-    const sM = /^(\d{1,2}):/.exec(startTime);
-    if (sM) startHour = parseInt(sM[1], 10);
-
-    /* ★ 出勤计数（V 列）→ 三倍判定的权威依据
-       人力计数（W 列）→ CPD 分母的权威依据
-       两者独立于「总计」，即使总计 > 0 也允许「出勤计数 = 0」
-       （例如某种特殊班次上工时为零/不计出勤）。 */
-    const attn     = num(row[idxAttn]);
-    const manpower = num(row[idxManpower]);
-
-    S.shiftMeta[shift] = {
-      totalMin: effectiveMin,
-      restDays: restDays > 0 ? restDays : 0,
-      startTime, endTime, mealTime,
-      isWorking, isLate, startHour,
-      color: color || null,
-      /* ★ 一并写入 meta，便于后续统一读取 */
-      attn,
-      manpower,
-    };
-
-    /* ★ 同步填充全局映射（CPD / 三倍 走这两个字段） */
-    S.shiftAttn[shift] = attn;
-    S.shiftMap[shift]  = manpower;
-    if (color) S.shiftColor[shift] = color;
-  }
-}
-
-/* ============================================================
-   员工 CPH（排班用产能预测值）
-   口径：日 CPD = 当日 CASE 总量；CPH = CPD / 8
-   算法：取该员工历史「日 CPD 最高的三天」，求平均后 / 8
-        - 无任何 CASE 记录 → calcPeerAvgCPH 兜底
-        - 样本不足三天 → 用所有可用样本
-   ============================================================ */
-function calcEmployeeCPH(name, alpha) {
-  alpha = alpha || 1.0;
-  const out = {};
-
-  /* 1. 按日聚合 CASE */
-  const dayVol = new Map();
-  for (const r of S.records) {
-    if (r.name !== name || !r.date) continue;
-    dayVol.set(r.date, (dayVol.get(r.date) || 0) + (r.volume || 0));
-  }
-
-  /* 2. 每日 CPD 列表（volume > 0 才算一天） */
-  const dailies = [];
-  for (const [date, v] of dayVol.entries()) {
-    if (v > 0) dailies.push({ date, cpd: v });
-  }
-
-  /* 3. 无数据兜底 */
-  if (!dailies.length) {
-    const peer = calcPeerAvgCPH(name);
-    for (const h of PREDICT_PERIODS) out[h] = Math.max(0, peer * alpha);
-    return out;
-  }
-
-  /* ★ 4. MAX 前三 CPD → 平均 CPD → CPH = avgCpd / 8 */
-  dailies.sort((a, b) => b.cpd - a.cpd);
-  const top3 = dailies.slice(0, 3);
-  const avgCpd = top3.reduce((s, x) => s + x.cpd, 0) / top3.length;
-  const value = Math.max(0, (avgCpd / 8) * alpha);
-
-  for (const h of PREDICT_PERIODS) out[h] = value;
-  return out;
-}
-
-
-
-function quantileArr(arr, q) {
-  if (!arr.length) return 0;
-  const s = arr.slice().sort((a, b) => a - b);
-  const pos = (s.length - 1) * q;
-  const lo = Math.floor(pos), hi = Math.ceil(pos);
-  return lo === hi ? s[lo] : s[lo] + (s[hi] - s[lo]) * (pos - lo);
-}
-
-function calcPeerAvgCPH(name) {
-  const me = getEmp(name);
-  const sameGroup = n => {
-    if (!me) return true;
-    const e = getEmp(n);
-    return !!e && e.biz === me.biz && categoryOf(e, S.month) === categoryOf(me, S.month);
-  };
-
-  const map = new Map();   // name|date → volume
-  for (const r of S.records) {
-    if (!r.name || r.name === name || !sameGroup(r.name) || !r.date) continue;
-    const k = r.name + '|' + r.date;
-    map.set(k, (map.get(k) || 0) + (r.volume || 0));
-  }
-
-  const arr = [];
-  for (const v of map.values()) {
-    if (v < 8) continue;
-    arr.push(v / 8);
-  }
-  if (!arr.length) return 0;
-
-  const sorted = arr.slice().sort((a, b) => a - b);
-  if (sorted.length >= 8) {
-    const q1 = sorted[Math.floor(sorted.length * 0.25)];
-    const q3 = sorted[Math.floor(sorted.length * 0.75)];
-    const iqr = q3 - q1;
-    const lo = q1 - 1.5 * iqr, hi = q3 + 1.5 * iqr;
-    const trimmed = sorted.filter(v => v >= lo && v <= hi);
-    return quantileArr(trimmed, 0.75);
-  }
-  return quantileArr(sorted, 0.75);
-}
-
-/* ============================================================
-   CPH 手动覆盖值持久化
-   localStorage['creator_sc_cph_manual'] = { "姓名": 数字, ... }
-   ============================================================ */
-const SC_CPH_MANUAL_KEY = 'creator_sc_cph_manual';
-
-function scLoadCphManual() {
-  try {
-    const raw = localStorage.getItem(SC_CPH_MANUAL_KEY);
-    if (!raw) return {};
-    const obj = JSON.parse(raw);
-    return (obj && typeof obj === 'object') ? obj : {};
-  } catch (_) { return {}; }
-}
-function scSaveCphManual(map) {
-  try { localStorage.setItem(SC_CPH_MANUAL_KEY, JSON.stringify(map || {})); } catch (_) {}
-}
-
-/* 遍历所有参与员工，产出全员 CPH 表
-   ★ 若 localStorage 里有该员工的手动值 → 直接覆盖到 S.employeeCPH */
-function calcAllEmployeeCPH() {
-  const alpha = 1.0;
-  S.employeeCPH = {};
-  S.employeeCPHAuto = {};
-  S.employeeCPHDaily = {};
-
-  const manual = scLoadCphManual();
-
-  /* ★ 新增：缓存每位员工的「日 CPD 最高的三天」明细 */
-  S.employeeCphTop3 = {};
-
-  for (const e of scActiveEmployees()) {
-    /* 自动值（算法） */
-    const v = calcEmployeeCPH(e.name, alpha);
-    S.employeeCPHAuto[e.name] = Object.assign({}, v);
-
-    /* ★ 计算 TOP3 明细：与 calcEmployeeCPH 内部逻辑保持一致的「日 CPD 最高的三天」 */
-    (function computeTop3() {
-      const dayVol = new Map();
-      for (const r of S.records) {
-        if (r.name !== e.name || !r.date) continue;
-        dayVol.set(r.date, (dayVol.get(r.date) || 0) + (r.volume || 0));
-      }
-      const dailies = [];
-      for (const [date, vol] of dayVol.entries()) {
-        if (vol > 0) dailies.push({ date, cpd: vol });
-      }
-      dailies.sort((a, b) => b.cpd - a.cpd);
-      const top3 = dailies.slice(0, 3).map(x => ({
-        date: x.date,
-        cpd: x.cpd,
-        cph: x.cpd / 8
-      }));
-      S.employeeCphTop3[e.name] = top3;
-    })();
-
-    /* 优先应用手动值 */
-    const mv = parseFloat(manual[e.name]);
-    if (isFinite(mv) && mv > 0) {
-      S.employeeCPH[e.name] = {};
-      for (const h of PREDICT_PERIODS) S.employeeCPH[e.name][h] = mv;
-    } else {
-      S.employeeCPH[e.name] = Object.assign({}, v);
-    }
-
-    /* 每日原始 CPH = 当日 CASE / 8（仅统计工作班次日） */
-    const vols = {};
-    for (const r of S.records) {
-      if (r.name !== e.name || !r.date) continue;
-      vols[r.date] = (vols[r.date] || 0) + (r.volume || 0);
-    }
-    const daily = {};
-    for (const d of S.scheduleDraft) {
-      if (d.name !== e.name) continue;
-      if (!scIsWorkingShift(d.shift)) continue;
-      if (!scIsActiveOn(e, d.date)) continue;   // ★
-      const vol = vols[d.date] || 0;
-      if (vol > 0) daily[d.date] = vol / 8;
-    }
-    S.employeeCPHDaily[e.name] = daily;
-  }
-}
-
 /* ==================== SLA 表解析 ==================== */
 function normPctVal(v) { const n = num(v); if (!isFinite(n)) return null; return n > 1 ? n / 100 : n; }
 function parseSlaSheet(kind) {
@@ -1393,26 +741,13 @@ function parseSlaSheet(kind) {
   const cMetric   = headers.findIndex(h => /指标/.test(h));
   const cCategory = headers.findIndex(h => /分类/.test(h));
   if (cMetric < 0 || cCategory < 0) return [];
-
-  const clean = h => String(h == null ? '' : h)
-    .replace(/[\u200B-\u200D\uFEFF\u00A0\u3000]/g, '')
-    .replace(/\s+/g, '').trim();
-
   const monthCols = {};
   headers.forEach((h, i) => {
-    const hh = clean(h);
-    if (!hh) return;
+    const hh = String(h||'').trim();
     let m;
-    if ((m = /^(\d{1,2})月(权重|weight)/i.exec(hh))) { (monthCols[+m[1]] = monthCols[+m[1]] || {}).weight = i; return; }
-    if ((m = /^(\d{1,2})月(目标|target)/i.exec(hh))) { (monthCols[+m[1]] = monthCols[+m[1]] || {}).target = i; return; }
-    if ((m = /^(\d{1,2})月(得分|points|score)/i.exec(hh))) { (monthCols[+m[1]] = monthCols[+m[1]] || {}).points = i; return; }
-    if ((m = /^(\d{1,2})月$/.exec(hh))) {
-      const mo = +m[1];
-      monthCols[mo] = monthCols[mo] || {};
-      if (monthCols[mo].weight == null) monthCols[mo].weight = i + 1;
-      if (monthCols[mo].target == null) monthCols[mo].target = i + 2;
-      if (monthCols[mo].points == null) monthCols[mo].points = i + 3;
-    }
+    if ((m = /^(\d{1,2})\s*月\s*权重$/.exec(hh))) { (monthCols[parseInt(m[1], 10)] = monthCols[parseInt(m[1], 10)] || {}).weight = i; }
+    else if ((m = /^(\d{1,2})\s*月\s*目标$/.exec(hh))) { (monthCols[parseInt(m[1], 10)] = monthCols[parseInt(m[1], 10)] || {}).target = i; }
+    else if ((m = /^(\d{1,2})\s*月\s*得分$/.exec(hh))) { (monthCols[parseInt(m[1], 10)] = monthCols[parseInt(m[1], 10)] || {}).points = i; }
   });
   const groups = new Map();
   for (let r = 1; r < sheet.rows.length; r++) {
@@ -1456,34 +791,13 @@ function buildAll() {
   S.records = []; S.wtRecords = []; S.inspections = [];
   S.slaBuyer = []; S.slaBlogger = [];
   S.businessMap = {}; S.business2Map = {};
-  S.shiftMap = {}; S.shiftAttn = {}; S.shiftColor = {};
-  S.schedule = {}; S.scheduleDates = [];
+  S.shiftMap = {}; S.schedule = {}; S.scheduleDates = [];
   S.forecastBuyer = {}; S.forecastBlogger = {};
   S.volumeForecast = {};
 
   if (S.sheets.business) { for (const o of rowsToObjs('business')) { const l1 = String(o.l1||'').trim(); const biz = String(o.biz||'').trim(); if (l1 && biz && !S.businessMap[l1]) S.businessMap[l1] = biz; } }
   if (S.sheets.business2) { for (const o of rowsToObjs('business2')) { const l1 = String(o.l1||'').trim(); const l2 = String(o.l2||'').trim(); const biz = String(o.biz||'').trim(); if (l1 && l2 && biz) { const key = l1 + '|' + l2; if (!S.business2Map[key]) S.business2Map[key] = biz; } } }
-  /* ★ 班次 sheet 解析：
-       column A = 班次名
-       column B = 人力计数（用于 CPD 分母：CASE / Σ人力计数）
-       column C = 出勤计数（用于三倍判断：>0 视为出勤）
-       cellColors[ri][0] = column A 的填充色（用于渲染兜底）
-     表头行（"班次"）自动跳过。 */
-  if (S.sheets.shift) {
-    const rows   = S.sheets.shift.rows || [];
-    const colors = S.sheets.shift.cellColors || [];
-    for (let ri = 0; ri < rows.length; ri++) {
-      const row = rows[ri];
-      if (!row) continue;
-      const name = String(row[0] || '').trim();
-      if (!name || name === '班次') continue;
-
-      S.shiftMap[name]  = num(row[1]);          // 人力计数
-      S.shiftAttn[name] = num(row[2]);          // 出勤计数
-      const color = colors[ri] && colors[ri][0];
-      if (color) S.shiftColor[name] = color;
-    }
-  }
+  if (S.sheets.shift) { for (const row of S.sheets.shift.rows) { if (!row) continue; const name = String(row[0]||'').trim(); if (!name || name === '班次') continue; S.shiftMap[name] = num(row[1]); } }
   if (S.sheets.schedule) {
     const rows = S.sheets.schedule.rows;
     if (rows.length) {
@@ -1591,14 +905,6 @@ function buildAll() {
     } else {
       for (let i = 0; i < 3; i++) { const d = dateAdd(S.latestDate, -i); if (d) S.s30Dates.add(d); }
     }
-  }
-
-  /* 智能排班：解析「排班草稿及诉求」与「班次时段」两张 sheet（依赖 latestDate 推断年份） */
-  if (S.sheets.scheduleDraft) {
-    try { parseScheduleDraftSheet(); } catch (e) { console.warn('[scheduleDraft] 解析失败：', e); }
-  }
-  if (S.sheets.shiftPeriods) {
-    try { parseShiftPeriodsSheet(); } catch (e) { console.warn('[shiftPeriods] 解析失败：', e); }
   }
 }
 
@@ -1750,10 +1056,15 @@ function timeCols() {
   return { monthLabel: S.month ? (parseInt(S.month.slice(5,7),10) + '月') : '月度', wks, last7, latest };
 }
 function buildHeaderHTML(cols) {
-  const ths = ['<th>指标</th>', '<th>' + esc(cols.monthLabel) + '</th>'];
-  for (const w of cols.wks) ths.push('<th>WK' + w + '</th>');
-  ths.push('<th>WK' + cols.wks[1] + ' − WK' + cols.wks[0] + '</th>');
-  ths.push('<th>WK' + cols.wks[2] + ' − WK' + cols.wks[1] + '</th>');
+  const ths = [
+    '<th>指标</th>', 
+    '<th>' + esc(cols.monthLabel) + ' <span class="help" data-tip="当前数据最新月份的整月汇总">?</span></th>'
+  ];
+  for (const w of cols.wks) {
+    ths.push('<th>WK' + w + ' <span class="help" data-tip="该自然周的汇总">?</span></th>');
+  }
+  ths.push('<th>WK' + cols.wks[1] + ' − WK' + cols.wks[0] + ' <span class="help" data-tip="本周较上周的环比变化">?</span></th>');
+  ths.push('<th>WK' + cols.wks[2] + ' − WK' + cols.wks[1] + ' <span class="help" data-tip="本周较上周的环比变化">?</span></th>');
   for (const d of cols.last7) ths.push('<th>' + esc(d.slice(5)) + '</th>');
   return ths.join('');
 }
@@ -1795,25 +1106,15 @@ function slaAchieve(src, metricKey, category) {
   return calcBySrc(src, opts)[metricKey];
 }
 function calcSlaScore(metricKey, actual, monthCfg) {
+  if (!monthCfg) return { threshold: null, points: null, achieveRate: null, finalScore: null, hitTierIndex: -1, actualDisp: null, weight: null, isPct: false, belowLowest: false };
   const m = metricKey ? METRIC_MAP[metricKey] : null;
   const isPct = m ? !!m.pct : false;
   const better = m ? m.better : 'up';
-  const actualDisp = (actual == null || !isFinite(actual)) ? null : actual;
-
-  if (!monthCfg) {
-    return { threshold: null, points: null, achieveRate: null, finalScore: null, hitTierIndex: -1, actualDisp: null, weight: null, isPct: false, belowLowest: false };
-  }
-
-  if (!monthCfg.tiers.length) {
+  const actualDisp = actual == null || !isFinite(actual) ? null : actual;
+  if (actualDisp == null || !monthCfg.tiers.length) {
     return { threshold: null, points: null, achieveRate: null, finalScore: null, hitTierIndex: -1, actualDisp, weight: monthCfg.weight, isPct, belowLowest: false };
   }
-
   const target = monthCfg.tiers[0].threshold;
-
-  if (actualDisp == null) {
-    return { threshold: target, points: null, achieveRate: null, finalScore: null, hitTierIndex: -1, actualDisp: null, weight: monthCfg.weight, isPct, belowLowest: false };
-  }
-
   let achieveRate = null;
   if (target != null && target !== 0) {
     if (better === 'down') achieveRate = actualDisp > 0 ? target / actualDisp : null;
@@ -1822,14 +1123,10 @@ function calcSlaScore(metricKey, actual, monthCfg) {
   let hitIdx = -1, points = null;
   if (better === 'down') {
     if (achieveRate != null) {
-      for (let i = 0; i < monthCfg.tiers.length; i++) {
-        if (achieveRate >= monthCfg.tiers[i].threshold) { hitIdx = i; points = monthCfg.tiers[i].points; break; }
-      }
+      for (let i = 0; i < monthCfg.tiers.length; i++) { if (achieveRate >= monthCfg.tiers[i].threshold) { hitIdx = i; points = monthCfg.tiers[i].points; break; } }
     }
   } else {
-    for (let i = 0; i < monthCfg.tiers.length; i++) {
-      if (actualDisp >= monthCfg.tiers[i].threshold) { hitIdx = i; points = monthCfg.tiers[i].points; break; }
-    }
+    for (let i = 0; i < monthCfg.tiers.length; i++) { if (actualDisp >= monthCfg.tiers[i].threshold) { hitIdx = i; points = monthCfg.tiers[i].points; break; } }
   }
   let belowLowest = false;
   if (hitIdx === -1) {
@@ -2097,9 +1394,9 @@ function calcPeriodStats(biz, metricKey, sampleWeeks, refDate) {
     const type = isWeekend ? 'weekend' : 'weekday';
     if (isWeekend) weCount++; else wdCount++;
 
-    totalPointsAll.push({ x, y: d.total, date: d.date });
-    if (isWeekend) totalPointsWeekend.push({ x, y: d.total, date: d.date });
-    else totalPointsWeekday.push({ x, y: d.total, date: d.date });
+    totalPointsAll.push({ x, y: d.total });
+    if (isWeekend) totalPointsWeekend.push({ x, y: d.total });
+    else totalPointsWeekday.push({ x, y: d.total });
 
     for (const p in d.periods) {
       const share = d.periods[p] / d.total;
@@ -2151,39 +1448,6 @@ function calcPeriodStats(biz, metricKey, sampleWeeks, refDate) {
     return emptyReturn();
   }
 
-  /* ★ 极端日识别（MAD 稳健法）——写入 diagnostic.outlierDates
-     - 用 MAD（中位数绝对偏差）识别日总量离群，比 IQR/均值更抗极端值
-     - 阈值 3.5×稳健σ，只剔除明显离群，正常大促保留
-     - 命中的日期会从「锚点 / 趋势 / 回归」计算中剔除，避免单日尖峰主导预测
-     - 博主 25/28 特殊日不参与识别（它们是业务规则，不是异常） */
-  (function detectOutliers() {
-    const specialDates = new Set();
-    if (biz === '博主合作') {
-      for (const k of ['25', '28']) {
-        const sg = specialDayGroups[k];
-        if (sg && sg.dates) for (const d of sg.dates) specialDates.add(d);
-      }
-    }
-    const candidates = dailyStats.filter(d => d.total > 0 && !specialDates.has(d.date));
-    if (candidates.length < 4) { diagnostic.outlierDates = []; return; }
-
-    const vals = candidates.map(d => d.total).sort((a, b) => a - b);
-    const n = vals.length;
-    const median = n % 2 ? vals[(n - 1) / 2] : (vals[n / 2 - 1] + vals[n / 2]) / 2;
-    const devs = vals.map(v => Math.abs(v - median)).sort((a, b) => a - b);
-    const mad = n % 2 ? devs[(n - 1) / 2] : (devs[n / 2 - 1] + devs[n / 2]) / 2;
-    const robustSigma = mad * 1.4826;   /* MAD → 稳健标准差 */
-    if (!(robustSigma > 0)) { diagnostic.outlierDates = []; return; }
-
-    const THRESH = 3.5;
-    const out = [];
-    for (const d of candidates) {
-      const z = Math.abs(d.total - median) / robustSigma;
-      if (z > THRESH) out.push(d.date);
-    }
-    diagnostic.outlierDates = out;
-  })();
-
   /* ---- 总量统计（用于日总量预测锚点与区间约束） ---- */
   const weekdayTotals = [];
   const weekendTotals = [];
@@ -2219,20 +1483,7 @@ function calcPeriodStats(biz, metricKey, sampleWeeks, refDate) {
     }
     return out;
   };
-  const avg = (group) => {
-    const out = {};
-    for (const p in group) {
-      const arr = group[p];
-      if (!arr.length) { out[p] = 0; continue; }
-      if (arr.length <= 2) { out[p] = arr.reduce((s, x) => s + x, 0) / arr.length; continue; }
-      /* ★ 10% 截尾均值：降低单日极端低/高接起率对均值的影响 */
-      const s = arr.slice().sort((a, b) => a - b);
-      const k = Math.floor(s.length * 0.1);
-      const core = k > 0 ? s.slice(k, s.length - k) : s;
-      out[p] = core.length ? core.reduce((a, b) => a + b, 0) / core.length : s[Math.floor(s.length / 2)];
-    }
-    return out;
-  };
+  const avg = (group) => { const out = {}; for (const p in group) { const arr = group[p]; out[p] = arr.reduce((s, x) => s + x, 0) / arr.length; } return out; };
   const normalize = (obj) => { let sum = 0; for (const p in obj) sum += obj[p]; if (sum <= 0) return obj; const out = {}; for (const p in obj) out[p] = obj[p] / sum; return out; };
   const fillPeriods = (obj) => { const out = {}; for (const p of sortedPeriods) out[p] = obj[p] || 0; return out; };
 
@@ -2261,13 +1512,10 @@ function calcPeriodStats(biz, metricKey, sampleWeeks, refDate) {
       regressions[type][p] = _linearReg(pts[p]);
     }
   }
-  /* ★ 剔除异常日后再算日总量回归，避免极端点拉偏斜率 */
-  const _outlierSet = new Set(diagnostic.outlierDates || []);
-  const _filterOutlierPts = pts => pts.filter(p => !_outlierSet.has(p.date));
   const totalRegression = {
-    all:     _linearReg(_filterOutlierPts(totalPointsAll)),
-    weekday: _linearReg(_filterOutlierPts(totalPointsWeekday)),
-    weekend: _linearReg(_filterOutlierPts(totalPointsWeekend)),
+    all: _linearReg(totalPointsAll),
+    weekday: _linearReg(totalPointsWeekday),
+    weekend: _linearReg(totalPointsWeekend),
   };
 
   const abnormalDays = [];
@@ -2589,32 +1837,6 @@ function formatForecastAiContext(ctx) {
   L.push('');
   return L.join('\n');
 }
-
-/* ============================================================
-   智能排班 · 月度休假规则持久化 bootstrap
-   ============================================================ */
-(function initScStorage() {
-  try {
-    const t = JSON.parse(localStorage.getItem('creator_sc_triple') || '[]');
-    if (Array.isArray(t)) t.forEach(d => { if (d) S.scTripleDates.add(d); });
-    const r = JSON.parse(localStorage.getItem('creator_sc_rules') || 'null');
-    if (Array.isArray(r) && r.length) S.scHolidayRules = r;
-  } catch (_) {}
-})();
-
-/* ★ 保持 S.shiftPool 与 S.shiftPoolByBiz[scBizState] 指向同一数组对象，
-     切换业务线时只需重新赋值 S.shiftPool 的引用即可。 */
-(function initScBizState() {
-  if (!S.scBizState) S.scBizState = '买手合作';
-  if (!S.shiftPoolByBiz) S.shiftPoolByBiz = { '买手合作': [], '博主合作': [] };
-  if (!Array.isArray(S.shiftPoolByBiz[S.scBizState])) S.shiftPoolByBiz[S.scBizState] = [];
-  S.shiftPool = S.shiftPoolByBiz[S.scBizState];
-
-  if (!S.shiftReqRules) S.shiftReqRules = { '买手合作': [], '博主合作': [] };
-  for (const b of ['买手合作', '博主合作']) {
-    if (!Array.isArray(S.shiftReqRules[b])) S.shiftReqRules[b] = [];
-  }
-})();
 
 /* ============================================================
    END OF dashboard-core.js

@@ -513,12 +513,12 @@ function renderForecastResult() {
 
   /* 双行表头 */
   let thead = '<tr>';
-  thead += '<th rowspan="2" style="vertical-align:middle;text-align:center;min-width:70px">时段</th>';
+  thead += '<th rowspan="2" style="vertical-align:middle;text-align:center;min-width:70px">时段 <span class="help" data-tip="9-23 时，基于历史时段占比回归预测">?</span></th>';
   for (const r of results) {
     const wd = new Date(r.date + 'T00:00:00Z').getUTCDay();
     thead += '<th style="text-align:center;min-width:78px">' + r.date.slice(5) + ' 周' + WEEKDAY_CN[wd] + '</th>';
   }
-  thead += '<th rowspan="2" style="vertical-align:middle;text-align:center;min-width:70px">合计</th>';
+  thead += '<th rowspan="2" style="vertical-align:middle;text-align:center;min-width:70px">合计 <span class="help" data-tip="所有时段预测值加总">?</span></th>';
   thead += '</tr>';
 
   thead += '<tr>';
@@ -579,7 +579,12 @@ function renderForecastResult() {
       noteHtml += '<div style="color:#77778A;margin-top:4px">📈 <b>算法：</b>时段占比线性回归；日总量 = max(同周加权均值, P60分位) × 趋势修正 × 1.10 排班 buffer，回归仅做微调</div>';
     }
     noteHtml += '<div style="color:#77778A;font-size:11.5px;margin-top:2px">🧮 <b>总量算法：</b>锚点 = max(同周加权均值, P60分位)，趋势修正 ±35%（负趋势减半），回归权重 0.7→50%/0.6→40%/0.5→30%/0.4→15%，最终值 × 1.10 排班 buffer，clamp 至 [P10×0.85, max×1.30]；博主 25/28 日走特殊日模板 × 1.10。</div>';
-    noteHtml += '<div style="color:#77778A;font-size:11.5px;margin-top:2px">🗓 节假日识别：' + _cnHolidayVersion + '；时段仅统计 9-23；勾选/取消「按休日算」可手动覆盖。</div>';
+    const holidayTag =
+      (_cnHolidayVersion.indexOf('不可用') >= 0) ? '<span style="color:#C98383">' + _cnHolidayVersion + '</span>'
+      : (_cnHolidayVersion.indexOf('异常') >= 0 || _cnHolidayVersion.indexOf('未刷新') >= 0)
+          ? '<span style="color:#B36A00">' + _cnHolidayVersion + '</span>'
+          : _cnHolidayVersion;
+    noteHtml += '<div style="color:#77778A;font-size:11.5px;margin-top:2px">🗓 节假日识别：' + holidayTag + '；时段仅统计 9-23；勾选/取消「按休日算」可手动覆盖。</div>';
 
     if (biz === '博主合作' && stats.specialDays) {
       const s25 = stats.specialDays['25'];
@@ -683,111 +688,6 @@ function exportForecastXlsx() {
   toast('⬇ 已导出 ' + fname);
 }
 
-/* ==================== AI 深度分析 ==================== */
-async function runForecastAiAnalysis() {
-  const outEl = $('#fcAiOut');
-  const btnAi = $('#btnFcAi');
-  if (!outEl) return;
-
-  const keyEl = $('#aiKey');
-  const modelEl = $('#aiModel');
-  const apiKey = ((keyEl && keyEl.value) || '').trim();
-  const model = (modelEl && modelEl.value) || 'glm-5.3-flash';
-
-  if (!apiKey) {
-    outEl.style.display = 'block';
-    outEl.innerHTML = '<div class="ai-err">❌ 请先在「🤖 AI 设置」页配置 API Key。</div>';
-    return;
-  }
-
-  const bizEl = $('#fcBiz');
-  const biz = (bizEl && bizEl.value) || '买手合作';
-  const startEl = $('#fcStartDate');
-  const daysEl = $('#fcDays');
-  const weeksEl = $('#fcSampleWeeks');
-  const startDate = startEl ? startEl.value : '';
-  const days = daysEl ? parseInt(daysEl.value, 10) : 7;
-  const sampleWeeks = weeksEl ? parseInt(weeksEl.value, 10) : 4;
-
-  const dailyTotals = collectDailyTotals();
-  const holidays = S.forecastHolidays || new Set();
-  const forecast = generateForecast(biz, 'caseVolume', sampleWeeks, startDate, days, dailyTotals, holidays);
-  if (!forecast) {
-    outEl.style.display = 'block';
-    outEl.innerHTML = '<div class="ai-err">❌ 无法生成预测数据，请检查历史记录。</div>';
-    return;
-  }
-  if (!forecast.stats.dailyStats || forecast.stats.dailyStats.length === 0) {
-    outEl.style.display = 'block';
-    outEl.innerHTML = '<div class="ai-err">❌ 历史数据中没有可用的时段占比。请先在「🔗 映射」页确认「CASE创建时段」字段已正确映射。</div>';
-    return;
-  }
-
-  const ctx = buildForecastAiContext(biz, 'caseVolume', sampleWeeks, startDate, days, dailyTotals, holidays, forecast);
-  const ctxText = formatForecastAiContext(ctx);
-
-  const system = [
-    '你是一个资深的客服中心排班与预测分析师。',
-    '请根据给定的历史时段占比、30S接起率、以及未来预测数据，输出一份专业的时段预测分析报告。',
-    '注意：时段占比是用**线性回归**预测的（而不是简单的平均值），你可以在报告中引用回归的斜率和 R² 来说明趋势。',
-    '如数据中出现「博主特殊日（25/28 日）」相关信息，请结合该特殊日的历史占比单独评估风险并给出建议。',
-    '',
-    '【分析要求】',
-    '1. 整体评估：评估未来几天的预测总量是否合理，与历史趋势是否一致。',
-    '2. 趋势识别：结合上下文里的回归信息（斜率、R²），指出哪些时段在走高、哪些在走低。',
-    '3. 高风险时段识别：识别预测量大但历史30S接起率低的时段，评估潜在风险。',
-    '4. 排班与容量建议：针对高风险时段，给出具体的排班弹性建议（如提前加人、应急备班等）。',
-    '5. 异常提示：如果历史数据中有异常天，请提醒排班时注意。',
-    '',
-    '【输出格式】',
-    '请使用 Markdown 格式，包含以下部分：',
-    '### 一、整体预测评估',
-    '### 二、趋势与时段特征',
-    '### 三、高风险时段预警',
-    '### 四、排班与容量建议',
-    '### 五、其他注意事项',
-  ].join('\n');
-
-  const user = '业务线：' + biz + '\n预测范围：' + startDate + ' 起 ' + days + ' 天\n样本周期：近 ' + sampleWeeks + ' 周\n\n=== 数据 ===\n\n' + ctxText + '\n\n请输出分析报告。';
-
-  const messages = [
-    { role: 'system', content: system },
-    { role: 'user', content: user }
-  ];
-
-  outEl.style.display = 'block';
-  outEl.innerHTML = '<div style="color:#7B8FBF;font-weight:600;padding:8px 0">🤖 AI 正在分析时段预测数据…</div><div class="ai-cursor"></div>';
-  if (btnAi) { btnAi.disabled = true; btnAi.textContent = '分析中…'; }
-
-  let buffer = '';
-  let reasoningBuf = '';
-  const logs = [];
-
-  const render = () => {
-    const dbg = logs.length ? '<div style="font-size:11px;color:#999;padding:4px 0;border-bottom:1px dashed #eee;margin-bottom:6px">' + logs.slice(-3).map(esc).join('<br>') + '</div>' : '';
-    outEl.innerHTML = dbg + renderAiMarkdown(buffer) + (buffer ? '' : '<span class="ai-cursor"></span>');
-    outEl.scrollTop = outEl.scrollHeight;
-  };
-
-  try {
-    await callZhipuAI(
-      apiKey, model, messages,
-      (chunk, type) => {
-        if (type === 'reasoning') reasoningBuf += chunk;
-        else buffer += chunk;
-        render();
-      },
-      null,
-      (msg) => { logs.push('[调试] ' + msg); render(); }
-    );
-  } catch (err) {
-    outEl.innerHTML = '<div class="ai-err">❌ 分析失败：' + esc(err.message) + '</div>';
-  } finally {
-    if (btnAi) { btnAi.disabled = false; btnAi.textContent = '🤖 AI 深度分析'; }
-    if (!buffer.trim() && reasoningBuf.trim()) { buffer = reasoningBuf; render(); }
-  }
-}
-
 /* ==================== 复制 Markdown ==================== */
 function copyForecastMd() {
   const bizEl = $('#fcBiz');
@@ -830,8 +730,6 @@ function clearForecastInputs() {
     localStorage.removeItem('creator_forecast_holidays');
     localStorage.removeItem('creator_forecast_workdays');
   } catch (_) {}
-  const outEl = $('#fcAiOut');
-  if (outEl) { outEl.style.display = 'none'; outEl.innerHTML = ''; }
   renderForecastConfig();
   renderForecastResult();
   toast('已清空输入与手动覆盖的节假日');

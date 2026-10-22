@@ -31,7 +31,7 @@ const METRICS = [
   { key:'escalateRate', label:'升级率', icon:'⚠️', digits:2, pct:true, better:'down', tip:'升级二线工单数 / CASE处理量' },
   { key:'fcr', label:'FCR', icon:'🔁', digits:2, pct:true, better:'down', tip:'1 - (72H重复进线量 / FCR分母)' },
   { key:'qualityPassRate', label:'质检合格率', icon:'🎯', digits:2, pct:true, better:'up', tip:'质检合格量 / 质检抽检量' },
-  { key:'s30Rate', label:'30S接起率', icon:'📞', digits:2, pct:true, better:'up', tip:'30S接起量 / 人工服务量' },
+  { key:'s30Rate', label:'30S接起率', icon:'📞', digits:2, pct:true, better:'up', tip:'30S接起率 = 30S接起量 / 人工服务量（case量）' },
 ];
 const METRIC_MAP = Object.fromEntries(METRICS.map(m => [m.key, m]));
 const metricLabel = m => (m.icon ? m.icon + ' ' : '') + m.label;

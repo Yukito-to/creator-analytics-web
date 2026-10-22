@@ -740,10 +740,10 @@ function renderS30() {
   }
   const cols = timeCols();
   const subMetrics = [
-    { key:'s30Rate', label:'30s接起率', digits:2, pct:true, better:'up', tip:'30S接起量 / 人工服务量' },
-    { key:'s30Num', label:'30S接起率-分子', digits:0, pct:false, better:'up', tip:'30秒内接起的电话量' },
-    { key:'s30Den', label:'30S接起率-分母', digits:0, pct:false, better:'up', tip:'人工服务量（总进线）' },
-    { key:'s30Miss', label:'30sMiss量', digits:0, pct:false, better:'down', tip:'分母 - 分子（未在30秒内接起的量）' },
+    { key:'s30Rate', label:'30s接起率', digits:2, pct:true, better:'up', tip:'30S接起率 = 30S接起量 / 人工服务量（case量）' },
+    { key:'s30Num', label:'30S接起率-分子', digits:0, pct:false, better:'up', tip:'30秒内接起的case量' },
+    { key:'s30Den', label:'30S接起率-分母', digits:0, pct:false, better:'up', tip:'人工服务量（case量总进线）' },
+    { key:'s30Miss', label:'30sMiss量', digits:0, pct:false, better:'down', tip:'分母 - 分子（未在30秒内接起的case量）' },
   ];
   top.innerHTML = '<div class="table-scroll"><table><thead><tr>' + buildHeaderHTML(cols) + '</tr></thead><tbody>' +
     subMetrics.map(m => rowHTMLS30(m.label, biz, m)).join('') + '</tbody></table></div>';
@@ -921,10 +921,10 @@ function renderS30Body(biz) {
   }
 
   const head = '<tr><th>日期 | 时段</th>' +
-    '<th>30s接起率 <span class="help" data-tip="30S接起量 / 人工服务量">?</span></th>' +
-    '<th>30S接起率-分子 <span class="help" data-tip="30秒内接起的电话量">?</span></th>' +
-    '<th>30S接起率-分母 <span class="help" data-tip="人工服务量（总进线）">?</span></th>' +
-    '<th>30sMiss量 <span class="help" data-tip="分母 - 分子（未在30秒内接起的量）">?</span></th>' +
+    '<th>30s接起率 <span class="help" data-tip="30S接起率 = 30S接起量 / 人工服务量（case量）">?</span></th>' +
+    '<th>30S接起率-分子 <span class="help" data-tip="30秒内接起的case量">?</span></th>' +
+    '<th>30S接起率-分母 <span class="help" data-tip="人工服务量（case量总进线）">?</span></th>' +
+    '<th>30sMiss量 <span class="help" data-tip="分母 - 分子（未在30秒内接起的case量）">?</span></th>' +
     (hasFc ? '<th>时段预测量 <span class="help" data-tip="导入的预测量表（按小时插值）">?</span></th>' +
              '<th>预测偏差 <span class="help" data-tip="实际分母 / 预测量。>120% 标记为红色（超预测）">?</span></th>' : '') + 
     '</tr>';

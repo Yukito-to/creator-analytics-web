@@ -356,3 +356,19 @@ else init();
 /* ============================================================
    END OF dashboard-ai.js
    ============================================================ */
+
+/* ★ 移动端 Tooltip：点击 ? 号时弹出解释 */
+document.addEventListener('click', function(e) {
+  const helpEl = e.target.closest('.help');
+  if (helpEl && helpEl.getAttribute('data-tip')) {
+    // 阻止事件冒泡，避免触发表格排序或折叠
+    e.stopPropagation();
+    const tipText = helpEl.getAttribute('data-tip');
+    // 复用 core 里的 toast 函数（如果没有找到 toast，则用 alert 兜底）
+    if (typeof toast === 'function') {
+      toast(tipText);
+    } else {
+      alert(tipText);
+    }
+  }
+});

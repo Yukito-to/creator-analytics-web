@@ -1240,20 +1240,39 @@ function reportToText(d) {
   const src = d.src;
   const L = [];
 
-  L.push('# ' + biz + ' 数据周报'); L.push('');
-  L.push('周次：WK' + wk + '（' + range[0] + ' ~ ' + range[1] + '），对比：WK' + prevWk);
-  L.push('生成时间：' + new Date().toLocaleString('zh-CN')); L.push('');
+  L.push('# 📄 ' + biz + ' 数据周报'); L.push('');
+  L.push('- 周次：**WK' + wk + '**（' + range[0] + ' ~ ' + range[1] + '）');
+  L.push('- 对比：**WK' + prevWk + '**');
+  L.push('- 生成时间：' + new Date().toLocaleString('zh-CN'));
+  L.push('');
 
   L.push('## 一、周报数据汇报'); L.push('');
   L.push('### 📊 核心指标'); L.push('');
-  L.push('| 指标 | 本周 | 上周 | 环比 |');
-  L.push('| --- | ---: | ---: | ---: |');
+  L.push('| 指标 | 本周 | 环比 | 趋势 |');
+  L.push('| --- | ---: | ---: | :---: |');
   {
     const hasPrev = prev.caseVolume > 0;
     for (const m of METRICS) {
       const v = cur[m.key];
       const p = hasPrev ? prev[m.key] : null;
-      L.push('| ' + m.label + ' | ' + fmtVal(v, m) + ' | ' + (p != null ? fmtVal(p, m) : '—') + ' | ' + diffText(v, p, m) + ' |');
+      let diffTxt = '—';
+      let trendTxt = '⚪ 持平';
+      if (v != null && p != null && isFinite(v) && isFinite(p)) {
+        const dv = v - p;
+        if (Math.abs(dv) < 1e-9) {
+          diffTxt = '0';
+          trendTxt = '⚪ 持平';
+        } else {
+          const up = dv > 0;
+          const good = m.better === 'up' ? up : !up;
+          const s = m.pct
+            ? (Math.abs(dv) * 100).toFixed(m.digits) + '%'
+            : Math.abs(dv).toFixed(m.digits);
+          diffTxt = (up ? '↑ ' : '↓ ') + s;
+          trendTxt = good ? '🟢 向好' : '🔴 走弱';
+        }
+      }
+      L.push('| ' + m.label + ' | ' + fmtVal(v, m) + ' | ' + diffTxt + ' | ' + trendTxt + ' |');
     }
   }
   L.push('');
@@ -1299,10 +1318,20 @@ function reportToText(d) {
     L.push('### 📞 30S 接起'); L.push('');
     const th = s30Threshold(biz);
     const rate = s30.week.cur.s30Rate;
-    L.push('- 30S 接起率：' + (rate != null ? (rate * 100).toFixed(2) + '%' : '—') + '（阈值 ≥ ' + (th * 100).toFixed(2) + '%，' + (rate != null && rate >= th ? '达标' : '未达标') + '）');
+    const prevRate = s30.week.prev.s30Den > 0 ? s30.week.prev.s30Rate : null;
+
+    let rateDiffStr = '';
+    if (rate != null && prevRate != null) {
+      const dv = rate - prevRate;
+      if (Math.abs(dv) < 1e-9) rateDiffStr = '（持平）';
+      else rateDiffStr = '（' + (dv > 0 ? '↑ ' : '↓ ') + (Math.abs(dv) * 100).toFixed(2) + '%）';
+    }
+    const hit = rate != null && rate >= th;
+    L.push('- 30S 接起率：**' + (rate != null ? (rate * 100).toFixed(2) + '%' : '—') + '**' + rateDiffStr + ' ' + (hit ? '✅ 达标' : '❌ 未达标'));
     L.push('- 30S 接起量：' + fmtInt(s30.week.cur.s30Num));
     L.push('- 人工服务量：' + fmtInt(s30.week.cur.s30Den));
     L.push('- 30S Miss 量：' + fmtInt(s30.week.cur.s30Miss));
+    L.push('- 达标阈值：≥ ' + (th * 100).toFixed(2) + '%');
     L.push('');
     const anal = s30AnalysisText(biz, wk, prevWk);
     if (anal.length) { for (const ln of anal) L.push(ln); }
@@ -1321,8 +1350,11 @@ function reportToText(d) {
   {
     L.push('### 💡 本周结论'); L.push('');
     const concl = reportConclusion(d);
-    if (concl.length) { for (const p of concl) L.push('- ' + p.replace(/<[^>]+>/g, '')); }
-    else L.push('本周暂无足够数据生成结论。');
+    if (concl.length) {
+      for (const p of concl) L.push(p.replace(/<[^>]+>/g, '').trim());
+    } else {
+      L.push('本周暂无足够数据生成结论。');
+    }
     L.push('');
   }
 

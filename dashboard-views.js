@@ -1251,17 +1251,11 @@ function renderSLA() {
     const pointsDisp = sc.points != null ? sc.points.toFixed(2) : '—';
     const scoreDisp = sc.finalScore != null ? sc.finalScore.toFixed(2) : '—';
 
-    /* ★ 状态列：显示当前命中的档位 + 距离上一档还差多少（目标值 + 差值）
-       · belowLowest   → 展示距最低档还需要多少
-       · hitTierIndex = 0 → 满档
-       · 其它 → 展示当前档位编号 + 距上一档还需要多少
-       差值口径：
-         · up 指标（越大越好）   → 差值 = 上档 threshold − 实际值
-         · down 指标（越小越好） → 目标值 = tiers[0].threshold / 上档 threshold；
-                                   差值 = 实际值 − 目标值 */
+    /* ★ 状态列：当前命中档位 + 距上一档的差距
+       使用 calcSlaScore 返回的、已按指标方向排序且带 _thr 的 tiers */
     let statusBadge = '<span class="delta-flat">—</span>';
     if (sc.points != null) {
-      const tiers = c.cfg.tiers;
+      const tiers = (sc.tiers && sc.tiers.length) ? sc.tiers : (c.cfg.tiers || []);
       const better = (c.key && METRIC_MAP[c.key]) ? METRIC_MAP[c.key].better : 'up';
       const fmtVal = v => (v == null || !isFinite(v)) ? '—'
                        : (isPct ? (v * 100).toFixed(2) + '%' : v.toFixed(2));
@@ -1271,14 +1265,10 @@ function renderSLA() {
 
       if (sc.belowLowest) {
         const lowest = tiers[tiers.length - 1];
-        let needValue, gapValue;
-        if (better === 'down') {
-          needValue = sc.threshold / lowest.threshold;
-          gapValue  = sc.actualDisp - needValue;
-        } else {
-          needValue = lowest.threshold;
-          gapValue  = lowest.threshold - sc.actualDisp;
-        }
+        const needValue = lowest._thr;
+        const gapValue  = (better === 'down')
+          ? (sc.actualDisp - needValue)
+          : (needValue - sc.actualDisp);
         statusBadge =
           '<span class="rp-badge warn">未达最低档（' + lowest.points + ' 分档）</span>' +
           '<div style="font-size:10.5px;color:#C98383;margin-top:3px;line-height:1.5;white-space:normal">' +
@@ -1290,14 +1280,10 @@ function renderSLA() {
       } else {
         const curTier  = tiers[sc.hitTierIndex];
         const nextTier = tiers[sc.hitTierIndex - 1];
-        let needValue, gapValue;
-        if (better === 'down') {
-          needValue = sc.threshold / nextTier.threshold;
-          gapValue  = sc.actualDisp - needValue;
-        } else {
-          needValue = nextTier.threshold;
-          gapValue  = nextTier.threshold - sc.actualDisp;
-        }
+        const needValue = nextTier._thr;
+        const gapValue  = (better === 'down')
+          ? (sc.actualDisp - needValue)
+          : (needValue - sc.actualDisp);
         statusBadge =
           '<span class="rp-badge flat">' + curTier.points + ' 分档' +
             '（第 ' + (sc.hitTierIndex + 1) + ' / ' + tiers.length + '）</span>' +

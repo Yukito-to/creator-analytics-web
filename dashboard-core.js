@@ -1208,35 +1208,67 @@ function slaAchieve(src, metricKey, category) {
   return calcBySrc(src, opts)[metricKey];
 }
 function calcSlaScore(metricKey, actual, monthCfg) {
-  if (!monthCfg) return { threshold: null, points: null, achieveRate: null, finalScore: null, hitTierIndex: -1, actualDisp: null, weight: null, isPct: false, belowLowest: false };
+  if (!monthCfg) return { threshold: null, points: null, achieveRate: null, finalScore: null, hitTierIndex: -1, actualDisp: null, weight: null, isPct: false, belowLowest: false, tiers: [] };
   const m = metricKey ? METRIC_MAP[metricKey] : null;
   const isPct = m ? !!m.pct : false;
   const better = m ? m.better : 'up';
   const actualDisp = actual == null || !isFinite(actual) ? null : actual;
-  if (actualDisp == null || !monthCfg.tiers.length) {
-    return { threshold: null, points: null, achieveRate: null, finalScore: null, hitTierIndex: -1, actualDisp, weight: monthCfg.weight, isPct, belowLowest: false };
+
+  /* ★ 每个档位的「实际值形式阈值」：
+       pct 指标 → 归一化后的 threshold（0~1）
+       非 pct 指标 → rawThreshold 的原始数值（如 AHT=5 分钟），fallback 到 threshold
+     并生成新对象（附加 _thr），避免污染原始 tiers */
+  const buildTier = t => {
+    let thr;
+    if (isPct) {
+      thr = t.threshold;
+    } else {
+      const raw = num(t.rawThreshold);
+      thr = (isFinite(raw) && raw !== 0) ? raw : t.threshold;
+    }
+    return { threshold: t.threshold, rawThreshold: t.rawThreshold, points: t.points, _thr: thr };
+  };
+  const sortedTiers = (monthCfg.tiers || [])
+    .map(buildTier)
+    .sort((a, b) => better === 'down' ? a._thr - b._thr : b._thr - a._thr);
+
+  if (actualDisp == null || !sortedTiers.length) {
+    return { threshold: null, points: null, achieveRate: null, finalScore: null, hitTierIndex: -1, actualDisp, weight: monthCfg.weight, isPct, belowLowest: false, tiers: sortedTiers };
   }
-  const target = monthCfg.tiers[0].threshold;
+
+  /* ★ 用「100 分档」作为目标档位，不再依赖 tiers[0] */
+  const isFullScore = p => { const n = Number(p); return isFinite(n) && (n === 100 || Math.abs(n - 1) < 1e-6); };
+  const t100 = sortedTiers.find(t => isFullScore(t.points)) || sortedTiers[0];
+  const target = t100._thr;
+
+  /* 达成率（统一为「越大越好」口径」） */
   let achieveRate = null;
   if (target != null && target !== 0) {
-    if (better === 'down') achieveRate = actualDisp > 0 ? target / actualDisp : null;
-    else                   achieveRate = actualDisp / target;
+    achieveRate = (better === 'down')
+      ? (actualDisp > 0 ? target / actualDisp : null)
+      : (actualDisp / target);
   }
+
+  /* ★ 命中档位：从「最优 → 最差」遍历
+       正向：actual >= 档位阈值
+       逆向：actual <= 档位阈值 */
   let hitIdx = -1, points = null;
-  if (better === 'down') {
-    if (achieveRate != null) {
-      for (let i = 0; i < monthCfg.tiers.length; i++) { if (achieveRate >= monthCfg.tiers[i].threshold) { hitIdx = i; points = monthCfg.tiers[i].points; break; } }
-    }
-  } else {
-    for (let i = 0; i < monthCfg.tiers.length; i++) { if (actualDisp >= monthCfg.tiers[i].threshold) { hitIdx = i; points = monthCfg.tiers[i].points; break; } }
+  for (let i = 0; i < sortedTiers.length; i++) {
+    const hit = (better === 'down') ? (actualDisp <= sortedTiers[i]._thr) : (actualDisp >= sortedTiers[i]._thr);
+    if (hit) { hitIdx = i; points = sortedTiers[i].points; break; }
   }
+
   let belowLowest = false;
   if (hitIdx === -1) {
-    const lowest = monthCfg.tiers[monthCfg.tiers.length - 1];
-    if (lowest && lowest.points != null && isFinite(lowest.points)) { points = lowest.points; belowLowest = true; }
+    const lowest = sortedTiers[sortedTiers.length - 1];
+    if (lowest && lowest.points != null && isFinite(lowest.points)) {
+      points = lowest.points;
+      belowLowest = true;
+    }
   }
   const finalScore = (points != null && monthCfg.weight != null) ? points * monthCfg.weight : null;
-  return { threshold: target, points, achieveRate, finalScore, hitTierIndex: hitIdx, actualDisp, weight: monthCfg.weight, isPct, belowLowest };
+
+  return { threshold: target, points, achieveRate, finalScore, hitTierIndex: hitIdx, actualDisp, weight: monthCfg.weight, isPct, belowLowest, tiers: sortedTiers };
 }
 
 /* ==================== 目标读取 ==================== */

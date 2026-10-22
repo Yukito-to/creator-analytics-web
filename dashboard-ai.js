@@ -1273,8 +1273,95 @@ function initWeekPicker() {
   const sel = document.getElementById('rpWK');
   if (!sel) return;
 
-  /* 为原生 select 添加 sc-native-select class，交由 CSS 处理外观（字体、圆角、箭头等） */
-  sel.classList.add('sc-native-select');
+  // 如果已经初始化过，只需更新选项内容
+  if (sel._customized) {
+    const btn = sel._customBtn;
+    const list = sel._customList;
+    if (btn && list) {
+      const selectedOpt = sel.options[sel.selectedIndex];
+      btn.innerHTML = '<span>' + (selectedOpt ? selectedOpt.text : '暂无周次') + '</span><span style="color:#77778A;font-size:10px;margin-left:8px;transform:scaleY(0.8);display:inline-block">▼</span>';
+      list.innerHTML = Array.from(sel.options).map((opt, i) => {
+        const isSel = i === sel.selectedIndex;
+        return `<div data-val="${opt.value}" style="padding:8px 12px; font-size:13px; cursor:pointer; border-radius:6px; ${isSel ? 'background:#E7ECF5; font-weight:600; color:#7B8FBF;' : 'color:#33333D;'}">${opt.text}</div>`;
+      }).join('');
+      list.querySelectorAll('div').forEach(item => {
+        item.addEventListener('click', (e) => {
+          e.stopPropagation();
+          sel.value = item.dataset.val;
+          sel.dispatchEvent(new Event('change', { bubbles: true }));
+          btn.innerHTML = '<span>' + item.textContent + '</span><span style="color:#77778A;font-size:10px;margin-left:8px;transform:scaleY(0.8);display:inline-block">▼</span>';
+          list.style.display = 'none';
+        });
+      });
+    }
+    return;
+  }
+
+  // 初次初始化：隐藏原生 select
+  sel._customized = true;
+  sel.style.display = 'none';
+
+  // 创建自定义包装器
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'position:relative; display:inline-block; min-width:240px; font-family:inherit;';
+
+  // 创建展示按钮
+  const btn = document.createElement('div');
+  btn.className = 'sc-native-select';
+  btn.style.cssText = 'cursor:pointer; display:flex; align-items:center; justify-content:space-between; user-select:none; padding:8px 12px; font-size:13px; background:#fff; border:1px solid var(--border-2); border-radius:8px; min-height:34px;';
+  
+  // 创建下拉列表 (max-height: 156px 约等于 4 项)
+  const list = document.createElement('div');
+  list.style.cssText = 'display:none; position:absolute; top:100%; left:0; right:0; z-index:9999; background:#fff; border:1px solid var(--border-2); border-radius:8px; box-shadow:0 4px 12px rgba(0,0,0,0.1); max-height:156px; overflow-y:auto; margin-top:4px; padding:4px;';
+
+  wrap.appendChild(btn);
+  wrap.appendChild(list);
+  sel.parentNode.insertBefore(wrap, sel.nextSibling);
+
+  sel._customBtn = btn;
+  sel._customList = list;
+
+  // 渲染初始选项
+  const selectedOpt = sel.options[sel.selectedIndex];
+  btn.innerHTML = '<span>' + (selectedOpt ? selectedOpt.text : '暂无周次') + '</span><span style="color:#77778A;font-size:10px;margin-left:8px;transform:scaleY(0.8);display:inline-block">▼</span>';
+  list.innerHTML = Array.from(sel.options).map((opt, i) => {
+    const isSel = i === sel.selectedIndex;
+    return `<div data-val="${opt.value}" style="padding:8px 12px; font-size:13px; cursor:pointer; border-radius:6px; ${isSel ? 'background:#E7ECF5; font-weight:600; color:#7B8FBF;' : 'color:#33333D;'}">${opt.text}</div>`;
+  }).join('');
+
+  // 绑定选项点击
+  list.querySelectorAll('div').forEach(item => {
+    item.addEventListener('click', (e) => {
+      e.stopPropagation();
+      sel.value = item.dataset.val;
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+      btn.innerHTML = '<span>' + item.textContent + '</span><span style="color:#77778A;font-size:10px;margin-left:8px;transform:scaleY(0.8);display:inline-block">▼</span>';
+      list.style.display = 'none';
+    });
+  });
+
+  // 展开/收起逻辑
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const isOpen = list.style.display === 'block';
+    list.style.display = isOpen ? 'none' : 'block';
+    if (!isOpen) {
+      const selItem = list.querySelectorAll('div')[sel.selectedIndex];
+      if (selItem) list.scrollTop = selItem.offsetTop - 40; // 打开时自动滚动到当前项
+    }
+  });
+
+  // 点击外部关闭
+  document.addEventListener('click', () => {
+    list.style.display = 'none';
+  });
+  list.addEventListener('click', e => e.stopPropagation());
+  
+  // 监听代码触发的 change 事件（如数据重置）
+  sel.addEventListener('change', () => {
+      const currentOpt = sel.options[sel.selectedIndex];
+      if (currentOpt) btn.innerHTML = '<span>' + currentOpt.text + '</span><span style="color:#77778A;font-size:10px;margin-left:8px;transform:scaleY(0.8);display:inline-block">▼</span>';
+  });
 }
 
 /* ★ 让所有业务线按钮组重新高亮（读各自的 select.value） */

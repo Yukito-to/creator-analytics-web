@@ -155,7 +155,11 @@ function _statOf(arr) {
   const mean = s.reduce((x, y) => x + y, 0) / n;
   const median = n % 2 ? s[(n - 1) / 2] : (s[n / 2 - 1] + s[n / 2]) / 2;
   const q = p => s[Math.min(n - 1, Math.max(0, Math.round((n - 1) * p)))];
-  return { mean, median, min: s[0], max: s[n - 1], p10: q(0.1), p90: q(0.9), n };
+  /* ★ 截尾均值（10%）：剔除最高/最低 10% 后求均值，降低极端值影响 */
+  const k = Math.floor(n * 0.1);
+  const core = (k > 0 && n - 2 * k > 0) ? s.slice(k, n - k) : s;
+  const trimmedMean = core.length ? core.reduce((a, b) => a + b, 0) / core.length : mean;
+  return { mean, median, trimmedMean, min: s[0], max: s[n - 1], p10: q(0.1), p90: q(0.9), n };
 }
 
 /* 从 dailyStats 里筛出同星期几、非异常日的总量数组 */
@@ -224,8 +228,10 @@ function _predictDailyTotal(stats, date, useWeekend, specialKind, biz) {
   if (specialKind != null && stats.specialTotals) {
     const st = stats.specialTotals[String(specialKind)];
     if (st && st.n >= 1) {
-      const anchor = (st.n >= 3 && isFinite(st.mean))
-        ? (st.median * 0.6 + st.mean * 0.4)
+      /* ★ 特殊日样本少（2~5 天），用 median 为主；
+           原 mean 换 trimmedMean，权重从 0.4 降到 0.3，降低单日尖峰影响 */
+      const anchor = (st.n >= 3 && isFinite(st.trimmedMean))
+        ? (st.median * 0.7 + st.trimmedMean * 0.3)
         : st.median;
       return { value: Math.round(anchor * 1.10), source: 'special' };
     }
@@ -261,14 +267,29 @@ function _predictDailyTotal(stats, date, useWeekend, specialKind, biz) {
   };
 
   const WEIGHTS = [5, 3, 2, 1.5, 1, 1, 1, 1, 1, 1];
+  const _quantileVals = (vals, q) => {
+    if (!vals.length) return 0;
+    const s = vals.slice().sort((a, b) => a - b);
+    const pos = (s.length - 1) * q;
+    const lo = Math.floor(pos), hi = Math.ceil(pos);
+    return lo === hi ? s[lo] : s[lo] + (s[hi] - s[lo]) * (pos - lo);
+  };
   const wAvg = (rows, cap) => {
     if (!rows.length) return 0;
     const limit = Math.min(rows.length, cap || 10);
+    const slice = rows.slice(0, limit);
+    let vals = slice.map(r => r.total);
+    /* ★ winsorize 到 [P10, P90]（样本 ≥5 时生效），防止单日尖峰主导加权均值 */
+    if (vals.length >= 5) {
+      const p10 = _quantileVals(vals, 0.10);
+      const p90 = _quantileVals(vals, 0.90);
+      vals = vals.map(v => Math.min(p90, Math.max(p10, v)));
+    }
     let wSum = 0, vSum = 0;
-    for (let i = 0; i < limit; i++) {
+    for (let i = 0; i < vals.length; i++) {
       const w = WEIGHTS[i] || 1;
       wSum += w;
-      vSum += rows[i].total * w;
+      vSum += vals[i] * w;
     }
     return wSum > 0 ? vSum / wSum : 0;
   };
@@ -298,15 +319,25 @@ function _predictDailyTotal(stats, date, useWeekend, specialKind, biz) {
     if (t < -0.35) return -0.35;
     return t;
   };
+  /* ★ 10% 截尾均值：避免单个极端值把趋势方向拉反 */
+  const _trimmedMean = (arr, trimRatio) => {
+    if (!arr || !arr.length) return 0;
+    const r = trimRatio == null ? 0.1 : trimRatio;
+    if (arr.length <= 2) return arr.reduce((a, b) => a + b, 0) / arr.length;
+    const s = arr.slice().sort((a, b) => a - b);
+    const k = Math.floor(s.length * r);
+    const core = (k > 0 && s.length - 2 * k > 0) ? s.slice(k, s.length - k) : s;
+    return core.reduce((a, b) => a + b, 0) / core.length;
+  };
 
   let trend = 0, trendParts = 0;
   if (recent7.length >= 3 && prev7.length >= 3) {
-    const p7 = _avg(prev7);
-    if (p7 > 0) { trend += clampTrend((_avg(recent7) - p7) / p7) * 0.6; trendParts += 0.6; }
+    const p7 = _trimmedMean(prev7);
+    if (p7 > 0) { trend += clampTrend((_trimmedMean(recent7) - p7) / p7) * 0.6; trendParts += 0.6; }
   }
   if (recent14.length >= 5 && prev14.length >= 5) {
-    const p14 = _avg(prev14);
-    if (p14 > 0) { trend += clampTrend((_avg(recent14) - p14) / p14) * 0.4; trendParts += 0.4; }
+    const p14 = _trimmedMean(prev14);
+    if (p14 > 0) { trend += clampTrend((_trimmedMean(recent14) - p14) / p14) * 0.4; trendParts += 0.4; }
   }
   if (trendParts > 0) trend = trend / trendParts;
   else trend = 0;
@@ -366,9 +397,13 @@ function _predictDailyTotal(stats, date, useWeekend, specialKind, biz) {
   const clampSource = (typeRows.length >= 3) ? typeRows : (allRows.length >= 3) ? allRows : null;
   if (clampSource) {
     const vals = clampSource.map(d => d.total).sort((a, b) => a - b);
-    const p10 = vals[Math.floor((vals.length - 1) * 0.1)];
+    const p10 = _quantileVals(vals, 0.10);
+    const p95 = _quantileVals(vals, 0.95);
+    /* ★ 上界从「max×1.30」改为「P95×1.25」：
+         单个历史极值（如大促日）不再把上界撑得过宽，
+         排班安全 buffer 仍保留（×1.10 已在下一步，这里是 clamp 上界） */
     const lo = p10 * 0.85;
-    const hi = vals[vals.length - 1] * 1.30;
+    const hi = p95 * 1.25;
     if (pred < lo) pred = lo;
     if (pred > hi) pred = hi;
   }
@@ -2062,9 +2097,9 @@ function calcPeriodStats(biz, metricKey, sampleWeeks, refDate) {
     const type = isWeekend ? 'weekend' : 'weekday';
     if (isWeekend) weCount++; else wdCount++;
 
-    totalPointsAll.push({ x, y: d.total });
-    if (isWeekend) totalPointsWeekend.push({ x, y: d.total });
-    else totalPointsWeekday.push({ x, y: d.total });
+    totalPointsAll.push({ x, y: d.total, date: d.date });
+    if (isWeekend) totalPointsWeekend.push({ x, y: d.total, date: d.date });
+    else totalPointsWeekday.push({ x, y: d.total, date: d.date });
 
     for (const p in d.periods) {
       const share = d.periods[p] / d.total;
@@ -2116,6 +2151,39 @@ function calcPeriodStats(biz, metricKey, sampleWeeks, refDate) {
     return emptyReturn();
   }
 
+  /* ★ 极端日识别（MAD 稳健法）——写入 diagnostic.outlierDates
+     - 用 MAD（中位数绝对偏差）识别日总量离群，比 IQR/均值更抗极端值
+     - 阈值 3.5×稳健σ，只剔除明显离群，正常大促保留
+     - 命中的日期会从「锚点 / 趋势 / 回归」计算中剔除，避免单日尖峰主导预测
+     - 博主 25/28 特殊日不参与识别（它们是业务规则，不是异常） */
+  (function detectOutliers() {
+    const specialDates = new Set();
+    if (biz === '博主合作') {
+      for (const k of ['25', '28']) {
+        const sg = specialDayGroups[k];
+        if (sg && sg.dates) for (const d of sg.dates) specialDates.add(d);
+      }
+    }
+    const candidates = dailyStats.filter(d => d.total > 0 && !specialDates.has(d.date));
+    if (candidates.length < 4) { diagnostic.outlierDates = []; return; }
+
+    const vals = candidates.map(d => d.total).sort((a, b) => a - b);
+    const n = vals.length;
+    const median = n % 2 ? vals[(n - 1) / 2] : (vals[n / 2 - 1] + vals[n / 2]) / 2;
+    const devs = vals.map(v => Math.abs(v - median)).sort((a, b) => a - b);
+    const mad = n % 2 ? devs[(n - 1) / 2] : (devs[n / 2 - 1] + devs[n / 2]) / 2;
+    const robustSigma = mad * 1.4826;   /* MAD → 稳健标准差 */
+    if (!(robustSigma > 0)) { diagnostic.outlierDates = []; return; }
+
+    const THRESH = 3.5;
+    const out = [];
+    for (const d of candidates) {
+      const z = Math.abs(d.total - median) / robustSigma;
+      if (z > THRESH) out.push(d.date);
+    }
+    diagnostic.outlierDates = out;
+  })();
+
   /* ---- 总量统计（用于日总量预测锚点与区间约束） ---- */
   const weekdayTotals = [];
   const weekendTotals = [];
@@ -2151,7 +2219,20 @@ function calcPeriodStats(biz, metricKey, sampleWeeks, refDate) {
     }
     return out;
   };
-  const avg = (group) => { const out = {}; for (const p in group) { const arr = group[p]; out[p] = arr.reduce((s, x) => s + x, 0) / arr.length; } return out; };
+  const avg = (group) => {
+    const out = {};
+    for (const p in group) {
+      const arr = group[p];
+      if (!arr.length) { out[p] = 0; continue; }
+      if (arr.length <= 2) { out[p] = arr.reduce((s, x) => s + x, 0) / arr.length; continue; }
+      /* ★ 10% 截尾均值：降低单日极端低/高接起率对均值的影响 */
+      const s = arr.slice().sort((a, b) => a - b);
+      const k = Math.floor(s.length * 0.1);
+      const core = k > 0 ? s.slice(k, s.length - k) : s;
+      out[p] = core.length ? core.reduce((a, b) => a + b, 0) / core.length : s[Math.floor(s.length / 2)];
+    }
+    return out;
+  };
   const normalize = (obj) => { let sum = 0; for (const p in obj) sum += obj[p]; if (sum <= 0) return obj; const out = {}; for (const p in obj) out[p] = obj[p] / sum; return out; };
   const fillPeriods = (obj) => { const out = {}; for (const p of sortedPeriods) out[p] = obj[p] || 0; return out; };
 
@@ -2180,10 +2261,13 @@ function calcPeriodStats(biz, metricKey, sampleWeeks, refDate) {
       regressions[type][p] = _linearReg(pts[p]);
     }
   }
+  /* ★ 剔除异常日后再算日总量回归，避免极端点拉偏斜率 */
+  const _outlierSet = new Set(diagnostic.outlierDates || []);
+  const _filterOutlierPts = pts => pts.filter(p => !_outlierSet.has(p.date));
   const totalRegression = {
-    all: _linearReg(totalPointsAll),
-    weekday: _linearReg(totalPointsWeekday),
-    weekend: _linearReg(totalPointsWeekend),
+    all:     _linearReg(_filterOutlierPts(totalPointsAll)),
+    weekday: _linearReg(_filterOutlierPts(totalPointsWeekday)),
+    weekend: _linearReg(_filterOutlierPts(totalPointsWeekend)),
   };
 
   const abnormalDays = [];

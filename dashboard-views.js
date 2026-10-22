@@ -445,16 +445,17 @@ function renderPersonBody(src, emps) {
   }
   const rows = [];
   for (const n of names) {
+    // ★ 同一员工的所有指标共享一个 nameSet，缓存命中率最大化
+    const opts = { nameSet: new Set([n]) };
     for (const mk of metricKeys) {
       const metric = METRIC_MAP[mk];
       const bg = METRIC_BG[mk] || '';
       const key = 'pe|' + n + '|' + mk;
       const expanded = S.expandedRows.has(key);
-      const opts = { nameSet: new Set([n]) };
       const labelHtml =
         '<span class="row-name">' + esc(n) + '</span>' +
-        '<span class="row-metric">' + esc(metricLabel(metric)) + 
-        (metric.tip ? ' <span class="help" data-tip="' + esc(metric.tip) + '">?</span>' : '') + 
+        '<span class="row-metric">' + esc(metricLabel(metric)) +
+        (metric.tip ? ' <span class="help" data-tip="' + esc(metric.tip) + '">?</span>' : '') +
         '</span>';
       rows.push(rowHTMLSrcToggle(n + ' · ' + metricLabel(metric), src, metric, opts, bg, key, expanded, labelHtml));
       if (expanded) { const ex = renderExpandRows(src, opts, mk, key); for (const r of ex) rows.push(r); }
@@ -663,6 +664,8 @@ function renderTeamBody(src, allEmps) {
   const metricKeys = getCheckedValues('#tmMetric').filter(k => k !== 's30Rate');
   if (!metricKeys.length) { el.innerHTML = '<p class="muted">请至少选择一个指标。</p>'; return; }
   const groups = buildGroups(allEmps);
+  // ★ 每个分组只创建一次 nameSet，跨指标共享
+  const groupOpts = groups.map(gr => ({ nameSet: new Set(gr.names) }));
   const rows = [];
   for (const mk of metricKeys) {
     const metric = METRIC_MAP[mk];
@@ -676,11 +679,12 @@ function renderTeamBody(src, allEmps) {
       '</span>';
     rows.push(rowHTMLSrcToggle('整体 · ' + metricLabel(metric), src, metric, null, bg, overallKey, overallExpanded, overallLabelHtml));
     if (overallExpanded) { const ex = renderExpandRows(src, null, mk, overallKey); for (const r of ex) rows.push(r); }
-    for (const gr of groups) {
+    for (let gi = 0; gi < groups.length; gi++) {
+      const gr = groups[gi];
       if (!gr.names.length) continue;
       const key = 'team|' + gr.label + '|' + mk;
       const expanded = S.expandedRows.has(key);
-      const opts = { nameSet: new Set(gr.names) };
+      const opts = groupOpts[gi];
       const grLabelHtml =
         '<span class="row-name">' + esc(gr.label) + '</span>' +
         '<span class="row-metric">' + esc(metricLabel(metric)) + 

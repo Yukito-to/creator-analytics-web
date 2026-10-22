@@ -383,6 +383,51 @@ const S = {
   forecastWorkdays:new Set()
 };
 
+/* ==================== 性能缓存层 ==================== */
+let _perfCache = null;
+let _setKeyCache = null;
+
+function _resetPerfCache() {
+  _perfCache = {
+    srcEmps: new Map(),
+    filterRecs: new Map(),
+    filterWt: new Map(),
+    inspectionStats: new Map(),
+    calcBySrc: new Map(),
+    calcBySrcAndL1: new Map(),
+    calcByL1: new Map(),
+    s30Agg: new Map(),
+    timeCols: null,
+  };
+  _setKeyCache = new WeakMap();
+}
+_resetPerfCache();
+
+function _setKey(set, prefix) {
+  if (!set) return '';
+  let k = _setKeyCache.get(set);
+  if (k !== undefined) return k;
+  const arr = [];
+  for (const v of set) arr.push(String(v));
+  arr.sort();
+  k = prefix + '[' + arr.join(',') + ']';
+  _setKeyCache.set(set, k);
+  return k;
+}
+
+function _optsKey(o, prefix) {
+  if (!o) return prefix || '';
+  const parts = [prefix || ''];
+  if (o.bizL1) parts.push('L:' + o.bizL1);
+  if (o.src) parts.push('S:' + o.src);
+  if (o.nameSet) parts.push(_setKey(o.nameSet, 'n'));
+  if (o.dateSet) parts.push(_setKey(o.dateSet, 'd'));
+  if (o.wkSet) parts.push(_setKey(o.wkSet, 'w'));
+  if (o.monthSet) parts.push(_setKey(o.monthSet, 'm'));
+  if (o.srcEmps) parts.push(_setKey(o.srcEmps, 'e'));
+  return parts.join('|');
+}
+
 /* ==================== 格式化工具 ==================== */
 const num = v => { if (v===''||v==null) return 0; const n = typeof v === 'number' ? v : parseFloat(String(v).replace(/,/g,'')); return isNaN(n)?0:n; };
 const fmtVal = (n,m) => { if (n==null||!isFinite(n)) return '—'; if (m.pct) return (n*100).toFixed(m.digits)+'%'; return n.toFixed(m.digits); };
@@ -620,13 +665,26 @@ function parseRoster() {
     if (memo.att) S.attOverride = memo.att;
   } catch (_) {}
 }
-function persistMemo() { const resign = {}; for (const e of S.roster) if (e.resignDate) resign[e.name] = e.resignDate; localStorage.setItem('creator_roster_memo', JSON.stringify({ resign, att: S.attOverride })); }
+function persistMemo() {
+  const resign = {};
+  for (const e of S.roster) if (e.resignDate) resign[e.name] = e.resignDate;
+  localStorage.setItem('creator_roster_memo', JSON.stringify({ resign, att: S.attOverride }));
+  _resetPerfCache();
+}
 function getEmp(name) { return S.roster.find(e => e.name === name); }
 function categoryOf(emp, monthStr) { if (!emp) return ''; if (monthStr) { const m = parseInt(monthStr.slice(5,7), 10); if (emp.categories[m] != null && emp.categories[m] !== '') return emp.categories[m]; } return emp.categories['*'] || ''; }
 function catSortKey(c) { for (const k in CAT_ORDER) if (String(c).includes(k)) return CAT_ORDER[k]; return 9; }
 function empBiz(name) { const e = getEmp(name); if (!e) return ''; const b = String(e.biz || ''); if (BIZ_LIST.includes(b)) return b; if (/买手/.test(b)) return '买手合作'; if (/博主/.test(b)) return '博主合作'; return ''; }
 function employeeVisible(e) { if (!e) return false; if (S.hidden && e.resignDate) return false; return true; }
-function srcEmployeeSet(src) { const set = new Set(); for (const r of S.records) if (r.src === src) set.add(r.name); for (const r of S.inspections) if (r.src === src) set.add(r.name); return set; }
+function srcEmployeeSet(src) {
+  let s = _perfCache.srcEmps.get(src);
+  if (s) return s;
+  s = new Set();
+  for (const r of S.records) if (r.src === src) s.add(r.name);
+  for (const r of S.inspections) if (r.src === src) s.add(r.name);
+  _perfCache.srcEmps.set(src, s);
+  return s;
+}
 function bizByL1(l1, defaultBiz) { const b = S.businessMap[l1] || ''; if (BIZ_LIST.includes(b)) return b; return defaultBiz; }
 function bizByL1L2(l1, l2, defaultBiz) {
   const key = (l1 || '') + '|' + (l2 || '');
@@ -945,8 +1003,11 @@ function aggregate(recs, wts, attDays, insp) {
   };
 }
 function filterRecs(o) {
+  const key = _optsKey(o, 'fr');
+  const cached = _perfCache.filterRecs.get(key);
+  if (cached) return cached;
   const { nameSet, dateSet, wkSet, monthSet, bizL1, src } = o || {};
-  return S.records.filter(r => {
+  const result = S.records.filter(r => {
     if (bizL1 && r.biz !== bizL1) return false;
     if (src && r.src !== src) return false;
     if (nameSet && !nameSet.has(r.name)) return false;
@@ -955,10 +1016,15 @@ function filterRecs(o) {
     if (monthSet && !monthSet.has(r.month)) return false;
     return true;
   });
+  _perfCache.filterRecs.set(key, result);
+  return result;
 }
 function filterWt(o) {
+  const key = _optsKey(o, 'fw');
+  const cached = _perfCache.filterWt.get(key);
+  if (cached) return cached;
   const { nameSet, dateSet, wkSet, monthSet, bizL1, srcEmps } = o || {};
-  return S.wtRecords.filter(r => {
+  const result = S.wtRecords.filter(r => {
     if (bizL1 && r.biz !== bizL1) return false;
     if (srcEmps && !srcEmps.has(r.name)) return false;
     if (nameSet && !nameSet.has(r.name)) return false;
@@ -967,8 +1033,13 @@ function filterWt(o) {
     if (monthSet && !monthSet.has(r.month)) return false;
     return true;
   });
+  _perfCache.filterWt.set(key, result);
+  return result;
 }
 function inspectionStats(o) {
+  const key = _optsKey(o, 'is');
+  const cached = _perfCache.inspectionStats.get(key);
+  if (cached) return cached;
   const { nameSet, dateSet, wkSet, monthSet, bizL1, src } = o || {};
   const seen = new Set();
   let total = 0, passCount = 0;
@@ -984,9 +1055,15 @@ function inspectionStats(o) {
     total += 1;
     if (r.pass) passCount += 1;
   }
-  return { total, pass: passCount, fail: total - passCount };
+  const result = { total, pass: passCount, fail: total - passCount };
+  _perfCache.inspectionStats.set(key, result);
+  return result;
 }
 function s30AggFor(biz, opts) {
+  const key = _optsKey(opts, 's30|' + (biz || ''));
+  const cached = _perfCache.s30Agg.get(key);
+  if (cached) return cached;
+
   const timeOpts = {};
   if (opts) {
     if (opts.dateSet)  timeOpts.dateSet  = opts.dateSet;
@@ -996,15 +1073,22 @@ function s30AggFor(biz, opts) {
     if (opts.srcEmps)  timeOpts.srcEmps  = opts.srcEmps;
   }
   const o = Object.assign({ bizL1: biz }, timeOpts);
-  return aggregate(filterRecs(o), filterWt(o), 0, inspectionStats(o));
+  const result = aggregate(filterRecs(o), filterWt(o), 0, inspectionStats(o));
+  _perfCache.s30Agg.set(key, result);
+  return result;
 }
 function calcBySrc(src, opts) {
+  const key = _optsKey(opts, 'cbs|' + src);
+  const cached = _perfCache.calcBySrc.get(key);
+  if (cached) return cached;
+
   const srcEmps = srcEmployeeSet(src);
   const o = Object.assign({ src, srcEmps }, opts || {});
   const recs = filterRecs(o);
   const wts = filterWt(o);
-  const empSet = new Set(recs.map(r => r.name));
-  const dateSet = new Set(recs.map(r => r.date));
+  const empSet = new Set();
+  const dateSet = new Set();
+  for (const r of recs) { empSet.add(r.name); dateSet.add(r.date); }
   let attDays = 0;
   for (const n of empSet) for (const d of dateSet) attDays += attOf(n, d);
   const insp = inspectionStats(o);
@@ -1015,15 +1099,21 @@ function calcBySrc(src, opts) {
   agg.s30Den  = s30.s30Den;
   agg.s30Miss = s30.s30Miss;
   agg.s30Rate = s30.s30Rate;
+  _perfCache.calcBySrc.set(key, agg);
   return agg;
 }
 function calcBySrcAndL1(src, bizL1, opts) {
+  const key = _optsKey(opts, 'cbsl1|' + src + '|' + (bizL1 || ''));
+  const cached = _perfCache.calcBySrcAndL1.get(key);
+  if (cached) return cached;
+
   const srcEmps = srcEmployeeSet(src);
   const o = Object.assign({ src, bizL1, srcEmps }, opts || {});
   const recs = filterRecs(o);
   const wts = filterWt(o);
-  const empSet = new Set(recs.map(r => r.name));
-  const dateSet = new Set(recs.map(r => r.date));
+  const empSet = new Set();
+  const dateSet = new Set();
+  for (const r of recs) { empSet.add(r.name); dateSet.add(r.date); }
   let attDays = 0;
   for (const n of empSet) for (const d of dateSet) attDays += attOf(n, d);
   const insp = inspectionStats(o);
@@ -1033,12 +1123,22 @@ function calcBySrcAndL1(src, bizL1, opts) {
   agg.s30Den  = s30.s30Den;
   agg.s30Miss = s30.s30Miss;
   agg.s30Rate = s30.s30Rate;
+  _perfCache.calcBySrcAndL1.set(key, agg);
   return agg;
 }
-function calcByL1(bizL1, opts) { const o = Object.assign({ bizL1 }, opts || {}); return aggregate(filterRecs(o), filterWt(o), 0, inspectionStats(o)); }
+function calcByL1(bizL1, opts) {
+  const key = _optsKey(opts, 'cbl1|' + (bizL1 || ''));
+  const cached = _perfCache.calcByL1.get(key);
+  if (cached) return cached;
+  const o = Object.assign({ bizL1 }, opts || {});
+  const agg = aggregate(filterRecs(o), filterWt(o), 0, inspectionStats(o));
+  _perfCache.calcByL1.set(key, agg);
+  return agg;
+}
 
 /* ==================== 时间列与表头 ==================== */
 function timeCols() {
+  if (_perfCache.timeCols) return _perfCache.timeCols;
   const latest = S.latestDate;
   const baseWk = S.latestWK || 1;
   const wks = [baseWk-2, baseWk-1, baseWk];
@@ -1053,7 +1153,9 @@ function timeCols() {
     for (let i = 1; i <= 7 && last7.length + fallback.length < 7; i++) { const d = dateAdd(latest, -i); if (d && !dateSet.has(d)) fallback.push(d); }
     last7 = Array.from(new Set([...last7, ...fallback])).sort().slice(-7);
   }
-  return { monthLabel: S.month ? (parseInt(S.month.slice(5,7),10) + '月') : '月度', wks, last7, latest };
+  const result = { monthLabel: S.month ? (parseInt(S.month.slice(5,7),10) + '月') : '月度', wks, last7, latest };
+  _perfCache.timeCols = result;
+  return result;
 }
 function buildHeaderHTML(cols) {
   const ths = [

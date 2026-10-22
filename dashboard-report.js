@@ -1126,7 +1126,7 @@ function reportHTML(d) {
         .sort((x, y) => Math.abs(y.impact) - Math.abs(x.impact)).slice(0, 3);
     }
     const tag = ahtRose ? '负贡献' : (ahtFell ? '正贡献' : '影响值');
-    P.push('<div class="rpt-line"><b>二级AHT</b>（按影响值大小排序：当周度 AHT 上升时，展示负贡献且自身 AHT 上升的二级AHT；当周度 AHT 下降时，展示正贡献且自身 AHT 下降的二级AHT；当周度 AHT 持平，则展示影响值绝对值前三的二级AHT）</div>');
+    P.push('<div class="rpt-line"><b>二级AHT</b></div>');
     if (!top3.length) P.push('<div class="rpt-sub">暂无数据</div>');
     else for (const o of top3) {
       const key = 'aht2r|' + wk + '|' + o.l1 + '|' + o.l2;
@@ -1425,7 +1425,7 @@ function reportToText(d) {
     else if (ahtFell) top3 = list.filter(o => o.impact != null && o.impact > 0 && o.ahtNow != null && o.ahtPrev != null && o.ahtNow < o.ahtPrev).sort((x, y) => y.impact - x.impact).slice(0, 3);
     else top3 = list.filter(o => o.impact != null).sort((x, y) => Math.abs(y.impact) - Math.abs(x.impact)).slice(0, 3);
     const tag = ahtRose ? '负贡献' : (ahtFell ? '正贡献' : '影响值');
-    L.push('二级AHT（按影响值大小排序：当周度 AHT 上升时，展示负贡献且自身 AHT 上升的二级AHT；当周度 AHT 下降时，展示正贡献且自身 AHT 下降的二级AHT；当周度 AHT 持平，则展示影响值绝对值前三的二级AHT）');
+    L.push('二级AHT');
     if (!top3.length) L.push('暂无数据');
     else for (const o of top3) {
       const key = 'aht2r|' + wk + '|' + o.l1 + '|' + o.l2;

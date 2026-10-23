@@ -165,6 +165,20 @@ main { padding: 12px 12px calc(40px + env(safe-area-inset-bottom)); }
   outline: none; transition: .15s ease;
   -webkit-appearance: none; appearance: none;
 }
+/* ★ BUG-5：业务线切换按钮组（替代原 select），作为 label 的兄弟节点独立伸缩 */
+.head-controls .biz-switch {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.head-controls .biz-switch .btn.sm {
+  min-height: 32px;
+  padding: 6px 12px;
+  font-size: 12.5px;
+}
 .head-controls select {
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path d='M2 4l4 4 4-4' stroke='%2377778A' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>");
   background-repeat: no-repeat; background-position: right 10px center;

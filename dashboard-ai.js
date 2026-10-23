@@ -49,8 +49,10 @@ function initBizSwitchers() {
     /* 暴露 paint，供 syncBizSwitchers 在 select.value 被代码改写后调用 */
     el._bizPaint = paint;
 
-    /* 插到 select 前面，与 label 里的其他 flex 子项并排显示 */
-    el.parentNode.insertBefore(wrap, el);
+    /* ★ BUG-5：插到 <label> 之后（兄弟节点），避免破坏 label 的 flex 布局；
+       原先插入 label 内部会让按钮与「业务线」文字挤在同一行且宽度被压缩 */
+    const label = el.closest('label');
+    (label || el).parentNode.insertBefore(wrap, label ? label.nextSibling : el.nextSibling);
   }
 }
 
@@ -301,7 +303,10 @@ function bindEvents() {
   });
   on('#a2Biz', 'change', renderAHT2);
   on('#slaBiz', 'change', renderSLA);
-  on('#s30Biz', 'change', renderS30);
+  on('#s30Biz', 'change', () => {
+    S.expandedRows = new Set();
+    renderS30();
+  });
   /* ★ 出勤看板已融合到员工看板，「#attName」下拉移除 */
   on('#rpBiz', 'change', () => { renderTargetConfig(); renderReport(); });
   on('#rpWK', 'change', renderReport);

@@ -148,6 +148,7 @@ function _statOf(arr) {
  * - 外推超过样本末 7 天后，回归权重线性衰减（最低 20%）
  * - 结果 clamp 到历史同类型 [p10*0.7, p90*1.3]
  */
+/* 注：biz 参数保留用于未来扩展（如未来按业务线添加特殊逻辑），当前未使用 */
 function _predictDailyTotal(stats, date, useWeekend, specialKind, biz) {
   if (!stats) return null;
 
@@ -254,14 +255,19 @@ function buildHolidayMap(days) {
 }
 async function loadHolidaysForYear(year) {
   const url = CN_HOLIDAY_API_BASE + '/' + year + '.json';
+  /* ★ BUG-12：网络挂起时 8 秒内必须 abort，否则 initHolidayData 整体被拖死 */
+  const ctrl = new AbortController();
+  const tid = setTimeout(() => ctrl.abort(), 8000);
   try {
-    const resp = await fetch(url, { cache: 'no-cache' });
+    const resp = await fetch(url, { cache: 'no-cache', signal: ctrl.signal });
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     const json = await resp.json();
     return buildHolidayMap(json.days || []);
   } catch (e) {
     console.warn('[节假日API] ' + year + ' 年数据拉取失败：', e.message);
     return null;
+  } finally {
+    clearTimeout(tid);
   }
 }
 async function initHolidayData() {
@@ -380,7 +386,8 @@ const S = {
   volumeForecast:{},
   forecastInputs:{},
   forecastHolidays:new Set(),
-  forecastWorkdays:new Set()
+  forecastWorkdays:new Set(),
+  _dataVersion: 0
 };
 
 /* ==================== 性能缓存层 ==================== */
@@ -661,7 +668,8 @@ function parseRoster() {
   }
   try {
     const memo = JSON.parse(localStorage.getItem('creator_roster_memo') || '{}');
-    if (memo.resign) for (const e of S.roster) if (memo.resign[e.name]) e.resignDate = memo.resign[e.name];
+    /* ★ BUG-6：文件优先 —— 只补齐文件中缺失的离职日期，避免旧 memo 覆盖新文件 */
+    if (memo.resign) for (const e of S.roster) if (!e.resignDate && memo.resign[e.name]) e.resignDate = memo.resign[e.name];
     if (memo.att) S.attOverride = memo.att;
   } catch (_) {}
 }
@@ -846,6 +854,17 @@ function parseSlaSheet(kind) {
 
 /* ==================== 数据构建 ==================== */
 function buildAll() {
+  /* ★ BUG-1 / BUG-3：每次重建数据时，必须清空所有派生缓存与选择状态，
+     否则重新导入文件后视图仍显示旧数据、或残留旧员工选择 */
+  _resetPerfCache();
+  S._dataVersion = (S._dataVersion || 0) + 1;
+  S.s30Dates = new Set();
+  S.s30MonthOpen = new Set();
+  S.s30MonthInitialized = false;
+  S.expandedRows = new Set();
+  S.personSel = new Set();
+  S.teamSel = { group: new Set(), batch: new Set(), category: new Set() };
+
   S.records = []; S.wtRecords = []; S.inspections = [];
   S.slaBuyer = []; S.slaBlogger = [];
   S.businessMap = {}; S.business2Map = {};
@@ -964,6 +983,11 @@ function buildAll() {
       for (let i = 0; i < 3; i++) { const d = dateAdd(S.latestDate, -i); if (d) S.s30Dates.add(d); }
     }
   }
+
+  /* ★ BUG-7：清理 attOverride / personSel 中残留的旧文件员工名 */
+  const _aliveNames = new Set(S.roster.map(e => e.name));
+  if (S.personSel) for (const n of Array.from(S.personSel)) if (!_aliveNames.has(n)) S.personSel.delete(n);
+  if (S.attOverride) for (const n of Object.keys(S.attOverride)) if (!_aliveNames.has(n)) delete S.attOverride[n];
 }
 
 function attOf(name, date) {
@@ -1691,7 +1715,9 @@ function calcPeriodStats(biz, metricKey, sampleWeeks, refDate) {
 /* 缓存层：避免 renderForecastConfig / renderForecastResult 重复聚合 */
 let _calcPeriodStatsCache = { key: '', data: null };
 function calcPeriodStatsCached(biz, metricKey, sampleWeeks, refDate) {
+  /* ★ BUG-2：key 必须包含 _dataVersion，防止同长度不同内容的文件误命中缓存 */
   const key = [
+    S._dataVersion || 0,
     biz, metricKey, sampleWeeks,
     refDate || S.latestDate || '',
     S.records.length,

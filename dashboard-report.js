@@ -1178,13 +1178,14 @@ function reportHTML(d) {
     const ddPct = (v) => v == null ? '—' : ((v >= 0 ? '+' : '') + (v * 100).toFixed(2) + '%');
     const disp = (v) => v == null ? '—' : (v * 100).toFixed(2) + '%';
     let s = '<b>④、30s接起率：</b>' + disp(r) + '，<span class="rpt-sep">|</span> 周度WoW：' + ddPct(dd) + arrow;
-    if (s30Tgt != null && r != null) {
+    /* ★ BUG-4：s30Tgt 可能被用户设为 0，需防止除零产生 Infinity */
+    if (s30Tgt != null && s30Tgt > 0 && r != null) {
       const rate = r * 100 / s30Tgt;
       const hit = rate >= 100;
       s += '（周度达成率：' + rate.toFixed(2) + '%）' + (hit ? '🟢 （达成）' : '🔴（未达成）');
     }
     s += ' <span class="rpt-sep">|</span> ' + monthLabel + '目标：' + (s30Tgt != null ? trimNum(s30Tgt * 100, 2) + '%' : '—') + '，' + monthLabel + '达成：' + disp(rm);
-    if (s30Tgt != null && rm != null) {
+    if (s30Tgt != null && s30Tgt > 0 && rm != null) {
       const mr = rm * 100 / s30Tgt;
       const mhit = mr >= 100;
       s += '（月度达成率：' + mr.toFixed(2) + '%）' + (mhit ? '🟢 （达成）' : '🔴（未达成）');
@@ -1477,12 +1478,13 @@ function reportToText(d) {
     const ddPct = (v) => v == null ? '—' : ((v >= 0 ? '+' : '') + (v * 100).toFixed(2) + '%');
     const disp = (v) => v == null ? '—' : (v * 100).toFixed(2) + '%';
     let s = '④、30s接起率：' + disp(r) + '，| 周度WoW：' + ddPct(dd) + arrow;
-    if (s30Tgt != null && r != null) {
+    /* ★ BUG-4：s30Tgt 可能被用户设为 0，需防止除零产生 Infinity */
+    if (s30Tgt != null && s30Tgt > 0 && r != null) {
       const rate = r * 100 / s30Tgt;
       s += '（周度达成率：' + rate.toFixed(2) + '%）' + (rate >= 100 ? '🟢 （达成）' : '🔴（未达成）');
     }
     s += ' | ' + monthLabel + '目标：' + (s30Tgt != null ? trimNum(s30Tgt * 100, 2) + '%' : '—') + '，' + monthLabel + '达成：' + disp(rm);
-    if (s30Tgt != null && rm != null) {
+    if (s30Tgt != null && s30Tgt > 0 && rm != null) {
       const mr = rm * 100 / s30Tgt;
       s += '（月度达成率：' + mr.toFixed(2) + '%）' + (mr >= 100 ? '🟢 （达成）' : '🔴（未达成）');
     }

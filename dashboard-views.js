@@ -189,6 +189,8 @@ function refreshAll() {
   renderS30();
   renderAHT2();
   renderSLA();
+  /* ★ BUG-8：目标面板依赖 SLA 数据，重新导入后必须同步刷新 */
+  if (typeof renderTargetConfig === 'function') renderTargetConfig();
   /* ★ 出勤看板已融合到员工看板，renderPerson 内部会联动 */
   renderReport();
   /* 时段预测若当前可见，也刷新（函数在 dashboard-forecast.js） */
@@ -1320,63 +1322,8 @@ function renderSLA() {
     '</tr></thead><tbody>' + rows + '</tbody></table></div>';
 }
 
-/* ==================== 出勤看板 ==================== */
-function renderAttendance() {
-  const el = $('#attBody');
-  if (!el) return;
-  const nameEl = $('#attName');
-  const name = nameEl && nameEl.value;
-  if (!name) { el.innerHTML = '<p class="muted">请选择员工。</p>'; return; }
-  if (!S.month) { el.innerHTML = '<p class="muted">尚未导入数据。</p>'; return; }
-  const emp = getEmp(name);
-  if (!emp) { el.innerHTML = '<p class="muted">未在花名册中找到此员工。</p>'; return; }
-  const [y, m] = S.month.split('-').map(Number);
-  const daysInMonth = new Date(y, m, 0).getDate();
-  const days = [];
-  for (let i = 1; i <= daysInMonth; i++) days.push(S.month + '-' + pad2(i));
-  let monthTotal = 0;
-  for (const d of days) monthTotal += attOf(name, d);
-  const lastWK = S.latestWK || 1;
-  const wkList = [lastWK-2, lastWK-1, lastWK];
-  const wkDates = {};
-  for (const w of wkList) wkDates[w] = [];
-  for (const d of days) { const w = wkOf(d); if (wkDates[w]) wkDates[w].push(d); }
-  const wkTotals = wkList.map(w => ({ w, total: wkDates[w].reduce((s, d) => s + attOf(name, d), 0) }));
-  const cols = timeCols();
-  const last7 = cols.last7.map(d => ({ d, v: attOf(name, d) }));
-
-  const dayCards = days.map(d => {
-    const v = attOf(name, d);
-    const shift = (S.schedule[name] || {})[d] || '';
-    const ov = S.attOverride[name] && S.attOverride[name][d] !== undefined;
-    return '<div class="att-day"><div class="d">' + d.slice(5) + '</div>' +
-      '<input type="number" inputmode="decimal" step="0.01" min="0" max="1" value="' + v.toFixed(2) + '" data-d="' + d + '">' +
-      '<div class="shift">' + esc(shift) + (ov ? ' ✎' : '') + '</div></div>';
-  }).join('');
-
-  el.innerHTML = '<div class="att-stat">' +
-    '<div class="item"><div class="k">月度出勤天数</div><div class="v">' + monthTotal.toFixed(2) + '</div></div>' +
-    wkTotals.map(x => '<div class="item"><div class="k">WK' + x.w + ' 出勤天数</div><div class="v">' + x.total.toFixed(2) + '</div></div>').join('') +
-    '</div><h3 class="sub-title">近 7 天每日出勤</h3><div class="att-stat">' +
-    last7.map(x => '<div class="item"><div class="k">' + x.d.slice(5) + '</div><div class="v">' + x.v.toFixed(2) + '</div></div>').join('') +
-    '</div><h3 class="sub-title">当月每日出勤（可手动调整 0~1）</h3><div class="att-day-grid">' + dayCards + '</div>';
-
-  el.querySelectorAll('.att-day input').forEach(inp => {
-    inp.addEventListener('change', () => {
-      const d = inp.dataset.d;
-      let v = parseFloat(inp.value);
-      if (isNaN(v)) v = 0;
-      v = Math.max(0, Math.min(1, v));
-      v = Math.round(v * 100) / 100;
-      inp.value = v.toFixed(2);
-      if (!S.attOverride[name]) S.attOverride[name] = {};
-      S.attOverride[name][d] = v;
-      persistMemo();
-      renderAttendance();
-      refreshAll();
-    });
-  });
-}
+/* ★ BUG-10：删除 renderAttendance()——该视图已并入员工看板，
+   且 #attBody / #attName 在 index.html 中不存在，是纯死代码 */
 
 /* ============================================================
    END OF dashboard-views.js

@@ -308,7 +308,9 @@ function renderForecastConfig() {
   /* 计算回归预测值，用于占位提示 */
   let regrPreview = null;
   try {
-    const stats = calcPeriodStatsCached(biz, 'caseVolume', parseInt((($('#fcSampleWeeks') || {}).value) || '4', 10));
+    const _swEl = document.getElementById('fcSampleWeeks');
+    const _swVal = (_swEl && _swEl.value) || '4';
+    const stats = calcPeriodStatsCached(biz, 'caseVolume', parseInt(_swVal, 10));
     if (stats && stats.totalRegression) regrPreview = stats;
   } catch (_) {}
 
@@ -321,9 +323,15 @@ function renderForecastConfig() {
 
     let val = S.forecastInputs[biz][date];
     let isAuto = false;
-    if (val === undefined || val === '') {
+    /* ★ 行为-4：val === null 表示「用户主动清空」，此时不回填 volumeMap；
+       val === undefined 才走自动填充逻辑 */
+    if (val === undefined) {
       if (volumeMap[date] != null) { val = volumeMap[date]; isAuto = true; hasAutoData = true; }
       else { val = ''; }
+    } else if (val === null) {
+      val = '';
+    } else if (val === '') {
+      val = '';
     }
 
     let regrVal = '';
@@ -414,7 +422,9 @@ function renderForecastConfig() {
 
   grid.querySelectorAll('input[type=number]').forEach(inp => {
     inp.addEventListener('input', () => {
-      S.forecastInputs[biz][inp.dataset.date] = inp.value;
+      const v = inp.value;
+      /* ★ 行为-4：空字符串时存 null（标记用户主动清空），避免被 volumeMap 回填 */
+      S.forecastInputs[biz][inp.dataset.date] = (v === '') ? null : v;
     });
   });
 

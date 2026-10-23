@@ -359,9 +359,10 @@ function renderForecastConfig() {
         console.warn('[renderForecastConfig] _predictDailyTotal 失败：', e);
       }
       if (pr && pr.value > 0) {
-        const srcTag = pr.source === 'regression' ? '回归'
-                     : pr.source === 'special'    ? '特殊日'
-                     : '中位';
+        const srcTag = pr.source === '近期均值+回归' ? '混合'
+                     : pr.source === '近期同星均值' ? '同星'
+                     : pr.source === 'special'      ? '特殊日'
+                     : '均值';
         /* ★ 特殊日额外标注样本量，便于用户核对「历史 25/28 日量级」 */
         let sampleTip = '';
         if (pr.source === 'special' && specialKind != null) {

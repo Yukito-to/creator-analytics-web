@@ -152,25 +152,45 @@ function _statOf(arr) {
 function _predictDailyTotal(stats, date, useWeekend, specialKind, biz) {
   if (!stats) return null;
 
-  /* ① 特殊日优先 */
+  /* ① 特殊日优先（带 1.1 Buffer） */
   if (specialKind != null && stats.specialTotals) {
     const st = stats.specialTotals[String(specialKind)];
     if (st && st.n >= 1) {
-      return { value: Math.round(st.median), source: 'special' };
+      return { value: Math.round(st.median * 1.1), source: 'special' };
     }
   }
 
-  /* ② 取历史同类型统计；样本不足回退到 all */
-  const ts = stats.totalStats || {};
-  const typeStat = useWeekend ? ts.weekend : ts.weekday;
-  const fallbackStat = ts.all;
-  let hist = null;
-  if (typeStat && typeStat.n >= 3) hist = typeStat;
-  else if (fallbackStat && fallbackStat.n >= 2) hist = fallbackStat;
-  else hist = typeStat || fallbackStat;
-  if (!hist || hist.n < 1) return null;
+  const dailyStats = stats.dailyStats || [];
+  const targetWd = new Date(date + 'T00:00:00Z').getUTCDay();
+  const sameWdStats = [];
 
-  /* ③ 回归选择（工作日 / 周末，样本不足回退到 all） */
+  /* ② 从后往前提取过去 4 周相同星期几的真实数据量 */
+  for (let i = dailyStats.length - 1; i >= 0; i--) {
+    const d = dailyStats[i];
+    if (d.date >= date) continue;
+    const wd = new Date(d.date + 'T00:00:00Z').getUTCDay();
+    if (wd === targetWd) {
+      sameWdStats.push(d.total);
+      if (sameWdStats.length >= 4) break;
+    }
+  }
+
+  let baseValue = 0;
+  let source = '近期同星均值';
+
+  if (sameWdStats.length > 0) {
+    baseValue = sameWdStats.reduce((a, b) => a + b, 0) / sameWdStats.length;
+  } else {
+    /* 无同星期数据时，退回到工作日/周末均值 */
+    const ts = stats.totalStats || {};
+    const hist = useWeekend ? ts.weekend : ts.weekday;
+    baseValue = hist && hist.mean ? hist.mean : (hist && hist.median ? hist.median : 0);
+    source = '历史均值';
+  }
+
+  if (baseValue <= 0) return null;
+
+  /* ③ 应用回归趋势修正（若 R² 尚可，用回归平滑近期波动） */
   const regrW = stats.totalRegression && stats.totalRegression.weekend;
   const regrD = stats.totalRegression && stats.totalRegression.weekday;
   const regrAll = stats.totalRegression && stats.totalRegression.all;
@@ -179,43 +199,35 @@ function _predictDailyTotal(stats, date, useWeekend, specialKind, biz) {
     ? primary
     : ((regrAll && regrAll.n >= 3 && isFinite(regrAll.slope) && isFinite(regrAll.intercept)) ? regrAll : null);
 
-  let pred = hist.median;
-  let source = 'history';
-
   if (useRegr) {
     const x = _dateDiffDays(stats.sampleRange.start, date);
     const regrPred = useRegr.slope * x + useRegr.intercept;
     const r2 = Number(useRegr.r2) || 0;
-
-    let wRegr;
-    if      (r2 >= 0.70) wRegr = 0.70;
+    let wRegr = 0;
+    if (r2 >= 0.70) wRegr = 0.70;
     else if (r2 >= 0.50) wRegr = 0.50;
     else if (r2 >= 0.30) wRegr = 0.30;
-    else                 wRegr = 0.00;
-
-    const lastX = _dateDiffDays(stats.sampleRange.start, stats.sampleRange.end);
-    const horizon = x - lastX;
-    if (horizon > 7) {
-      const decay = Math.max(0.2, 1 - (horizon - 7) / 30);
-      wRegr *= decay;
-    }
 
     if (wRegr > 0 && isFinite(regrPred) && regrPred > 0) {
-      pred = wRegr * regrPred + (1 - wRegr) * hist.median;
-      source = 'regression';
-    } else {
-      pred = hist.median;
-      source = 'history';
+      baseValue = wRegr * regrPred + (1 - wRegr) * baseValue;
+      source = '近期均值+回归';
     }
   }
 
-  /* ④ 合理性约束：clamp 到历史同类型区间 */
-  const lo = Math.max(0, (hist.p10 != null ? hist.p10 : hist.min) * 0.7);
-  const hi = (hist.p90 != null ? hist.p90 : hist.max) * 1.3;
-  if (isFinite(lo) && pred < lo) pred = lo;
-  if (isFinite(hi) && pred > hi) pred = hi;
+  /* ④ 预留 110% 排班 Buffer */
+  let finalValue = baseValue * 1.1;
 
-  return { value: Math.round(pred), source };
+  /* ⑤ 合理性区间约束 */
+  const ts = stats.totalStats || {};
+  const hist = useWeekend ? ts.weekend : ts.weekday;
+  if (hist && hist.p10 && hist.p90) {
+    const lo = Math.max(0, hist.p10 * 0.7);
+    const hi = hist.p90 * 1.3;
+    if (finalValue < lo) finalValue = lo;
+    if (finalValue > hi) finalValue = hi;
+  }
+
+  return { value: Math.round(finalValue), source };
 }
 
 const BUYER_AHT2_ORDER = [['买手带货','业务介绍'],['买手带货','准入门槛'],['买手带货','买手撮合'],['买手带货','商家分销'],['买手带货','买手选品'],['买手带货','笔记带货'],['买手带货','橱窗带货'],['买手带货','蓝链带货'],['买手带货','直播带货'],['买手带货','营销运营'],['买手带货','直播间审核'],['买手带货','笔记审核'],['买手带货','账号违规'],['买手带货','买手拿样'],['买手带货','买手成长'],['买手带货','商家分销结算'],['买手带货','经营数据'],['买手带货','买手活动'],['买手带货','合作纠纷'],['买手带货','买手财务'],['买手合作','其他']];

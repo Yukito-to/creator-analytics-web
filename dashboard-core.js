@@ -558,7 +558,23 @@ async function handleFile(file) {
       sheets = [{ name: base || 'Sheet1', rows: parseCSV(text) }];
     } else {
       const buf = await file.arrayBuffer();
-      sheets = await XlsxParser.parseWorkbook(buf, (p, t) => setProgress(p * 0.85, t));
+      /* ★ 30MB+ 提速关键：
+         - 首次导入时 S.sheets 为空 → neededSheets = null → 全解析
+         - 后续导入时 S.sheets 保留了上次识别出的 sheet 名 → 只解析这些 sheet，
+           跳过文件里无关的表（如「预测量」「SLA」之外的历史遗留表），
+           解析时间随无关 sheet 数量线性下降。
+         - 若用户点「重置」后 S.sheets = {}，会重新触发全解析。 */
+      const neededSheets = (function () {
+        const keys = Object.keys(S.sheets || {});
+        if (!keys.length) return null;
+        const names = [];
+        for (const k of keys) {
+          const sh = S.sheets[k];
+          if (sh && sh.name) names.push(sh.name);
+        }
+        return names.length ? names : null;
+      })();
+      sheets = await XlsxParser.parseWorkbook(buf, (p, t) => setProgress(p * 0.85, t), neededSheets);
     }
     setProgress(88, '识别工作表类型…'); await sleep(30);
     S.sheets = {}; S.headers = {}; S.mapping = {};

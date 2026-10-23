@@ -36,7 +36,7 @@ function diffText(cur, prev, metric) {
 
 function rowHTMLSrcToggle(label, src, metric, opts, rowBg, toggleKey, expanded, labelHtml) {
   const cols = timeCols();
-  const m = calcBySrc(src, Object.assign({}, opts || {}, { monthSet: new Set([S.month]) }));
+  const monthAggs = (cols.months || []).map(mo => calcBySrc(src, Object.assign({}, opts || {}, { monthSet: new Set([mo]) })));
   const wkA = cols.wks.map(w => calcBySrc(src, Object.assign({}, opts || {}, { wkSet: new Set([w]) })));
   const dayA = cols.last7.map(d => calcBySrc(src, Object.assign({}, opts || {}, { dateSet: new Set([d]) })));
   const tdStyle = rowBg ? ' style="background:' + rowBg + '"' : '';
@@ -56,7 +56,12 @@ function rowHTMLSrcToggle(label, src, metric, opts, rowBg, toggleKey, expanded, 
     }
     firstTd = '<td' + tdStyle + '><span class="row-toggle" data-key="' + esc(toggleKey) + '">' + arrow + '</span>' + labelWithTip + '</td>';
   }
-  const tds = [firstTd, '<td' + tdStyle + '>' + fmtVal(m[metric.key], metric) + '</td>'];
+  const tds = [firstTd];
+  if (monthAggs.length) {
+    for (const mAgg of monthAggs) tds.push('<td' + tdStyle + '>' + fmtVal(mAgg[metric.key], metric) + '</td>');
+  } else {
+    tds.push('<td' + tdStyle + '>—</td>');
+  }
   for (const w of wkA) tds.push('<td' + tdStyle + '>' + fmtVal(w[metric.key], metric) + '</td>');
   tds.push('<td' + tdStyle + '>' + diffHTML(wkA[1][metric.key], wkA[0][metric.key], metric) + '</td>');
   tds.push('<td' + tdStyle + '>' + diffHTML(wkA[2][metric.key], wkA[1][metric.key], metric) + '</td>');
@@ -66,7 +71,7 @@ function rowHTMLSrcToggle(label, src, metric, opts, rowBg, toggleKey, expanded, 
 
 function rowHTMLByL1(label, src, bizL1, metric, opts, rowBg) {
   const cols = timeCols();
-  const m = calcBySrcAndL1(src, bizL1, Object.assign({}, opts || {}, { monthSet: new Set([S.month]) }));
+  const monthAggs = (cols.months || []).map(mo => calcBySrcAndL1(src, bizL1, Object.assign({}, opts || {}, { monthSet: new Set([mo]) })));
   const wkA = cols.wks.map(w => calcBySrcAndL1(src, bizL1, Object.assign({}, opts || {}, { wkSet: new Set([w]) })));
   const dayA = cols.last7.map(d => calcBySrcAndL1(src, bizL1, Object.assign({}, opts || {}, { dateSet: new Set([d]) })));
   const tdStyle = rowBg ? ' style="background:' + rowBg + '"' : '';
@@ -74,7 +79,12 @@ function rowHTMLByL1(label, src, bizL1, metric, opts, rowBg) {
   if (metric && metric.tip) {
     labelWithTip += ' <span class="help" data-tip="' + esc(metric.tip) + '">?</span>';
   }
-  const tds = ['<td' + tdStyle + '>' + labelWithTip + '</td>', '<td' + tdStyle + '>' + fmtVal(m[metric.key], metric) + '</td>'];
+  const tds = ['<td' + tdStyle + '>' + labelWithTip + '</td>'];
+  if (monthAggs.length) {
+    for (const mAgg of monthAggs) tds.push('<td' + tdStyle + '>' + fmtVal(mAgg[metric.key], metric) + '</td>');
+  } else {
+    tds.push('<td' + tdStyle + '>—</td>');
+  }
   for (const w of wkA) tds.push('<td' + tdStyle + '>' + fmtVal(w[metric.key], metric) + '</td>');
   tds.push('<td' + tdStyle + '>' + diffHTML(wkA[1][metric.key], wkA[0][metric.key], metric) + '</td>');
   tds.push('<td' + tdStyle + '>' + diffHTML(wkA[2][metric.key], wkA[1][metric.key], metric) + '</td>');
@@ -84,15 +94,20 @@ function rowHTMLByL1(label, src, bizL1, metric, opts, rowBg) {
 
 function inspRowToggleHTML(label, src, opts, valueKey, toggleKey, expanded, rowBg) {
   const cols = timeCols();
+  const monthAggs = (cols.months || []).map(mo => pick({ monthSet: new Set([mo]) }));
   const queryOpts = Object.assign({}, opts || {}, { src });
   function pick(o) { return inspectionStats(Object.assign({}, queryOpts, o))[valueKey] || 0; }
-  const m = pick({ monthSet: new Set([S.month]) });
   const wkA = cols.wks.map(w => pick({ wkSet: new Set([w]) }));
   const dayA = cols.last7.map(d => pick({ dateSet: new Set([d]) }));
   const tdStyle = rowBg ? ' style="background:' + rowBg + '"' : '';
   const arrow = expanded ? '▼' : '▶';
   const firstTd = '<td' + tdStyle + '><span class="row-toggle" data-key="' + esc(toggleKey) + '">' + arrow + '</span>' + esc(label) + '</td>';
-  const tds = [firstTd, '<td' + tdStyle + '>' + fmtInt(m) + '</td>'];
+  const tds = [firstTd];
+  if (monthAggs.length) {
+    for (const mAgg of monthAggs) tds.push('<td' + tdStyle + '>' + fmtInt(mAgg) + '</td>');
+  } else {
+    tds.push('<td' + tdStyle + '>—</td>');
+  }
   for (const w of wkA) tds.push('<td' + tdStyle + '>' + fmtInt(w) + '</td>');
   tds.push('<td' + tdStyle + '>' + diffInt(wkA[1], wkA[0]) + '</td>');
   tds.push('<td' + tdStyle + '>' + diffInt(wkA[2], wkA[1]) + '</td>');
@@ -104,11 +119,16 @@ function inspRowByL1HTML(label, src, bizL1, opts, valueKey, rowBg) {
   const cols = timeCols();
   const queryOpts = Object.assign({}, opts || {}, { src, bizL1 });
   function pick(o) { return inspectionStats(Object.assign({}, queryOpts, o))[valueKey] || 0; }
-  const m = pick({ monthSet: new Set([S.month]) });
+  const monthAggs = (cols.months || []).map(mo => pick({ monthSet: new Set([mo]) }));
   const wkA = cols.wks.map(w => pick({ wkSet: new Set([w]) }));
   const dayA = cols.last7.map(d => pick({ dateSet: new Set([d]) }));
   const tdStyle = rowBg ? ' style="background:' + rowBg + '"' : '';
-  const tds = ['<td' + tdStyle + '>' + esc(label) + '</td>', '<td' + tdStyle + '>' + fmtInt(m) + '</td>'];
+  const tds = ['<td' + tdStyle + '>' + esc(label) + '</td>'];
+  if (monthAggs.length) {
+    for (const mAgg of monthAggs) tds.push('<td' + tdStyle + '>' + fmtInt(mAgg) + '</td>');
+  } else {
+    tds.push('<td' + tdStyle + '>—</td>');
+  }
   for (const w of wkA) tds.push('<td' + tdStyle + '>' + fmtInt(w) + '</td>');
   tds.push('<td' + tdStyle + '>' + diffInt(wkA[1], wkA[0]) + '</td>');
   tds.push('<td' + tdStyle + '>' + diffInt(wkA[2], wkA[1]) + '</td>');
@@ -151,12 +171,17 @@ function rateSpan(rate, biz) {
 function rowHTMLS30(label, biz, metric) {
   const cols = timeCols();
   const calc = opts => calcByL1(biz, opts);
-  const m = calc({ monthSet: new Set([S.month]) });
+  const monthAggs = (cols.months || []).map(mo => calc({ monthSet: new Set([mo]) }));
   const wkA = cols.wks.map(w => calc({ wkSet: new Set([w]) }));
   const dayA = cols.last7.map(d => calc({ dateSet: new Set([d]) }));
   const cell = v => (metric.key === 's30Rate') ? rateSpan(v, biz) : fmtVal(v, metric);
   const labelWithTip = esc(label) + (metric.tip ? ' <span class="help" data-tip="' + esc(metric.tip) + '">?</span>' : '');
-  const tds = ['<td>' + labelWithTip + '</td>', '<td>' + cell(m[metric.key]) + '</td>'];
+  const tds = ['<td>' + labelWithTip + '</td>'];
+  if (monthAggs.length) {
+    for (const mAgg of monthAggs) tds.push('<td>' + cell(mAgg[metric.key]) + '</td>');
+  } else {
+    tds.push('<td>—</td>');
+  }
   for (const w of wkA) tds.push('<td>' + cell(w[metric.key]) + '</td>');
   tds.push('<td>' + diffHTML(wkA[1][metric.key], wkA[0][metric.key], metric) + '</td>');
   tds.push('<td>' + diffHTML(wkA[2][metric.key], wkA[1][metric.key], metric) + '</td>');

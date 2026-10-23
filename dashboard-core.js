@@ -1193,15 +1193,35 @@ function timeCols() {
     for (let i = 1; i <= 7 && last7.length + fallback.length < 7; i++) { const d = dateAdd(latest, -i); if (d && !dateSet.has(d)) fallback.push(d); }
     last7 = Array.from(new Set([...last7, ...fallback])).sort().slice(-7);
   }
-  const result = { monthLabel: S.month ? (parseInt(S.month.slice(5,7),10) + '月') : '月度', wks, last7, latest };
+  /* ★ 双月独立推算：当前月 + 上个月，各自独立成列 */
+  let months = [];
+  if (S.month) {
+    const y = parseInt(S.month.slice(0, 4), 10);
+    const m = parseInt(S.month.slice(5, 7), 10);
+    const prevM = m === 1 ? 12 : m - 1;
+    const prevY = m === 1 ? y - 1 : y;
+    const prevMonth = prevY + '-' + pad2(prevM);
+    months = [prevMonth, S.month];
+  }
+  
+  // 生成独立的月份标签：['9月', '10月']
+  const monthLabels = months.map(mo => parseInt(mo.slice(5, 7), 10) + '月');
+
+  const result = { months, monthLabels, wks, last7, latest };
   _perfCache.timeCols = result;
   return result;
 }
 function buildHeaderHTML(cols) {
-  const ths = [
-    '<th>指标</th>', 
-    '<th>' + esc(cols.monthLabel) + ' <span class="help" data-tip="当前数据最新月份的整月汇总">?</span></th>'
-  ];
+  const ths = ['<th>指标</th>'];
+  if (cols.months && cols.months.length) {
+    cols.months.forEach((mo, i) => {
+      const label = cols.monthLabels[i] || '月度';
+      const tip = i === 0 ? '上个月整月汇总' : '当前月整月汇总';
+      ths.push('<th>' + esc(label) + ' <span class="help" data-tip="' + tip + '">?</span></th>');
+    });
+  } else {
+    ths.push('<th>月度 <span class="help" data-tip="月度汇总">?</span></th>');
+  }
   for (const w of cols.wks) {
     ths.push('<th>WK' + w + ' <span class="help" data-tip="该自然周的汇总">?</span></th>');
   }

@@ -811,6 +811,11 @@ function parseVolumeSheet() {
 }
 function parseDateFlexible(v, refYear, refMonth) {
   if (v === '' || v == null) return '';
+  /* ★ 修复：由于解析器关闭了 cellDates，Excel 真实日期变为数字序列号，
+     必须先拦截 number 类型并交由 parseDate 处理 */
+  if (typeof v === 'number') {
+    return parseDate(v);
+  }
   const s = String(v).trim();
   if (!s) return '';
   let m = /^(\d{4})[\/\-年.](\d{1,2})[\/\-月.](\d{1,2})/.exec(s);
@@ -899,6 +904,7 @@ function buildAll() {
   S.shiftMap = {}; S.schedule = {}; S.scheduleDates = [];
   S.forecastBuyer = {}; S.forecastBlogger = {};
   S.volumeForecast = {};
+  S.forecastInputs = {};   /* ★ 修复：重新导入文件时清空手动输入缓存，避免旧值拦截自动读取 */
 
   if (S.sheets.business) { for (const o of rowsToObjs('business')) { const l1 = String(o.l1||'').trim(); const biz = String(o.biz||'').trim(); if (l1 && biz && !S.businessMap[l1]) S.businessMap[l1] = biz; } }
   if (S.sheets.business2) { for (const o of rowsToObjs('business2')) { const l1 = String(o.l1||'').trim(); const l2 = String(o.l2||'').trim(); const biz = String(o.biz||'').trim(); if (l1 && l2 && biz) { const key = l1 + '|' + l2; if (!S.business2Map[key]) S.business2Map[key] = biz; } } }

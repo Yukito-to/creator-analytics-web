@@ -461,18 +461,29 @@ function isPassValue(v) { const s = String(v == null ? '' : v).trim(); if (!s) r
 function bizToSrc(biz) { return biz === '博主合作' ? 'blogger' : 'buyer'; }
 
 /* ==================== 日期工具 ==================== */
+const _dateCache = new Map();   /* ★ 极速缓存：避免几十万行重复执行正则 */
 function parseDate(v) {
   if (v === '' || v == null) return '';
   if (v instanceof Date) return v.getFullYear()+'-'+pad2(v.getMonth()+1)+'-'+pad2(v.getDate());
   if (typeof v === 'number') { const d = new Date(Date.UTC(1899,11,30) + Math.round(v*86400000)); return d.getUTCFullYear()+'-'+pad2(d.getUTCMonth()+1)+'-'+pad2(d.getUTCDate()); }
+  
   const s = String(v).trim();
+  if (_dateCache.has(s)) return _dateCache.get(s);
+
+  let res = '';
   let m = /^(\d{4})[\/\-年.](\d{1,2})[\/\-月.](\d{1,2})/.exec(s);
-  if (m) return m[1]+'-'+pad2(m[2])+'-'+pad2(m[3]);
-  m = /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/.exec(s);
-  if (m) return m[3]+'-'+pad2(m[1])+'-'+pad2(m[2]);
-  const d = new Date(s);
-  if (!isNaN(d.getTime())) return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate());
-  return '';
+  if (m) { res = m[1]+'-'+pad2(m[2])+'-'+pad2(m[3]); }
+  else {
+    m = /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/.exec(s);
+    if (m) { res = m[3]+'-'+pad2(m[1])+'-'+pad2(m[2]); }
+    else {
+      const d = new Date(s);
+      if (!isNaN(d.getTime())) res = d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate());
+    }
+  }
+  
+  _dateCache.set(s, res);
+  return res;
 }
 const monthOf = d => d ? d.slice(0,7) : '';
 const wkOf = d => { if (!d) return 0; const t = Date.parse(d + 'T00:00:00Z'); if (isNaN(t)) return 0; return WK_BASE_NUM + Math.floor(Math.floor((t - WK_BASE_UTC) / 86400000) / 7); };
@@ -890,6 +901,7 @@ function buildAll() {
   /* ★ BUG-1 / BUG-3：每次重建数据时，必须清空所有派生缓存与选择状态，
      否则重新导入文件后视图仍显示旧数据、或残留旧员工选择 */
   _resetPerfCache();
+  _dateCache.clear(); /* ★ 导入新文件时清空日期解析缓存 */
   S._dataVersion = (S._dataVersion || 0) + 1;
   S.s30Dates = new Set();
   S.s30MonthOpen = new Set();

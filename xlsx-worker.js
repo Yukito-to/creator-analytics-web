@@ -65,12 +65,39 @@ self.onmessage = function (e) {
     const ws = wb.Sheets[name];
     if (!ws) continue;
 
-    let rows;
+    let rows = [];
+    
     try {
-      rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+      /* ★ 极限提速：在 dense 模式下，直接读取二维单元格数组 ws['!data'] */
+      const rawData = ws['!data'] || [];
+      let maxCols = 0;
+      
+      // 1. 预扫描最大列数，避免动态扩容
+      for (let r = 0; r < rawData.length; r++) {
+        if (rawData[r] && rawData[r].length > maxCols) maxCols = rawData[r].length;
+      }
+      
+      // 2. 快速构建纯值二维数组
+      for (let r = 0; r < rawData.length; r++) {
+        const rowCells = rawData[r];
+        if (!rowCells) { rows.push([]); continue; }
+        
+        const rowArr = new Array(maxCols);
+        for (let c = 0; c < maxCols; c++) {
+          const cell = rowCells[c];
+          if (!cell) { 
+            rowArr[c] = ''; 
+          } else {
+            // 提取原始值 v，如果没有则退回格式化文本 w
+            rowArr[c] = cell.v !== undefined ? cell.v : (cell.w !== undefined ? cell.w : '');
+          }
+        }
+        rows.push(rowArr);
+      }
     } catch (err) {
-      self.postMessage({ type: 'error', message: 'sheet「' + name + '」解析失败：' + (err && err.message || err) });
-      return;
+      // 极端异常情况降级回 sheet_to_json
+      console.warn('底层读取失败，降级使用 sheet_to_json', err);
+      rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
     }
     result.push({ name: name, rows: rows, cellColors: [] });
 

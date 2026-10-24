@@ -2064,6 +2064,50 @@ function formatForecastAiContext(ctx) {
   return L.join('\n');
 }
 
+/* ★ 业务线下拉 → 按钮组 */
+function initBizSwitchers() {
+  const ids = ['#ovBiz','#peBiz','#tmBiz','#s30Biz','#a2Biz','#slaBiz','#rpBiz','#fcBiz'];
+  for (const sel of ids) {
+    const el = $(sel);
+    if (!el || el._bizSwitched) continue;
+    el._bizSwitched = true;
+
+    el.style.display = 'none';
+
+    const wrap = document.createElement('div');
+    wrap.className = 'biz-switch';
+    wrap.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;align-items:center';
+    wrap.innerHTML = BIZ_LIST.map(b =>
+      '<button type="button" class="btn sm" data-biz="' + esc(b) + '">' + esc(b) + '</button>'
+    ).join('');
+
+    const paint = () => {
+      const v = el.value;
+      wrap.querySelectorAll('button').forEach(b => {
+        const on = b.dataset.biz === v;
+        b.classList.toggle('primary', on);
+        b.classList.toggle('sm', !on);
+      });
+    };
+    paint();
+
+    wrap.querySelectorAll('button').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const v = btn.dataset.biz;
+        if (el.value === v) return;
+        el.value = v;
+        paint();
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+    });
+
+    el._bizPaint = paint;
+
+    const label = el.closest('label');
+    (label || el).parentNode.insertBefore(wrap, label ? label.nextSibling : el.nextSibling);
+  }
+}
+
 /* ★ 周次下拉：原生 <select> + .sc-native-select 样式覆盖，保证跨浏览器统一外观。 */
 function initWeekPicker() {
   const sel = document.getElementById('rpWK');

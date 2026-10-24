@@ -1653,6 +1653,8 @@ document.addEventListener('click', function(e) {
     } else {
       alert(tipText);
     }
+  }
+});
 
 /* ★ 事件绑定主函数 */
 function bindEvents() {

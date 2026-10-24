@@ -2164,6 +2164,16 @@ function initWeekPicker() {
       item.addEventListener('click', (e) => {
         e.stopPropagation();
         const val = item.dataset.val;
+        if (sel.value !== val) {
+          sel.value = val;
+          sel.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        list.style.display = 'none';
+      });
+    });
+  }
+}
+
 /* ★ 让所有业务线按钮组重新高亮（读各自的 select.value） */
 function syncBizSwitchers() {
   const ids = ['#ovBiz','#peBiz','#tmBiz','#s30Biz','#a2Biz','#slaBiz','#rpBiz','#fcBiz'];

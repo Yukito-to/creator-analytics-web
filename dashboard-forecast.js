@@ -541,11 +541,7 @@ function renderForecastResult() {
                 : label.indexOf('博主') === 0 ? '#C75C5C'
                 : label.indexOf('自定义') === 0 ? '#7B8FBF'
                 : '#77778A';
-    const srcTag = r.totalSource === 'regression' ? '回归'
-                 : r.totalSource === 'history'    ? '中位'
-                 : r.totalSource === 'special'    ? '特殊日'
-                 : r.totalSource === 'user'       ? '手动'
-                 : '—';
+    const srcTag = FORECAST_SOURCE_LABEL[r.totalSource] || '—';   // ★ BUG-FIX P2：统一来源标签
     thead += '<th style="text-align:center;vertical-align:middle;color:' + color + ';font-weight:500;font-size:11px;padding-top:4px;padding-bottom:5px">' + label +
       '<br><span style="font-size:9px;color:#A0A0AE;font-weight:400">' + srcTag + '</span></th>';
   }

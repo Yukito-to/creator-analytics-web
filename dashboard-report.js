@@ -1647,6 +1647,14 @@ function renderReport() {
     const wk = parseInt(wkVal, 10) || S.latestWK;
     const d = buildReport(biz, wk);
 
+    // ★ BUG-FIX P1：buildReport 在 S.month 为空时返回 null，必须短路
+    if (!d) {
+      el.innerHTML = '<p class="muted">无法确定数据月份，请检查 CASE 日期列是否可解析。</p>';
+      if (copyBtn) copyBtn.disabled = true;
+      if (mdBtn) mdBtn.disabled = true;
+      return;
+    }
+
     if (!d.week.cur.caseVolume && !d.s30.week.cur.s30Den) {
       el.innerHTML = '<p class="muted">WK' + wk + ' 暂无数据，请选择其他周次。</p>';
       if (copyBtn) copyBtn.disabled = true;

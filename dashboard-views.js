@@ -286,7 +286,35 @@ function renderMapping() {
   el.querySelectorAll('select').forEach(sel => {
     sel.addEventListener('change', () => {
       S.mapping[sel.dataset.mod][sel.dataset.field] = sel.value;
-      parseRoster(); buildAll(); renderRoster(); refreshAll();
+
+      /* ★ BUG-FIX P2：buildAll() 内部会无条件重置 personSel / teamSel / forecastInputs /
+         expandedRows。修改字段映射不应该清空这些用户状态，因此先快照 → 重建 → 恢复。
+         失效员工名在恢复后单独清理。 */
+      const snap = {
+        personSel: new Set(S.personSel),
+        teamSel: {
+          group: new Set(S.teamSel.group),
+          batch: new Set(S.teamSel.batch),
+          category: new Set(S.teamSel.category),
+        },
+        forecastInputs: JSON.parse(JSON.stringify(S.forecastInputs || {})),
+        expandedRows: new Set(S.expandedRows),
+      };
+
+      parseRoster();
+      buildAll();
+
+      S.personSel = snap.personSel;
+      S.teamSel = snap.teamSel;
+      S.forecastInputs = snap.forecastInputs;
+      S.expandedRows = snap.expandedRows;
+
+      /* 清理花名册中已不存在的员工名 */
+      const alive = new Set(S.roster.map(e => e.name));
+      for (const n of Array.from(S.personSel)) if (!alive.has(n)) S.personSel.delete(n);
+
+      renderRoster();
+      refreshAll();
     });
   });
 }

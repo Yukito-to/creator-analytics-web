@@ -148,6 +148,15 @@ function _statOf(arr) {
  * - 外推超过样本末 7 天后，回归权重线性衰减（最低 20%）
  * - 结果 clamp 到历史同类型 [p10*0.7, p90*1.3]
  */
+/* ★ BUG-FIX P2：预测来源统一标签映射，避免多处 UI 重复且不一致 */
+const FORECAST_SOURCE_LABEL = {
+  user:    '手动',
+  special: '特殊日',
+  blend:   '混合',
+  samewd:  '同星',
+  history: '历史',
+};
+
 /* 注：biz 参数保留用于未来扩展（如未来按业务线添加特殊逻辑），当前未使用 */
 function _predictDailyTotal(stats, date, useWeekend, specialKind, biz) {
   if (!stats) return null;
@@ -176,7 +185,7 @@ function _predictDailyTotal(stats, date, useWeekend, specialKind, biz) {
   }
 
   let baseValue = 0;
-  let source = '近期同星均值';
+  let source = 'samewd';   // ★ BUG-FIX P2：改用英文 key，与展示层统一映射
 
   if (sameWdStats.length > 0) {
     baseValue = sameWdStats.reduce((a, b) => a + b, 0) / sameWdStats.length;
@@ -185,7 +194,7 @@ function _predictDailyTotal(stats, date, useWeekend, specialKind, biz) {
     const ts = stats.totalStats || {};
     const hist = useWeekend ? ts.weekend : ts.weekday;
     baseValue = hist && hist.mean ? hist.mean : (hist && hist.median ? hist.median : 0);
-    source = '历史均值';
+    source = 'history';   // ★ BUG-FIX P2
   }
 
   if (baseValue <= 0) return null;
@@ -210,7 +219,7 @@ function _predictDailyTotal(stats, date, useWeekend, specialKind, biz) {
 
     if (wRegr > 0 && isFinite(regrPred) && regrPred > 0) {
       baseValue = wRegr * regrPred + (1 - wRegr) * baseValue;
-      source = '近期均值+回归';
+      source = 'blend';   // ★ BUG-FIX P2：混合（回归+中位数）
     }
   }
 
@@ -399,7 +408,8 @@ const S = {
   forecastInputs:{},
   forecastHolidays:new Set(),
   forecastWorkdays:new Set(),
-  _dataVersion: 0
+  _dataVersion: 0,
+  _lastFileName: ''   // ★ BUG-FIX P1：用于判断二次导入是否同一文件
 };
 
 /* ==================== 性能缓存层 ==================== */
@@ -566,7 +576,7 @@ function autoMatch(headers, wanted) {
 function buildAutoMap(headers, def) { const out = {}; for (const k in def) out[k] = autoMatch(headers, def[k]); return out; }
 
 /* ==================== 文件导入 ==================== */
-function handleFile(file) {
+async function handleFile(file) {
   if (typeof XlsxParser === 'undefined') { alert('解析器未加载：请确认 lib/xlsx.js 存在。'); return; }
   S.fileName = file.name;
   const impSum = $('#importSummary'); if (impSum) impSum.innerHTML = '';
@@ -576,18 +586,19 @@ function handleFile(file) {
     let sheets;
     if (lower.endsWith('.csv')) {
       setProgress(20, '读取 CSV…');
-      const text = file.text();
+      const text = await file.text();   // ★ BUG-FIX P0：必须 await，否则 text 是 Promise
       const base = file.name.replace(/\.csv$/i, '');
       sheets = [{ name: base || 'Sheet1', rows: parseCSV(text) }];
     } else {
-      const buf = file.arrayBuffer();
+      const buf = await file.arrayBuffer();  // ★ BUG-FIX P0：必须 await
       /* ★ 30MB+ 提速关键：
          - 首次导入时 S.sheets 为空 → neededSheets = null → 全解析
-         - 后续导入时 S.sheets 保留了上次识别出的 sheet 名 → 只解析这些 sheet，
-           跳过文件里无关的表（如「预测量」「SLA」之外的历史遗留表），
-           解析时间随无关 sheet 数量线性下降。
-         - 若用户点「重置」后 S.sheets = {}，会重新触发全解析。 */
+         - 同名文件二次导入时 S.sheets 保留上次识别出的 sheet 名 → 局部解析
+         - 但若文件名与上次不同（用户换了文件），必须全解析，避免新 sheet 被跳过
+         - 若用户点「重置」后 S.sheets = {}，也会重新触发全解析。 */
       const neededSheets = (function () {
+        // ★ BUG-FIX P1：仅同一文件的二次导入才走局部解析，换文件必全解析
+        if (!S._lastFileName || S._lastFileName !== file.name) return null;
         const keys = Object.keys(S.sheets || {});
         if (!keys.length) return null;
         const names = [];
@@ -597,7 +608,9 @@ function handleFile(file) {
         }
         return names.length ? names : null;
       })();
-      sheets = XlsxParser.parseWorkbook(buf, (p, t) => setProgress(p * 0.85, t), neededSheets);
+      sheets = await XlsxParser.parseWorkbook(buf, (p, t) => setProgress(p * 0.85, t), neededSheets);  // ★ BUG-FIX P0：必须 await
+    }
+    S._lastFileName = file.name;   // ★ BUG-FIX P1：记录本次文件名，供下次判断是否同文件
     }
     setProgress(88, '识别工作表类型…');
     S.sheets = {}; S.headers = {}; S.mapping = {};
@@ -652,7 +665,8 @@ function parseCSV(text) {
 
 // 精确处理含引号的 CSV 行
 function parseCSVEscape(line) {
-  const rows = []; let cur = '', field = '', inQ = false;
+  // ★ BUG-FIX P0：cur 必须是数组（原代码初始化为字符串，cur.push 会直接抛 TypeError）
+  const cur = []; let field = '', inQ = false;
   for (let i = 0; i < line.length; i++) {
     const c = line[i];
     if (inQ) { if (c === '"') { if (line[i+1] === '"') { field += '"'; i++; } else inQ = false; } else field += c; }
@@ -2096,7 +2110,10 @@ function formatForecastAiContext(ctx) {
   L.push('  说明：totalSource = user 表示用户输入；regression 表示用历史日度总量回归外推');
   L.push('  日期 | 类型 | 总量(来源) | ' + ctx.periodList.map(p => p + '时').join(' | '));
   for (const r of ctx.forecastRows) {
-    const srcTag = r.totalSource === 'regression' ? '(回归)' : (r.totalSource === 'user' ? '' : '(无)');
+    // ★ BUG-FIX P2：统一用 FORECAST_SOURCE_LABEL 映射，避免遗漏新来源
+    const srcTag = r.totalSource === 'user'
+      ? ''
+      : (r.totalSource ? '(' + (FORECAST_SOURCE_LABEL[r.totalSource] || '自动') + ')' : '(无)');
     const cells = ctx.periodList.map(p => r.periods[p] || 0);
     L.push('  ' + r.date + '(' + r.weekday + ') | ' + r.typeLabel + ' | ' + r.total + srcTag + ' | ' + cells.join(' | '));
   }

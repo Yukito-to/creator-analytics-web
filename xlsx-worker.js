@@ -9,7 +9,7 @@
 /* ★ SheetJS 从 CDN 加载，与 index.html 主线程使用的版本保持一致。
    若项目改为本地库（如 lib/xlsx.full.min.js），把下面这行改成对应相对路径即可。 */
 try {
-  importScripts('https://jsd.onmicrosoft.cn/npm/xlsx@0.18.5/dist/xlsx.full.min.js');
+  importScripts('lib/xlsx.full.min.js');
 } catch (e) {
   try {
     /* 兜底：尝试本地路径 */

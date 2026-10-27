@@ -388,6 +388,7 @@ function circledNum(i) {
   const CIRCLED = '①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳';
   if (i >= 1 && i <= 20) return CIRCLED[i - 1];
   return '(' + i + ')';
+}
 
 function formatPeriods(periods) {
   const nums = periods.map(p => parseInt(p, 10)).filter(n => !isNaN(n)).sort((a, b) => a - b);

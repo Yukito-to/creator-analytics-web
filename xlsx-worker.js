@@ -70,6 +70,10 @@ self.onmessage = function (e) {
     try {
       /* ★ 极限提速：在 dense 模式下，直接读取二维单元格数组 ws['!data'] */
       const rawData = ws['!data'] || [];
+      if (!rawData.length) {
+        // ★ 空数据时直接降级，避免解析出空结果
+        throw new Error('Worker 解析结果为空，降级使用 sheet_to_json');
+      }
       let maxCols = 0;
       
       // 1. 预扫描最大列数，避免动态扩容

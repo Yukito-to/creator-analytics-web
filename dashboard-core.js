@@ -566,7 +566,7 @@ function autoMatch(headers, wanted) {
 function buildAutoMap(headers, def) { const out = {}; for (const k in def) out[k] = autoMatch(headers, def[k]); return out; }
 
 /* ==================== 文件导入 ==================== */
-async function handleFile(file) {
+function handleFile(file) {
   if (typeof XlsxParser === 'undefined') { alert('解析器未加载：请确认 lib/xlsx.js 存在。'); return; }
   S.fileName = file.name;
   const impSum = $('#importSummary'); if (impSum) impSum.innerHTML = '';
@@ -576,11 +576,11 @@ async function handleFile(file) {
     let sheets;
     if (lower.endsWith('.csv')) {
       setProgress(20, '读取 CSV…');
-      const text = await file.text();
+      const text = file.text();
       const base = file.name.replace(/\.csv$/i, '');
       sheets = [{ name: base || 'Sheet1', rows: parseCSV(text) }];
     } else {
-      const buf = await file.arrayBuffer();
+      const buf = file.arrayBuffer();
       /* ★ 30MB+ 提速关键：
          - 首次导入时 S.sheets 为空 → neededSheets = null → 全解析
          - 后续导入时 S.sheets 保留了上次识别出的 sheet 名 → 只解析这些 sheet，
@@ -597,9 +597,9 @@ async function handleFile(file) {
         }
         return names.length ? names : null;
       })();
-      sheets = await XlsxParser.parseWorkbook(buf, (p, t) => setProgress(p * 0.85, t), neededSheets);
+      sheets = XlsxParser.parseWorkbook(buf, (p, t) => setProgress(p * 0.85, t), neededSheets);
     }
-    setProgress(88, '识别工作表类型…'); await sleep(30);
+    setProgress(88, '识别工作表类型…');
     S.sheets = {}; S.headers = {}; S.mapping = {};
     for (const sh of sheets) {
       const k = identify(sh.name);
@@ -610,11 +610,11 @@ async function handleFile(file) {
     for (const mod of ['buyer','blogger','inspectionBuyer','inspectionBlogger','worktime','business','business2']) {
       if (S.headers[mod]) S.mapping[mod] = buildAutoMap(S.headers[mod], MAP_DEF[mod]);
     }
-    setProgress(92, '解析花名册…'); await sleep(20);
+    setProgress(92, '解析花名册…');
     parseRoster();
-    setProgress(96, '构建数据记录…'); await sleep(20);
+    setProgress(96, '构建数据记录…');
     buildAll();
-    setProgress(99, '汇总…'); await sleep(20);
+    setProgress(99, '汇总…');
     afterLoad();
     setProgress(100, '完成');
     const st = $('#dataStatus');
@@ -662,76 +662,6 @@ function parseCSVEscape(line) {
   return cur;
 }
 
-function parseCSV(text) {
-  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
-  // ★ 极速版：用 split 按行切分，再按逗号切分（不处理复杂引号嵌套，速度极快）
-  // 优化版本：使用更快的字符串处理方法和数组预分配
-  const lines = text.split(/\r?\n/);
-  const rows = [];
-  
-  // 预分配数组大小以提高性能
-  const tempRows = [];
-  
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (!line.trim()) continue;
-    
-    // 使用更高效的分割方法
-    let fields;
-    if (line.indexOf('"') < 0) {
-      // 没有引号的简单情况 - 使用更高效的split
-      fields = line.split(',');
-    } else {
-      // 含引号的复杂情况，使用精确解析
-      fields = parseCSVEscape(line);
-    }
-    
-    // 移除末尾的空字段
-    let lastNonEmpty = fields.length - 1;
-    while (lastNonEmpty >= 0 && !fields[lastNonEmpty].trim()) {
-      lastNonEmpty--;
-    }
-    
-    if (lastNonEmpty >= 0) {
-      tempRows.push(fields.slice(0, lastNonEmpty + 1));
-    } else if (fields.length > 0) {
-      // 全部为空的情况，保留至少一个空字段
-      tempRows.push(['']);
-    }
-  }
-  
-  return tempRows;
-}
-
-// 精确处理含引号的 CSV 行
-function parseCSVEscape(line) {
-  const rows = []; let cur = '', field = '', inQ = false;
-  for (let i = 0; i < line.length; i++) {
-    const c = line[i];
-    if (inQ) { 
-      if (c === '"') { 
-        if (line[i+1] === '"') { 
-          field += '"'; 
-          i++; 
-        } else inQ = false; 
-      } else field += c; 
-    }
-    else { 
-      if (c === '"') inQ = true; 
-      else if (c === ',') { 
-        cur.push(field); 
-        field = ''; 
-      } else if (c === '\n') { 
-        cur.push(field); 
-        field = ''; 
-      } else if (c !== '\r') field += c; 
-    }
-  }
-  if (field || cur.length) { cur.push(field); }
-  return cur;
-}
-
-/* ==================== 各 sheet → 对象数组 ==================== */
 /* ==================== 各 sheet → 对象数组 ==================== */
 function rowsToObjs(kind) {
   const sheet = S.sheets[kind];

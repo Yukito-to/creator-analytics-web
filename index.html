@@ -40,28 +40,27 @@
 </nav>
 
 <main>
+
   <section id="view-import" class="view active">
     <div class="card">
       <h2>导入数据表格</h2>
       <p class="muted">支持 .xlsx / .xlsm / .csv。解析在本机完成，数据不会上传。</p>
-       <h2>导入数据表格</h2>
-       <p class="muted">支持 .xlsx / .xlsm / .csv。解析在本机完成，数据不会上传。</p>
-       <p class="muted"><strong>💡 CSV格式建议：</strong>使用UTF-8编码，避免中文乱码；建议使用Excel保存为CSV格式以确保兼容性。</p>
-       <div id="dropZone" class="dropzone">
       <div id="dropZone" class="dropzone">
-        <div class="drop-icon">⬆</div>
-        <div class="drop-text">点击选择文件</div>
-        <div class="drop-hint">自动识别：花名册 / 员工数据 / 质检 / 工时 / 业务线映射 / 二级打点映射 / 班次 / 班表 / 员工SLA / 预测量</div>
-        <input type="file" id="fileInput" accept=".xlsx,.xlsm,.csv" hidden>
-      </div>
-      <div id="progressWrap" class="progress-wrap hidden">
-        <div class="progress-bar"><div id="progressFill" class="progress-fill"></div></div>
-        <div class="progress-meta">
-          <span id="progressText">准备中…</span>
-          <span id="progressPct">0%</span>
+        <div id="dropZone" class="dropzone">
+          <div class="drop-icon">⬆</div>
+          <div class="drop-text">点击选择文件</div>
+          <div class="drop-hint">自动识别：花名册 / 员工数据 / 质检 / 工时 / 业务线映射 / 二级打点映射 / 班次 / 班表 / 员工SLA / 预测量</div>
+          <input type="file" id="fileInput" accept=".xlsx,.xlsm,.csv" hidden>
         </div>
+        <div id="progressWrap" class="progress-wrap hidden">
+          <div class="progress-bar"><div id="progressFill" class="progress-fill"></div></div>
+          <div class="progress-meta">
+            <span id="progressText">准备中…</span>
+            <span id="progressPct">0%</span>
+          </div>
+        </div>
+        <div id="importSummary" class="summary-grid"></div>
       </div>
-      <div id="importSummary" class="summary-grid"></div>
     </div>
   </section>
 

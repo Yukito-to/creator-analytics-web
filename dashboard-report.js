@@ -1668,7 +1668,7 @@ function renderReport() {
   } catch (err) {
     console.error('周报渲染异常:', err);
     el.innerHTML = '<div style="padding:16px;background:#FDF0F0;color:#B33;border-radius:8px;border:1px solid #F5C2C2;">' +
-      '<b>⚠ 周报生成失败</b><br>原因：' + err.message + '<br>请检查该业务线下是否缺少当前周次的数据。</div>';
+      '<b>⚠ 周报生成失败</b><br>原因：' + esc(err.message) + '<br>请检查该业务线下是否缺少当前周次的数据。</div>';
     if (copyBtn) copyBtn.disabled = true;
     if (mdBtn) mdBtn.disabled = true;
   }
@@ -1691,7 +1691,10 @@ async function copyReport() {
     const wkEl = $('#rpWK');
     const biz = (bizEl && bizEl.value) || '买手合作';
     const wk = parseInt(wkEl && wkEl.value, 10) || S.latestWK;
-    const text = reportToText(buildReport(biz, wk));
+    // ★ BUG-FIX：buildReport 在 S.month 为空时返回 null，必须先判空再 reportToText
+    const d = buildReport(biz, wk);
+    if (!d) { toast('❌ 无法生成周报：数据月份为空，请检查 CASE 日期列'); return; }
+    const text = reportToText(d);
     await navigator.clipboard.writeText(text);
     toast('✅ 周报已复制到剪贴板');
   } catch (err) {
@@ -1705,7 +1708,10 @@ function downloadReportMd() {
     const wkEl = $('#rpWK');
     const biz = (bizEl && bizEl.value) || '买手合作';
     const wk = parseInt(wkEl && wkEl.value, 10) || S.latestWK;
-    const text = reportToText(buildReport(biz, wk));
+    // ★ BUG-FIX：buildReport 可能返回 null，必须先判空
+    const d = buildReport(biz, wk);
+    if (!d) { toast('❌ 无法生成周报：数据月份为空，请检查 CASE 日期列'); return; }
+    const text = reportToText(d);
     const blob = new Blob([text], { type: 'text/markdown;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');

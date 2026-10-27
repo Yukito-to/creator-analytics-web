@@ -646,20 +646,38 @@ async function handleFile(file) {
 }
 function parseCSV(text) {
   if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
-  // ★ 极速版：用 split 按行切分，再按逗号切分（不处理复杂引号嵌套，速度极快）
-  const lines = text.split(/\r?\n/);
-  const rows = [];
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (!line.trim()) continue;
-    if (line.indexOf('"') < 0) {
+
+  /* ★ 极速路径：整个文本不含引号 → 按行 split 后按逗号切分 */
+  if (text.indexOf('"') < 0) {
+    const rows = [];
+    for (const line of text.split(/\r?\n/)) {
+      if (!line.trim()) continue;
       rows.push(line.split(','));
+    }
+    return rows;
+  }
+
+  /* ★ 精确路径：文本含引号 → 走完整状态机，支持字段内换行 / 转义引号 */
+  const rows = [];
+  let row = [], field = '', inQ = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQ) {
+      if (c === '"') {
+        if (text[i + 1] === '"') { field += '"'; i++; }
+        else inQ = false;
+      } else {
+        field += c;
+      }
     } else {
-      // 含双引号则走精确解析（处理引号内包含逗号的情况）
-      const exact = parseCSVEscape(line);
-      rows.push(exact);
+      if (c === '"') inQ = true;
+      else if (c === ',') { row.push(field); field = ''; }
+      else if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
+      else if (c === '\r') { /* skip CR */ }
+      else field += c;
     }
   }
+  if (field !== '' || row.length) { row.push(field); rows.push(row); }
   return rows;
 }
 
@@ -950,6 +968,7 @@ function buildAll() {
   S.forecastBuyer = {}; S.forecastBlogger = {};
   S.volumeForecast = {};
   S.forecastInputs = {};   /* ★ 修复：重新导入文件时清空手动输入缓存，避免旧值拦截自动读取 */
+  S.unknownShifts = new Set();   /* ★ BUG-FIX：重新导入时清空未知班次集合，避免旧文件残留 */
 
   if (S.sheets.business) { for (const o of rowsToObjs('business')) { const l1 = String(o.l1||'').trim(); const biz = String(o.biz||'').trim(); if (l1 && biz && !S.businessMap[l1]) S.businessMap[l1] = biz; } }
   if (S.sheets.business2) { for (const o of rowsToObjs('business2')) { const l1 = String(o.l1||'').trim(); const l2 = String(o.l2||'').trim(); const biz = String(o.biz||'').trim(); if (l1 && l2 && biz) { const key = l1 + '|' + l2; if (!S.business2Map[key]) S.business2Map[key] = biz; } } }
@@ -2243,6 +2262,9 @@ function initWeekPicker() {
         }
       });
     });
+  } else {
+    // ★ BUG-FIX：包裹层已存在时，仍确保原生 select 隐藏，避免未来 DOM 重构后双控件并存
+    sel.style.display = 'none';
   }
 
   // 9. 渲染/更新选项列表

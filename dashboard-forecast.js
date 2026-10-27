@@ -100,7 +100,9 @@ function _zipBuild(files) {
   ev.setUint32(12, cdSize, true);
   ev.setUint32(16, offset, true);
   ev.setUint16(20, 0, true);
-  return new Blob([...parts, ...cd, eocd], {
+  // ★ 加固：预测表行数极大时 [...parts, ...cd] 可能触及调用栈参数上限，改用 concat
+  const all = parts.concat(cd, [eocd]);
+  return new Blob(all, {
     type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
   });
 }
@@ -359,10 +361,9 @@ function renderForecastConfig() {
         console.warn('[renderForecastConfig] _predictDailyTotal 失败：', e);
       }
       if (pr && pr.value > 0) {
-        const srcTag = pr.source === '近期均值+回归' ? '混合'
-                     : pr.source === '近期同星均值' ? '同星'
-                     : pr.source === 'special'      ? '特殊日'
-                     : '均值';
+        // ★ BUG-FIX：_predictDailyTotal 返回的是英文 key（special/samewd/history/blend），
+        // 统一用 FORECAST_SOURCE_LABEL 映射，避免中文比较导致 'blend'/'samewd' 永远落到"均值"
+        const srcTag = FORECAST_SOURCE_LABEL[pr.source] || '均值';
         /* ★ 特殊日额外标注样本量，便于用户核对「历史 25/28 日量级」 */
         let sampleTip = '';
         if (pr.source === 'special' && specialKind != null) {

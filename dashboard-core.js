@@ -386,7 +386,7 @@ const S = {
   roster:[], records:[], wtRecords:[], inspections:[],
   slaBuyer:[], slaBlogger:[],
   businessMap:{}, business2Map:{},
-  shiftMap:{}, schedule:{}, scheduleDates:[],
+  shiftMap:{}, manpowerMap:{}, schedule:{}, scheduleDates:[],
   month:'', latestDate:'', latestWK:0, hidden:false,
   attOverride:{}, personSel:new Set(),
   teamSel:{ group:new Set(), batch:new Set(), category:new Set() },
@@ -920,7 +920,33 @@ function buildAll() {
 
   if (S.sheets.business) { for (const o of rowsToObjs('business')) { const l1 = String(o.l1||'').trim(); const biz = String(o.biz||'').trim(); if (l1 && biz && !S.businessMap[l1]) S.businessMap[l1] = biz; } }
   if (S.sheets.business2) { for (const o of rowsToObjs('business2')) { const l1 = String(o.l1||'').trim(); const l2 = String(o.l2||'').trim(); const biz = String(o.biz||'').trim(); if (l1 && l2 && biz) { const key = l1 + '|' + l2; if (!S.business2Map[key]) S.business2Map[key] = biz; } } }
-  if (S.sheets.shift) { for (const row of S.sheets.shift.rows) { if (!row) continue; const name = String(row[0]||'').trim(); if (!name || name === '班次') continue; S.shiftMap[name] = num(row[1]); } }
+  if (S.sheets.shift) {
+    const rows = S.sheets.shift.rows;
+    let manCol = -1;
+    // 在前 3 行寻找表头名为「人力计数」的列
+    for (let r = 0; r < Math.min(rows.length, 3); r++) {
+      if (!rows[r]) continue;
+      for (let c = 0; c < rows[r].length; c++) {
+        if (String(rows[r][c] || '').trim() === '人力计数') {
+          manCol = c;
+          break;
+        }
+      }
+      if (manCol >= 0) break;
+    }
+    // 兜底：如果没有找到表头，且列数足够，默认取第 23 列（W列，索引 22）
+    if (manCol < 0 && rows[0] && rows[0].length > 22) manCol = 22;
+    
+    for (const row of rows) {
+      if (!row) continue;
+      const name = String(row[0] || '').trim();
+      if (!name || name === '班次') continue;
+      S.shiftMap[name] = num(row[1]); // B列：工作时长（用于算CPD等）
+      if (manCol >= 0) {
+        S.manpowerMap[name] = num(row[manCol]); // W列：人力计数
+      }
+    }
+  }
   if (S.sheets.schedule) {
     const rows = S.sheets.schedule.rows;
     if (rows.length) {
@@ -1048,6 +1074,17 @@ function attOf(name, date) {
     return 0;
   }
   return S.shiftMap[shift];
+}
+
+function manpowerOf(name, date) {
+  const ov = S.attOverride[name];
+  if (ov && ov[date] !== undefined) return ov[date]; // 如果手动调整过，优先按手动修改的算
+  const sched = S.schedule[name];
+  if (!sched) return 0;
+  const shift = sched[date];
+  if (!shift) return 0;
+  if (S.manpowerMap[shift] == null) return 0;
+  return S.manpowerMap[shift];
 }
 
 /* ==================== 聚合与过滤 ==================== */
@@ -1470,7 +1507,7 @@ function bizAttendanceCount(biz, wk) {
   for (const name of srcEmps) {
     const e = getEmp(name);
     if (e && !employeeVisible(e)) continue;
-    for (const d of days) total += attOf(name, d);
+    for (const d of days) total += manpowerOf(name, d); // ★ 改为按人力计数累加
   }
   return total;
 }

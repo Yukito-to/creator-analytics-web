@@ -388,6 +388,25 @@ function circledNum(i) {
   const CIRCLED = '①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳';
   if (i >= 1 && i <= 20) return CIRCLED[i - 1];
   return '(' + i + ')';
+
+function formatPeriods(periods) {
+  const nums = periods.map(p => parseInt(p, 10)).filter(n => !isNaN(n)).sort((a, b) => a - b);
+  if (!nums.length) return periods.join('、') + '时';
+  const result = [];
+  let start = nums[0], prev = nums[0];
+  for (let i = 1; i < nums.length; i++) {
+    if (nums[i] === prev + 1) {
+      prev = nums[i];
+    } else {
+      result.push(start === prev ? `${start}` : `${start}-${prev}`);
+      start = nums[i];
+      prev = nums[i];
+    }
+  }
+  result.push(start === prev ? `${start}` : `${start}-${prev}`);
+  return result.join('、') + '时';
+}
+
 }
 
 function s30AnalysisHTML(biz, wk, prevWk) {
@@ -467,11 +486,40 @@ function s30AnalysisHTML(biz, wk, prevWk) {
     if (impacts.length) {
       P.push('<div class="rpt-sub" style="margin-top:8px">🎯 <b>日度时段超预测影响值</b>（仅统计超预测 &gt;120% 且时段接起率不达标的切片；将 Miss 回补至 30S 接起量后重算日 / 周接起率，影响值 = 回补后接起率 − 实际接起率）</div>');
 
-      for (let i = 0; i < impacts.length; i++) {
-        const x = impacts[i];
-        P.push('<div class="rpt-sub">' + circledNum(i + 1) + esc(x.date.slice(5)) + ' ' + esc(x.period) + ' 时 · 预测 ' +
-          Math.round(x.forecast) + ' / 实际 ' + Math.round(x.den) + '（偏差 ' + (x.bias * 100).toFixed(0) +
-          '%）· Miss ' + x.miss + '，周度影响值：' + (x.weekImpact * 100).toFixed(2) + '%；</div>');
+      // 按日期分组
+      const groupedImpacts = new Map();
+      for (const x of impacts) {
+        if (!groupedImpacts.has(x.date)) groupedImpacts.set(x.date, []);
+        groupedImpacts.get(x.date).push(x);
+      }
+
+      let seq = 1;
+      for (const [date, dayImpacts] of groupedImpacts) {
+        // 1. 先输出当天的所有明细
+        for (const x of dayImpacts) {
+          P.push('<div class="rpt-sub">' + circledNum(seq++) + esc(x.date.slice(5)) + ' ' + esc(x.period) + ' 时 · 预测 ' +
+            Math.round(x.forecast) + ' / 实际 ' + Math.round(x.den) + '（偏差 ' + (x.bias * 100).toFixed(0) +
+            '%）· Miss ' + x.miss + '，周度影响值：' + (x.weekImpact * 100).toFixed(2) + '%；</div>');
+        }
+
+        // 2. 如果当天有 >= 2 个时段，追加红点汇总行
+        if (dayImpacts.length >= 2) {
+          let sumForecast = 0, sumDen = 0, sumNum = 0, sumMiss = 0;
+          const pList = [];
+          for (const x of dayImpacts) {
+            sumForecast += x.forecast;
+            sumDen += x.den;
+            sumNum += x.num;
+            sumMiss += x.miss;
+            pList.push(x.period);
+          }
+          const sumBias = sumForecast > 0 ? sumDen / sumForecast : 0;
+          const sumWeekImpact = ((cur.totNum + sumMiss) / cur.totDen) - cur.totRate;
+          const periodStr = formatPeriods(pList);
+          P.push('<div class="rpt-sub" style="color:#D9363E;font-weight:600;margin-top:4px;">' +
+            '🔴 ' + esc(date.slice(5)) + ' ' + esc(periodStr) + ' · 预测 ' + Math.round(sumForecast) + ' / 实际 ' + Math.round(sumDen) +
+            '（综合偏差 ' + (sumBias * 100).toFixed(0) + '%）· 累计 Miss ' + sumMiss + '，当日汇总影响值：' + (sumWeekImpact * 100).toFixed(2) + '%；</div>');
+        }
       }
 
       const missAll = impacts.reduce((s, x) => s + x.miss, 0);
@@ -672,13 +720,37 @@ function s30AnalysisText(biz, wk, prevWk) {
     if (impacts.length) {
       L.push('🎯 日度时段超预测影响值（仅统计超预测 >120% 且时段接起率不达标的切片；将 Miss 回补至 30S 接起量后重算日 / 周接起率，影响值 = 回补后接起率 − 实际接起率）');
       L.push('');
-      for (let i = 0; i < impacts.length; i++) {
-        const x = impacts[i];
-        L.push(circledNum(i + 1) + x.date.slice(5) + ' ' + x.period + ' 时 · 预测 ' + Math.round(x.forecast) +
-          ' / 实际 ' + Math.round(x.den) + '（偏差 ' + (x.bias * 100).toFixed(0) +
-          '%）· Miss ' + x.miss + '，周度影响值：' + (x.weekImpact * 100).toFixed(2) + '%；');
+      // 按日期分组
+      const groupedImpacts = new Map();
+      for (const x of impacts) {
+        if (!groupedImpacts.has(x.date)) groupedImpacts.set(x.date, []);
+        groupedImpacts.get(x.date).push(x);
       }
-      L.push('');
+
+      let seq = 1;
+      for (const [date, dayImpacts] of groupedImpacts) {
+        for (const x of dayImpacts) {
+          L.push(circledNum(seq++) + x.date.slice(5) + ' ' + x.period + ' 时 · 预测 ' + Math.round(x.forecast) +
+            ' / 实际 ' + Math.round(x.den) + '（偏差 ' + (x.bias * 100).toFixed(0) +
+            '%）· Miss ' + x.miss + '，周度影响值：' + (x.weekImpact * 100).toFixed(2) + '%；');
+        }
+        if (dayImpacts.length >= 2) {
+          let sumForecast = 0, sumDen = 0, sumNum = 0, sumMiss = 0;
+          const pList = [];
+          for (const x of dayImpacts) {
+            sumForecast += x.forecast;
+            sumDen += x.den;
+            sumNum += x.num;
+            sumMiss += x.miss;
+            pList.push(x.period);
+          }
+          const sumBias = sumForecast > 0 ? sumDen / sumForecast : 0;
+          const sumWeekImpact = ((cur.totNum + sumMiss) / cur.totDen) - cur.totRate;
+          const periodStr = formatPeriods(pList);
+          L.push('🔴 **' + date.slice(5) + ' ' + periodStr + ' · 预测 ' + Math.round(sumForecast) + ' / 实际 ' + Math.round(sumDen) +
+            '（综合偏差 ' + (sumBias * 100).toFixed(0) + '%）· 累计 Miss ' + sumMiss + '，当日汇总影响值：' + (sumWeekImpact * 100).toFixed(2) + '%；**');
+        }
+      }
 
       const missAll = impacts.reduce((s, x) => s + x.miss, 0);
       const rateX = (cur.totRate * 100).toFixed(2) + '%';

@@ -586,7 +586,7 @@ async function handleFile(file) {
     let sheets;
     if (lower.endsWith('.csv')) {
       setProgress(20, '读取 CSV…');
-      const text = await file.text();   // ★ BUG-FIX P0：必须 await，否则 text 是 Promise
+      const text = await file.text();   // ★ BUG-FIX P0：必须 await
       const base = file.name.replace(/\.csv$/i, '');
       sheets = [{ name: base || 'Sheet1', rows: parseCSV(text) }];
     } else {
@@ -611,7 +611,7 @@ async function handleFile(file) {
       sheets = await XlsxParser.parseWorkbook(buf, (p, t) => setProgress(p * 0.85, t), neededSheets);  // ★ BUG-FIX P0：必须 await
     }
     S._lastFileName = file.name;   // ★ BUG-FIX P1：记录本次文件名，供下次判断是否同文件
-    }
+
     setProgress(88, '识别工作表类型…');
     S.sheets = {}; S.headers = {}; S.mapping = {};
     for (const sh of sheets) {

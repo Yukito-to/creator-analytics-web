@@ -9,18 +9,19 @@
 /* ★ SheetJS 从 CDN 加载，与 index.html 主线程使用的版本保持一致。
    若项目改为本地库（如 lib/xlsx.full.min.js），把下面这行改成对应相对路径即可。 */
 try {
-  importScripts('lib/xlsx.full.min.js');
-} catch (e) {
-  try {
-    /* 兜底：尝试本地路径 */
+    // 优先加载本地库（极速且防断网）
     importScripts('lib/xlsx.full.min.js');
-  } catch (e2) {
-    self.postMessage({
-      type: 'error',
-      message: 'SheetJS 加载失败：CDN 不可达且无本地 lib/xlsx.full.min.js',
-    });
+  } catch (e) {
+    try {
+      // 如果本地路径不对或缺失，尝试 CDN
+      importScripts('https://jsd.onmicrosoft.cn/npm/xlsx@0.18.5/dist/xlsx.full.min.js');
+    } catch (e2) {
+      self.postMessage({
+        type: 'error',
+        message: 'SheetJS 加载失败：本地 lib/xlsx.full.min.js 不存在，且 CDN 也不可达',
+      });
+    }
   }
-}
 
 self.onmessage = function (e) {
   const data = e.data || {};

@@ -73,81 +73,27 @@ self.onmessage = function (e) {
       
       // 1. 预扫描最大列数，避免动态扩容
       let maxCols = 0;
-      let maxRowWithData = -1;
       
       for (let r = 0; r < rawData.length; r++) {
         if (rawData[r] && rawData[r].length > maxCols) maxCols = rawData[r].length;
-        // 记录最后一行有数据的行号
-        if (rawData[r] && rawData[r].length > 0) maxRowWithData = r;
       }
       
-      // 2. 快速构建纯值二维数组，并剔除空行和空列
-      for (let r = 0; r <= maxRowWithData; r++) {
+      // 2. 快速构建纯值二维数组（不跳过任何行）
+      for (let r = 0; r < rawData.length; r++) {
         const rowCells = rawData[r];
-        if (!rowCells) { 
-          rows.push([]); 
-          continue; 
-        }
+        if (!rowCells) { rows.push([]); continue; }
         
         const rowArr = new Array(maxCols);
-        let hasDataInRow = false;
-        
         for (let c = 0; c < maxCols; c++) {
           const cell = rowCells[c];
           if (!cell) { 
             rowArr[c] = ''; 
           } else {
             // 提取原始值 v，如果没有则退回格式化文本 w
-            const value = cell.v !== undefined ? cell.v : (cell.w !== undefined ? cell.w : '');
-            rowArr[c] = value;
-            // 检查是否包含有效数据
-            if (value !== '' && value !== null && value !== undefined) {
-              hasDataInRow = true;
-            }
+            rowArr[c] = cell.v !== undefined ? cell.v : (cell.w !== undefined ? cell.w : '');
           }
         }
-        
-        // 只添加包含有效数据的行（或空行）
-        if (hasDataInRow || r === 0) { // 保留第一行（标题行）
-          rows.push(rowArr);
-        } else if (rows.length > 0) {
-          // 如果是空行且不是第一行，则跳过
-          // 注意：这里我们只跳过完全空白的行，但保留标题行
-        }
-      }
-      
-      // 3. 剔除末尾的空行和空列
-      if (rows.length > 0) {
-        // 剔除末尾的空行
-        while (rows.length > 0 && rows[rows.length - 1].every(cell => cell === '' || cell === null || cell === undefined)) {
-          rows.pop();
-        }
-        
-        // 剔除末尾的空列
-        if (rows.length > 0 && rows[0].length > 0) {
-          let lastNonEmptyCol = -1;
-          // 找到最后一个非空列
-          for (let c = rows[0].length - 1; c >= 0; c--) {
-            let colHasData = false;
-            for (let r = 0; r < rows.length; r++) {
-              if (rows[r][c] !== '' && rows[r][c] !== null && rows[r][c] !== undefined) {
-                colHasData = true;
-                break;
-              }
-            }
-            if (colHasData) {
-              lastNonEmptyCol = c;
-              break;
-            }
-          }
-          
-          // 如果找到了非空列，则裁剪掉后面的空列
-          if (lastNonEmptyCol >= 0) {
-            for (let r = 0; r < rows.length; r++) {
-              rows[r] = rows[r].slice(0, lastNonEmptyCol + 1);
-            }
-          }
-        }
+        rows.push(rowArr);
       }
     } catch (err) {
       // 极端异常情况降级回 sheet_to_json

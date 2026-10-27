@@ -732,6 +732,7 @@ function parseCSVEscape(line) {
 }
 
 /* ==================== 各 sheet → 对象数组 ==================== */
+/* ==================== 各 sheet → 对象数组 ==================== */
 function rowsToObjs(kind) {
   const sheet = S.sheets[kind];
   if (!sheet) return [];
@@ -985,7 +986,7 @@ function parseSlaSheet(kind) {
 }
 
 /* ==================== 数据构建 ==================== */
-async function buildAll() {
+function buildAll() {
   /* ★ BUG-1 / BUG-3：每次重建数据时，必须清空所有派生缓存与选择状态，
      否则重新导入文件后视图仍显示旧数据、或残留旧员工选择 */
   _resetPerfCache();
@@ -1055,10 +1056,7 @@ async function buildAll() {
   for (const mod of ['buyer','blogger']) {
     if (!S.sheets[mod]) continue;
     const defaultBiz = (mod === 'buyer') ? '买手合作' : '博主合作';
-    const objs = rowsToObjs(mod);
-    const total = objs.length;
-    for (let i = 0; i < total; i++) {
-      const o = objs[i];
+    for (const o of rowsToObjs(mod)) {
       const name = String(o.name||'').trim();
       const date = parseDate(o.date);
       if (!name || !date) continue;
@@ -1076,21 +1074,13 @@ async function buildAll() {
         satisfy: num(o.satisfy), satisfyEval: num(o.satisfyEval),
         escalate: num(o.escalate), repeat72: num(o.repeat72), fcrDen: num(o.fcrDen)
       });
-      // ★ 每 5000 行让出主线程，防止页面假死
-      if (i > 0 && i % 5000 === 0) {
-        setProgress(96 + (i / total) * 3, `构建数据 (${i}/${total})…`);
-        await sleep(1);
-      }
     }
   }
   for (const mod of ['inspectionBuyer','inspectionBlogger']) {
     if (!S.sheets[mod]) continue;
     const src = (mod === 'inspectionBuyer') ? 'buyer' : 'blogger';
     const defaultBiz = (mod === 'inspectionBuyer') ? '买手合作' : '博主合作';
-    const objs = rowsToObjs(mod);
-    const total = objs.length;
-    for (let i = 0; i < total; i++) {
-      const o = objs[i];
+    for (const o of rowsToObjs(mod)) {
       const name = String(o.name||'').trim();
       const date = parseDate(o.date);
       const id = String(o.id||'').trim();
@@ -1098,17 +1088,10 @@ async function buildAll() {
       const l1 = String(o.l1||'').trim();
       const biz = bizByL1(l1, defaultBiz);
       S.inspections.push({ src, biz, name, date, id, l1, wk: wkOf(date), month: monthOf(date), pass: isPassValue(o.pass) });
-      if (i > 0 && i % 5000 === 0) {
-        setProgress(96 + (i / total) * 3, `解析质检数据 (${i}/${total})…`);
-        await sleep(1);
-      }
     }
   }
   if (S.sheets.worktime) {
-    const objs = rowsToObjs('worktime');
-    const total = objs.length;
-    for (let i = 0; i < total; i++) {
-      const o = objs[i];
+    for (const o of rowsToObjs('worktime')) {
       const name = String(o.name||'').trim();
       const date = parseDate(o.date);
       if (!name || !date) continue;
@@ -1118,10 +1101,6 @@ async function buildAll() {
         train: num(o.train), mentor: num(o.mentor), rest: num(o.rest),
         meal: num(o.meal), total: num(o.total)
       });
-      if (i > 0 && i % 5000 === 0) {
-        setProgress(96 + 90 + (i / total) * 3, `解析工时数据 (${i}/${total})…`);
-        await sleep(1);
-      }
     }
   }
   if (S.sheets.buyerSla) S.slaBuyer = parseSlaSheet('buyerSla');

@@ -633,14 +633,102 @@ async function handleFile(file) {
 }
 function parseCSV(text) {
   if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
-  const rows = []; let cur = [], field = '', inQ = false;
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i];
-    if (inQ) { if (c === '"') { if (text[i+1] === '"') { field += '"'; i++; } else inQ = false; } else field += c; }
-    else { if (c === '"') inQ = true; else if (c === ',') { cur.push(field); field = ''; } else if (c === '\n') { cur.push(field); rows.push(cur); cur = []; field = ''; } else if (c !== '\r') field += c; }
+  // ★ 极速版：用 split 按行切分，再按逗号切分（不处理复杂引号嵌套，速度极快）
+  const lines = text.split(/\r?\n/);
+  const rows = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (!line.trim()) continue;
+    if (line.indexOf('"') < 0) {
+      rows.push(line.split(','));
+    } else {
+      // 含双引号则走精确解析（处理引号内包含逗号的情况）
+      const exact = parseCSVEscape(line);
+      rows.push(exact);
+    }
   }
-  if (field || cur.length) { cur.push(field); rows.push(cur); }
   return rows;
+}
+
+// 精确处理含引号的 CSV 行
+function parseCSVEscape(line) {
+  const rows = []; let cur = '', field = '', inQ = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (inQ) { if (c === '"') { if (line[i+1] === '"') { field += '"'; i++; } else inQ = false; } else field += c; }
+    else { if (c === '"') inQ = true; else if (c === ',') { cur.push(field); field = ''; } else if (c === '\n') { cur.push(field); field = ''; } else if (c !== '\r') field += c; }
+  }
+  if (field || cur.length) { cur.push(field); }
+  return cur;
+}
+
+function parseCSV(text) {
+  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+  // ★ 极速版：用 split 按行切分，再按逗号切分（不处理复杂引号嵌套，速度极快）
+  // 优化版本：使用更快的字符串处理方法和数组预分配
+  const lines = text.split(/\r?\n/);
+  const rows = [];
+  
+  // 预分配数组大小以提高性能
+  const tempRows = [];
+  
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (!line.trim()) continue;
+    
+    // 使用更高效的分割方法
+    let fields;
+    if (line.indexOf('"') < 0) {
+      // 没有引号的简单情况 - 使用更高效的split
+      fields = line.split(',');
+    } else {
+      // 含引号的复杂情况，使用精确解析
+      fields = parseCSVEscape(line);
+    }
+    
+    // 移除末尾的空字段
+    let lastNonEmpty = fields.length - 1;
+    while (lastNonEmpty >= 0 && !fields[lastNonEmpty].trim()) {
+      lastNonEmpty--;
+    }
+    
+    if (lastNonEmpty >= 0) {
+      tempRows.push(fields.slice(0, lastNonEmpty + 1));
+    } else if (fields.length > 0) {
+      // 全部为空的情况，保留至少一个空字段
+      tempRows.push(['']);
+    }
+  }
+  
+  return tempRows;
+}
+
+// 精确处理含引号的 CSV 行
+function parseCSVEscape(line) {
+  const rows = []; let cur = '', field = '', inQ = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (inQ) { 
+      if (c === '"') { 
+        if (line[i+1] === '"') { 
+          field += '"'; 
+          i++; 
+        } else inQ = false; 
+      } else field += c; 
+    }
+    else { 
+      if (c === '"') inQ = true; 
+      else if (c === ',') { 
+        cur.push(field); 
+        field = ''; 
+      } else if (c === '\n') { 
+        cur.push(field); 
+        field = ''; 
+      } else if (c !== '\r') field += c; 
+    }
+  }
+  if (field || cur.length) { cur.push(field); }
+  return cur;
 }
 
 /* ==================== 各 sheet → 对象数组 ==================== */
@@ -897,7 +985,7 @@ function parseSlaSheet(kind) {
 }
 
 /* ==================== 数据构建 ==================== */
-function buildAll() {
+async function buildAll() {
   /* ★ BUG-1 / BUG-3：每次重建数据时，必须清空所有派生缓存与选择状态，
      否则重新导入文件后视图仍显示旧数据、或残留旧员工选择 */
   _resetPerfCache();
@@ -967,7 +1055,10 @@ function buildAll() {
   for (const mod of ['buyer','blogger']) {
     if (!S.sheets[mod]) continue;
     const defaultBiz = (mod === 'buyer') ? '买手合作' : '博主合作';
-    for (const o of rowsToObjs(mod)) {
+    const objs = rowsToObjs(mod);
+    const total = objs.length;
+    for (let i = 0; i < total; i++) {
+      const o = objs[i];
       const name = String(o.name||'').trim();
       const date = parseDate(o.date);
       if (!name || !date) continue;
@@ -985,13 +1076,21 @@ function buildAll() {
         satisfy: num(o.satisfy), satisfyEval: num(o.satisfyEval),
         escalate: num(o.escalate), repeat72: num(o.repeat72), fcrDen: num(o.fcrDen)
       });
+      // ★ 每 5000 行让出主线程，防止页面假死
+      if (i > 0 && i % 5000 === 0) {
+        setProgress(96 + (i / total) * 3, `构建数据 (${i}/${total})…`);
+        await sleep(1);
+      }
     }
   }
   for (const mod of ['inspectionBuyer','inspectionBlogger']) {
     if (!S.sheets[mod]) continue;
     const src = (mod === 'inspectionBuyer') ? 'buyer' : 'blogger';
     const defaultBiz = (mod === 'inspectionBuyer') ? '买手合作' : '博主合作';
-    for (const o of rowsToObjs(mod)) {
+    const objs = rowsToObjs(mod);
+    const total = objs.length;
+    for (let i = 0; i < total; i++) {
+      const o = objs[i];
       const name = String(o.name||'').trim();
       const date = parseDate(o.date);
       const id = String(o.id||'').trim();
@@ -999,10 +1098,17 @@ function buildAll() {
       const l1 = String(o.l1||'').trim();
       const biz = bizByL1(l1, defaultBiz);
       S.inspections.push({ src, biz, name, date, id, l1, wk: wkOf(date), month: monthOf(date), pass: isPassValue(o.pass) });
+      if (i > 0 && i % 5000 === 0) {
+        setProgress(96 + (i / total) * 3, `解析质检数据 (${i}/${total})…`);
+        await sleep(1);
+      }
     }
   }
   if (S.sheets.worktime) {
-    for (const o of rowsToObjs('worktime')) {
+    const objs = rowsToObjs('worktime');
+    const total = objs.length;
+    for (let i = 0; i < total; i++) {
+      const o = objs[i];
       const name = String(o.name||'').trim();
       const date = parseDate(o.date);
       if (!name || !date) continue;
@@ -1012,6 +1118,10 @@ function buildAll() {
         train: num(o.train), mentor: num(o.mentor), rest: num(o.rest),
         meal: num(o.meal), total: num(o.total)
       });
+      if (i > 0 && i % 5000 === 0) {
+        setProgress(96 + 90 + (i / total) * 3, `解析工时数据 (${i}/${total})…`);
+        await sleep(1);
+      }
     }
   }
   if (S.sheets.buyerSla) S.slaBuyer = parseSlaSheet('buyerSla');

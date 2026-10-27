@@ -408,8 +408,6 @@ function formatPeriods(periods) {
   return result.join('、') + '时';
 }
 
-}
-
 function s30AnalysisHTML(biz, wk, prevWk) {
   const cur = s30AnalysisData(biz, wk);
   if (!cur) return '';

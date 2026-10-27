@@ -923,12 +923,18 @@ function reportConclusion(d) {
   return out;
 }
 
-/* ==================== 周报 · 构建 ==================== */
+ * 周报 · 构建
+ */
 function buildReport(biz, wk) {
   const src = bizToSrc(biz);
   const prevWk = wk - 1;
   const month = S.month;
   const monthLabel = month ? parseInt(month.slice(5,7),10) + '月' : '月度';
+
+  // ★ 空月兜底：防止后续解析报错
+  if (!month) {
+    return null;
+  }
   const targets = getTargets(biz);
   const wkSet = new Set([wk]);
   const prevSet = new Set([prevWk]);
@@ -1622,34 +1628,44 @@ function renderReport() {
   if (!el) return;
   const copyBtn = $('#btnRpCopy');
   const mdBtn = $('#btnRpMd');
-  if (!S.records.length && !S.wtRecords.length) {
-    el.innerHTML = '<p class="muted">尚未导入数据。</p>';
+
+  try {
+    if (!S.records.length && !S.wtRecords.length) {
+      el.innerHTML = '<p class="muted">尚未导入数据。</p>';
+      if (copyBtn) copyBtn.disabled = true;
+      if (mdBtn) mdBtn.disabled = true;
+      return;
+    }
+    const bizEl = $('#rpBiz');
+    const wkEl = $('#rpWK');
+    const biz = (bizEl && bizEl.value) || '买手合作';
+    const wkVal = wkEl ? wkEl.value : '';
+    if (!wkVal) {
+      el.innerHTML = '<p class="muted">暂无可用周次，请先导入含日期的数据。</p>';
+      if (copyBtn) copyBtn.disabled = true;
+      if (mdBtn) mdBtn.disabled = true;
+      return;
+    }
+    const wk = parseInt(wkVal, 10) || S.latestWK;
+    const d = buildReport(biz, wk);
+
+    if (!d.week.cur.caseVolume && !d.s30.week.cur.s30Den) {
+      el.innerHTML = '<p class="muted">WK' + wk + ' 暂无数据，请选择其他周次。</p>';
+      if (copyBtn) copyBtn.disabled = true;
+      if (mdBtn) mdBtn.disabled = true;
+      return;
+    }
+    el.innerHTML = reportHTML(d);
+    bindReportInputs();
+    if (copyBtn) copyBtn.disabled = false;
+    if (mdBtn) mdBtn.disabled = false;
+  } catch (err) {
+    console.error('周报渲染异常:', err);
+    el.innerHTML = '<div style="padding:16px;background:#FDF0F0;color:#B33;border-radius:8px;border:1px solid #F5C2C2;">' +
+      '<b>⚠ 周报生成失败</b><br>原因：' + err.message + '<br>请检查该业务线下是否缺少当前周次的数据。</div>';
     if (copyBtn) copyBtn.disabled = true;
     if (mdBtn) mdBtn.disabled = true;
-    return;
   }
-  const bizEl = $('#rpBiz');
-  const wkEl = $('#rpWK');
-  const biz = (bizEl && bizEl.value) || '买手合作';
-  const wkVal = wkEl ? wkEl.value : '';
-  if (!wkVal) {
-    el.innerHTML = '<p class="muted">暂无可用周次，请先导入含日期的数据。</p>';
-    if (copyBtn) copyBtn.disabled = true;
-    if (mdBtn) mdBtn.disabled = true;
-    return;
-  }
-  const wk = parseInt(wkVal, 10) || S.latestWK;
-  const d = buildReport(biz, wk);
-  if (!d.week.cur.caseVolume && !d.s30.week.cur.s30Den) {
-    el.innerHTML = '<p class="muted">WK' + wk + ' 暂无数据，请选择其他周次。</p>';
-    if (copyBtn) copyBtn.disabled = true;
-    if (mdBtn) mdBtn.disabled = true;
-    return;
-  }
-  el.innerHTML = reportHTML(d);
-  bindReportInputs();
-  if (copyBtn) copyBtn.disabled = false;
-  if (mdBtn) mdBtn.disabled = false;
 }
 function bindReportInputs() {
   const el = $('#rpBody');
@@ -1664,36 +1680,38 @@ function bindReportInputs() {
   });
 }
 async function copyReport() {
-  const bizEl = $('#rpBiz');
-  const wkEl = $('#rpWK');
-  const biz = (bizEl && bizEl.value) || '买手合作';
-  const wk = parseInt(wkEl && wkEl.value, 10) || S.latestWK;
-  const text = reportToText(buildReport(biz, wk));
-  try { await navigator.clipboard.writeText(text); toast('✅ 周报已复制到剪贴板'); }
-  catch (_) {
-    const ta = document.createElement('textarea');
-    ta.value = text;
-    ta.style.cssText = 'position:fixed;left:-9999px;top:0';
-    document.body.appendChild(ta); ta.select();
-    try { document.execCommand('copy'); toast('✅ 周报已复制到剪贴板'); }
-    catch (e) { toast('❌ 复制失败，请手动选择文本'); }
-    document.body.removeChild(ta);
+  try {
+    const bizEl = $('#rpBiz');
+    const wkEl = $('#rpWK');
+    const biz = (bizEl && bizEl.value) || '买手合作';
+    const wk = parseInt(wkEl && wkEl.value, 10) || S.latestWK;
+    const text = reportToText(buildReport(biz, wk));
+    await navigator.clipboard.writeText(text);
+    toast('✅ 周报已复制到剪贴板');
+  } catch (err) {
+    console.error(err);
+    toast('❌ 复制失败：' + err.message);
   }
 }
 function downloadReportMd() {
-  const bizEl = $('#rpBiz');
-  const wkEl = $('#rpWK');
-  const biz = (bizEl && bizEl.value) || '买手合作';
-  const wk = parseInt(wkEl && wkEl.value, 10) || S.latestWK;
-  const text = reportToText(buildReport(biz, wk));
-  const blob = new Blob([text], { type: 'text/markdown;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = '周报-' + biz + '-WK' + wk + '.md';
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-  toast('⬇ 已下载 Markdown 文件');
+  try {
+    const bizEl = $('#rpBiz');
+    const wkEl = $('#rpWK');
+    const biz = (bizEl && bizEl.value) || '买手合作';
+    const wk = parseInt(wkEl && wkEl.value, 10) || S.latestWK;
+    const text = reportToText(buildReport(biz, wk));
+    const blob = new Blob([text], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = '周报-' + biz + '-WK' + wk + '.md';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    toast('⬇ 已下载 Markdown 文件');
+  } catch (err) {
+    console.error(err);
+    toast('❌ 下载失败：' + err.message);
+  }
 }
 
 /* ============================================================

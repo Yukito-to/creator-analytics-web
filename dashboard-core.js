@@ -137,7 +137,10 @@ function _statOf(arr) {
   const mean = s.reduce((x, y) => x + y, 0) / n;
   const median = n % 2 ? s[(n - 1) / 2] : (s[n / 2 - 1] + s[n / 2]) / 2;
   const q = p => s[Math.min(n - 1, Math.max(0, Math.round((n - 1) * p)))];
-  return { mean, median, min: s[0], max: s[n - 1], p10: q(0.1), p90: q(0.9), n };
+  // ★ 新增：计算 Q1 和 Q3 用于 IQR 剔除极端值
+  const q1 = q(0.25);
+  const q3 = q(0.75);
+  return { mean, median, min: s[0], max: s[n - 1], p10: q(0.1), p90: q(0.9), q1, q3, n };
 }
 
 /**
@@ -1669,44 +1672,80 @@ function calcPeriodStats(biz, metricKey, sampleWeeks, refDate) {
     }
   }
 
-  const groups = { weekday: {}, weekend: {} };
-  const s30Groups = { weekday: {}, weekend: {} };
-  const regressionPoints = { weekday: {}, weekend: {}, special25: {}, special28: {} };
-  const specialDayGroups = {
-    '25': { shares: {}, s30: {}, count: 0, dates: [] },
-    '28': { shares: {}, s30: {}, count: 0, dates: [] },
-  };
-
+  /* 1. 先构建原始 dailyStats */
   let wdCount = 0, weCount = 0;
-  const dailyStats = [];
-  const totalPointsAll = [];
-  const totalPointsWeekday = [];
-  const totalPointsWeekend = [];
-
+  const rawDailyStats = [];
   for (const d of dayMap.values()) {
     if (d.total <= 0) continue;
     const x = _dateDiffDays(startDate, d.date);
     const wd = new Date(d.date + 'T00:00:00Z').getUTCDay();
     const isWeekend = (wd === 0 || wd === 6);
-    const type = isWeekend ? 'weekend' : 'weekday';
     if (isWeekend) weCount++; else wdCount++;
 
-    totalPointsAll.push({ x, y: d.total });
-    if (isWeekend) totalPointsWeekend.push({ x, y: d.total });
-    else totalPointsWeekday.push({ x, y: d.total });
+    rawDailyStats.push({
+      date: d.date, x, total: d.total, isWeekend,
+      periods: Object.assign({}, d.periods),
+      s30: Object.assign({}, d.s30)
+    });
+  }
+
+  if (!rawDailyStats.length) {
+    diagnostic.reason = 'zero-volume-and-zero-rows';
+    diagnostic.hint = '检测到 ' + dayMap.size + ' 天有数据，但既没有 CASE 处理量、也没有有效明细行。';
+    return emptyReturn();
+  }
+
+  /* 2. 剔除异常天（基于日总量的 IQR） */
+  const allTotalsArr = rawDailyStats.map(d => d.total);
+  const allStat = _statOf(allTotalsArr);
+  let iqrMin = 0, iqrMax = Infinity;
+  if (allStat && allStat.q1 != null && allStat.q3 != null) {
+    const iqr = allStat.q3 - allStat.q1;
+    iqrMin = Math.max(0, allStat.q1 - 1.5 * iqr);
+    iqrMax = allStat.q3 + 1.5 * iqr;
+  }
+
+  const dailyStats = [];
+  const outlierDays = [];  // 用于记录被剔除的天
+  for (const d of rawDailyStats) {
+    if (d.total < iqrMin || d.total > iqrMax) {
+      outlierDays.push({ date: d.date, total: d.total, reason: d.total < iqrMin ? '异常偏低' : '异常偏高' });
+      continue; // 跳过该天，不参与训练
+    }
+    dailyStats.push(d);
+  }
+
+  // 如果剔除后没数据了，退回原始数据
+  if (dailyStats.length === 0 && rawDailyStats.length > 0) {
+    outlierDays.length = 0;
+    for (const d of rawDailyStats) dailyStats.push(d);
+  }
+
+  const groups = { weekday: {}, weekend: {} };
+  const s30Groups = { weekday: {}, weekend: {} };
+  const regressionPoints = { weekday: {}, weekend: {}, special25: {}, special28: {} };
+  const specialDayGroups = { '25': { shares: {}, s30: {}, count: 0, dates: [] }, '28': { shares: {}, s30: {}, count: 0, dates: [] } };
+  const totalPointsAll = [];
+  const totalPointsWeekday = [];
+  const totalPointsWeekend = [];
+
+  for (const d of dailyStats) {
+    totalPointsAll.push({ x: d.x, y: d.total });
+    if (d.isWeekend) totalPointsWeekend.push({ x: d.x, y: d.total });
+    else totalPointsWeekday.push({ x: d.x, y: d.total });
 
     for (const p in d.periods) {
       const share = d.periods[p] / d.total;
-      if (!groups[type][p]) groups[type][p] = [];
-      groups[type][p].push(share);
-      if (!regressionPoints[type][p]) regressionPoints[type][p] = [];
-      regressionPoints[type][p].push({ x, y: share });
+      if (!groups[d.isWeekend ? 'weekend' : 'weekday'][p]) groups[d.isWeekend ? 'weekend' : 'weekday'][p] = [];
+      groups[d.isWeekend ? 'weekend' : 'weekday'][p].push(share);
+      if (!regressionPoints[d.isWeekend ? 'weekend' : 'weekday'][p]) regressionPoints[d.isWeekend ? 'weekend' : 'weekday'][p] = [];
+      regressionPoints[d.isWeekend ? 'weekend' : 'weekday'][p].push({ x: d.x, y: share });
     }
     for (const p in d.s30) {
       const s = d.s30[p];
       if (s.den <= 0) continue;
-      if (!s30Groups[type][p]) s30Groups[type][p] = [];
-      s30Groups[type][p].push(s.num / s.den);
+      if (!s30Groups[d.isWeekend ? 'weekend' : 'weekday'][p]) s30Groups[d.isWeekend ? 'weekend' : 'weekday'][p] = [];
+      s30Groups[d.isWeekend ? 'weekend' : 'weekday'][p].push(s.num / s.den);
     }
 
     if (biz === '博主合作') {
@@ -1724,7 +1763,7 @@ function calcPeriodStats(biz, metricKey, sampleWeeks, refDate) {
             if (!sg.shares[p]) sg.shares[p] = [];
             sg.shares[p].push(share);
             if (!regressionPoints[regKey][p]) regressionPoints[regKey][p] = [];
-            regressionPoints[regKey][p].push({ x, y: share });
+            regressionPoints[regKey][p].push({ x: d.x, y: share });
           }
           for (const p in d.s30) {
             const s = d.s30[p];
@@ -1735,14 +1774,6 @@ function calcPeriodStats(biz, metricKey, sampleWeeks, refDate) {
         }
       }
     }
-
-    dailyStats.push({ date: d.date, total: d.total, isWeekend, periods: Object.assign({}, d.periods), s30: Object.assign({}, d.s30) });
-  }
-
-  if (!dailyStats.length) {
-    diagnostic.reason = 'zero-volume-and-zero-rows';
-    diagnostic.hint = '检测到 ' + dayMap.size + ' 天有数据，但既没有 CASE 处理量、也没有有效明细行。';
-    return emptyReturn();
   }
 
   /* ---- 总量统计（用于日总量预测锚点与区间约束） ---- */
@@ -1771,12 +1802,25 @@ function calcPeriodStats(biz, metricKey, sampleWeeks, refDate) {
     }
   }
 
+  /* ---- 3. 计算时段占比：对占比做 MAD 截断过滤 ---- */
   const median = (group) => {
     const out = {};
     for (const p in group) {
-      const arr = group[p].slice().sort((a, b) => a - b);
+      let arr = group[p].slice().sort((a, b) => a - b);
       const n = arr.length;
-      out[p] = n % 2 ? arr[(n - 1) / 2] : (arr[n / 2 - 1] + arr[n / 2]) / 2;
+      let med = n % 2 ? arr[(n - 1) / 2] : (arr[n / 2 - 1] + arr[n / 2]) / 2;
+      // 过滤极端占比：偏离中位数 3 倍 MAD 之后直接忽略
+      if (n >= 3) {
+        const absDev = arr.map(x => Math.abs(x - med));
+        const mad = absDev.slice().sort((a, b) => a - b)[Math.floor(n / 2)] || 0.0001;
+        const filtered = arr.filter(x => Math.abs(x - med) <= 3 * mad);
+        if (filtered.length > 0) {
+          arr = filtered;
+          const m = arr.length;
+          med = m % 2 ? arr[(m - 1) / 2] : (arr[m / 2 - 1] + arr[m / 2]) / 2;
+        }
+      }
+      out[p] = med;
     }
     return out;
   };
@@ -1848,6 +1892,10 @@ function calcPeriodStats(biz, metricKey, sampleWeeks, refDate) {
     totalStats,
     regressions,
     totalRegression,
+    // ★ 新增：
+    outlierDays,
+    iqrRange: { min: iqrMin, max: iqrMax },
+    validDailyCount: dailyStats.length,
   };
 }
 

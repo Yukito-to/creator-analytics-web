@@ -610,7 +610,52 @@ function renderForecastResult() {
     if (stats.abnormalDays && stats.abnormalDays.length) {
       noteHtml += '<div style="color:#C98383;margin-top:4px">⚠ <b>疑似异常天：</b>' + stats.abnormalDays.map(d => d.date + '（偏差' + d.totalDevPct + '%）').join('、') + '。</div>';
     }
-    notesEl.innerHTML = noteHtml;
+
+    // ★ 新增：详细运算过程展示
+    let detailHtml = '<details style="margin-top:12px;background:#FCFBF9;border:1px solid #E5E1DA;border-radius:8px;padding:10px 14px">';
+    detailHtml += '<summary style="cursor:pointer;font-weight:600;color:#7B8FBF;outline:none;user-select:none">🔍 展开查看详细计算过程与极值剔除逻辑</summary>';
+
+    detailHtml += '<div style="margin-top:10px; font-size:12.5px; line-height:1.8; color:#333">';
+
+    // 1. 异常值剔除
+    detailHtml += '<div style="font-weight:bold; color:#5C7099; margin-bottom:4px">1. 历史数据清洗（IQR 异常值剔除）</div>';
+    if (stats.iqrRange && stats.outlierDays) {
+      detailHtml += '<div>· 正常区间：[<b>' + Math.round(stats.iqrRange.min) + '</b>, <b>' + Math.round(stats.iqrRange.max) + '</b>]（基于历史日总量 Q1-1.5IQR ~ Q3+1.5IQR 计算）</div>';
+      detailHtml += '<div>· 有效天数：' + stats.validDailyCount + ' 天</div>';
+      if (stats.outlierDays.length > 0) {
+        detailHtml += '<div>· 已自动剔除 <b>' + stats.outlierDays.length + '</b> 个极端天，避免对回归产生拉偏影响：</div>';
+        detailHtml += '<div style="padding-left:12px; color:#C98383">' +
+          stats.outlierDays.map(d => d.date + '（' + d.total + '单，' + d.reason + '）').join('<br>') + '</div>';
+      } else {
+        detailHtml += '<div>· 未发现需要剔除的极端天。</div>';
+      }
+    } else {
+      detailHtml += '<div>· 数据量较少，本次未启用极值剔除。</div>';
+    }
+    detailHtml += '<div style="height:8px"></div>';
+
+    // 2. 总量预测逻辑
+    detailHtml += '<div style="font-weight:bold; color:#5C7099; margin-bottom:4px">2. 每日总量预测逻辑</div>';
+    detailHtml += '<div>· 算法：优先使用同星期历史均值 → 结合线性回归外推（基于 R² 赋予权重） → 乘以 1.1 排班 Buffer → 约束在历史合理区间内。</div>';
+    if (stats.totalRegression && stats.totalRegression.all && stats.totalRegression.all.n >= 3) {
+      detailHtml += '<div>· 总量回归方程：y = ' + stats.totalRegression.all.slope.toFixed(2) + ' * x + ' + stats.totalRegression.all.intercept.toFixed(2) + '（R² = ' + stats.totalRegression.all.r2.toFixed(3) + '）</div>';
+    }
+    detailHtml += '<div style="height:8px"></div>';
+
+    // 3. 时段占比逻辑
+    detailHtml += '<div style="font-weight:bold; color:#5C7099; margin-bottom:4px">3. 时段占比预测逻辑</div>';
+    detailHtml += '<div>· 算法：统计历史各时段的占比中位数（已用 3倍MAD 过滤极端占比），结合线性回归的趋势预测，最后进行归一化。</div>';
+    detailHtml += '<div>· 示例（工作日 10 时）：中位数 X%，回归预测 Y%，按 R² 权重混合后为 Z%。</div>';
+    detailHtml += '<div style="height:8px"></div>';
+
+    // 4. 最终结果计算链路
+    detailHtml += '<div style="font-weight:bold; color:#5C7099; margin-bottom:4px">4. 最终预测输出计算公式</div>';
+    detailHtml += '<div>· 某时段预测单量 = 该日预测总单量 × 该时段的预测占比</div>';
+    detailHtml += '<div>· <i>注：表格顶部的“合计”代表全天各时段预测值加总。</i></div>';
+
+    detailHtml += '</div></details>';
+
+    notesEl.innerHTML = noteHtml + detailHtml;
   }
 }
 

@@ -114,15 +114,32 @@ const _XLSX_STYLES_XML =
       '<font><sz val="11"/><name val="Calibri"/></font>' +
       '<font><b/><sz val="11"/><name val="Calibri"/></font>' +
     '</fonts>' +
-    '<fills count="2">' +
+    '<fills count="4">' +
       '<fill><patternFill patternType="none"/></fill>' +
       '<fill><patternFill patternType="gray125"/></fill>' +
+      '<fill><patternFill patternType="solid"><fgColor rgb="FFF4F3EF"/><bgColor indexed="64"/></patternFill></fill>' +
+      '<fill><patternFill patternType="solid"><fgColor rgb="FFE8EDF3"/><bgColor indexed="64"/></patternFill></fill>' +
     '</fills>' +
-    '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>' +
+    '<borders count="2">' +
+      '<border><left/><right/><top/><bottom/><diagonal/></border>' +
+      '<border>' +
+        '<left style="thin"><color rgb="FFD5D2CB"/></left>' +
+        '<right style="thin"><color rgb="FFD5D2CB"/></right>' +
+        '<top style="thin"><color rgb="FFD5D2CB"/></top>' +
+        '<bottom style="thin"><color rgb="FFD5D2CB"/></bottom>' +
+        '<diagonal/>' +
+      '</border>' +
+    '</borders>' +
     '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
-    '<cellXfs count="2">' +
-      '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>' +
-      '<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/>' +
+    '<cellXfs count="4">' +
+      /* 0 普通（带边框，水平居中） */ +
+      '<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment horizontal="center"/></xf>' +
+      /* 1 粗体（带边框，水平居中） */ +
+      '<xf numFmtId="0" fontId="1" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center"/></xf>' +
+      /* 2 表头（粗体 + 浅灰填充 + 边框，居中） */ +
+      '<xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>' +
+      /* 3 合计（粗体 + 浅蓝填充 + 边框，居中） */ +
+      '<xf numFmtId="0" fontId="1" fillId="3" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center"/></xf>' +
     '</cellXfs>' +
     '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>' +
   '</styleSheet>';
@@ -687,15 +704,15 @@ function exportForecastXlsx() {
 
   const rows = [];
 
-  const header1 = [{ v: '时段', t: 's', s: 1 }];
-  const header2 = [{ v: '', t: 's', s: 1 }];
+  const header1 = [{ v: '时段', t: 's', s: 2 }];
+  const header2 = [{ v: '', t: 's', s: 2 }];
   for (const r of results) {
     const wd = new Date(r.date + 'T00:00:00Z').getUTCDay();
-    header1.push({ v: r.date.slice(5) + ' 周' + WEEKDAY_CN[wd], t: 's', s: 1 });
-    header2.push({ v: r.typeLabel || '', t: 's', s: 1 });
+    header1.push({ v: r.date.slice(5) + ' 周' + WEEKDAY_CN[wd], t: 's', s: 2 });
+    header2.push({ v: r.typeLabel || '', t: 's', s: 2 });
   }
-  header1.push({ v: '合计', t: 's', s: 1 });
-  header2.push({ v: '', t: 's', s: 1 });
+  header1.push({ v: '合计', t: 's', s: 2 });
+  header2.push({ v: '', t: 's', s: 2 });
   rows.push(header1, header2);
 
   for (const p of periodList) {
@@ -706,17 +723,17 @@ function exportForecastXlsx() {
       sum += v;
       row.push({ v: Math.round(v), t: 'n', s: 0 });
     }
-    row.push({ v: Math.round(sum), t: 'n', s: 1 });
+    row.push({ v: Math.round(sum), t: 'n', s: 3 });
     rows.push(row);
   }
 
-  const totalRow = [{ v: '总量', t: 's', s: 1 }];
+  const totalRow = [{ v: '总量', t: 's', s: 3 }];
   let grand = 0;
   for (const r of results) {
-    totalRow.push({ v: Math.round(r.total), t: 'n', s: 0 });
+    totalRow.push({ v: Math.round(r.total), t: 'n', s: 3 });
     grand += r.total;
   }
-  totalRow.push({ v: Math.round(grand), t: 'n', s: 1 });
+  totalRow.push({ v: Math.round(grand), t: 'n', s: 3 });
   rows.push(totalRow);
 
   const lastCol = results.length + 2;

@@ -363,15 +363,13 @@ function computeOverForecastImpactDetail(cur) {
     const day = dayMap.get(o.date);
     if (!day || day.den <= 0) continue;
 
-    const newDayRate = (day.num + miss) / day.den;
-    const dayImpact = newDayRate - day.rate;
     const newWeekRate = (totNum + miss) / totDen;
     const weekImpact = newWeekRate - totRate;
 
     rows.push({
       date: o.date, period: o.period,
       forecast: o.forecast, den: o.den, num: o.num,
-      miss, bias, rate, dayImpact, weekImpact
+      miss, bias, rate, weekImpact
     });
   }
   rows.sort((a, b) => {
@@ -1788,6 +1786,12 @@ function bindEvents() {
     S.volumeForecast = {};
     S.scheduleDates = []; S.month = ''; S.latestDate = ''; S.latestWK = 0;
     S.expandedRows = new Set();
+    /* ★ 重置派生状态，确保下次导入走全解析路径 */
+    S._lastFileName = '';
+    S._dataVersion = 0;
+    S.personSel = new Set();
+    S.teamSel = { group: new Set(), batch: new Set(), category: new Set() };
+    if (typeof _resetPerfCache === 'function') _resetPerfCache();
     const ds = $('#dataStatus'); if (ds) { ds.textContent = '未导入'; ds.classList.remove('pill-on'); ds.classList.add('pill-off'); }
     const pw = $('#progressWrap'); if (pw) pw.classList.add('hidden');
     const is = $('#importSummary'); if (is) is.innerHTML = '';

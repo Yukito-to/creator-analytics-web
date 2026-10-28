@@ -217,7 +217,7 @@ function refreshAll() {
   /* ★ BUG-8：目标面板依赖 SLA 数据，重新导入后必须同步刷新 */
   if (typeof renderTargetConfig === 'function') renderTargetConfig();
   /* ★ 出勤看板已融合到员工看板，renderPerson 内部会联动 */
-  renderReport();
+  if (typeof renderReport === 'function') renderReport();
   /* 时段预测若当前可见，也刷新（函数在 dashboard-forecast.js） */
   const fcView = document.getElementById('view-forecast');
   if (fcView && fcView.classList.contains('active') && typeof renderForecastConfig === 'function') {
@@ -1064,12 +1064,7 @@ function renderAHT2() {
   const el = $('#a2Body');
   if (!el) return;
   el.classList.remove('table-scroll');
-  el.style.overflow = 'visible';
-  el.style.maxHeight = 'none';
-  el.style.border = 'none';
-  el.style.borderRadius = '0';
-  el.style.background = 'transparent';
-  el.style.position = 'static';
+  el.classList.add('aht2-outer');
 
   const bizEl = $('#a2Biz');
   const biz = (bizEl && bizEl.value) || '买手合作';
@@ -1251,38 +1246,43 @@ function renderSLA() {
       '</div>'
     : '';
 
-  /* ★ 诊断：目标/实际为何是「—」 */
+  /* ★ 诊断：目标/实际为何是「—」（★ 上限 100 条，避免极端数据下内存膨胀） */
   const diagItems = [];
+  let diagTotal = 0;
+  function addDiag(s) {
+    diagTotal++;
+    if (diagItems.length < 100) diagItems.push(s);
+  }
   const srcEmps = srcEmployeeSet(src);
   const rosterInSrc = S.roster.filter(e => srcEmps.has(e.name));
   for (const c of computed) {
     const cat = String(c.item.category || '').trim();
     const isOverall = !cat || /^(整体|全部|合计|总计|平均|总体)$/.test(cat);
     if (c.score.threshold == null) {
-      diagItems.push('【' + c.item.metric + ' / ' + cat + '】目标未读到（tiers 为空）');
+      addDiag('【' + c.item.metric + ' / ' + cat + '】目标未读到（tiers 为空）');
     } else if (c.score.actualDisp == null) {
       if (!S.roster.length) {
-        diagItems.push('【' + c.item.metric + ' / ' + cat + '】目标已读到，实际值算不出：花名册为空');
+        addDiag('【' + c.item.metric + ' / ' + cat + '】目标已读到，实际值算不出：花名册为空');
       } else if (!rosterInSrc.length) {
-        diagItems.push('【' + c.item.metric + ' / ' + cat + '】目标已读到，实际值算不出：花名册里没有出现在「' + src + '」数据里的员工');
+        addDiag('【' + c.item.metric + ' / ' + cat + '】目标已读到，实际值算不出：花名册里没有出现在「' + src + '」数据里的员工');
       } else if (!isOverall) {
         const matched = rosterInSrc.filter(e => (categoryOf(e, S.month) || '').includes(cat));
         if (!matched.length) {
           const sampleCats = Array.from(new Set(rosterInSrc.map(e => categoryOf(e, S.month) || '（空）'))).slice(0, 5);
-          diagItems.push('【' + c.item.metric + ' / ' + cat + '】目标已读到，实际值算不出：花名册里没有分类含「' + cat + '」的员工（当前花名册出现的分类：' + sampleCats.join('、') + '）');
+          addDiag('【' + c.item.metric + ' / ' + cat + '】目标已读到，实际值算不出：花名册里没有分类含「' + cat + '」的员工（当前花名册出现的分类：' + sampleCats.join('、') + '）');
         }
       }
     }
   }
-  if (diagItems.length) {
+  if (diagTotal) {
     headInfo += '<details style="margin-bottom:12px;padding:10px 16px;background:#FFF7E6;border-radius:10px;border-left:3px solid #E8A33E;font-size:12.5px;line-height:1.9">' +
       '<summary style="cursor:pointer;font-weight:700;color:#B36A00;user-select:none;outline:none">' +
-        '⚠ 部分指标未显示完整（共 ' + diagItems.length + ' 项）' +
+        '⚠ 部分指标未显示完整（共 ' + diagTotal + ' 项）' +
         '<span style="font-weight:400;color:#A67419;margin-left:8px;font-size:11.5px">点击展开详情</span>' +
       '</summary>' +
       '<div style="margin-top:8px">' +
         diagItems.slice(0, 6).map(s => '<div>· ' + esc(s) + '</div>').join('') +
-        (diagItems.length > 6 ? '<div style="color:#A0A0AE">…等 ' + diagItems.length + ' 项</div>' : '') +
+        (diagTotal > 6 ? '<div style="color:#A0A0AE">…等 ' + diagTotal + ' 项</div>' : '') +
         '<div style="margin-top:8px;color:#B36A00">目标值已从 SLA 表读出，独立于实际值显示；实际值缺失通常是 <b>花名册未导入</b> 或 <b>花名册分类列未匹配当前月份</b>。</div>' +
       '</div>' +
     '</details>';

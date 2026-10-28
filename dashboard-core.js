@@ -417,7 +417,6 @@ const S = {
 
 /* ==================== 性能缓存层 ==================== */
 let _perfCache = null;
-let _setKeyCache = null;
 
 function _resetPerfCache() {
   _perfCache = {
@@ -431,20 +430,24 @@ function _resetPerfCache() {
     s30Agg: new Map(),
     timeCols: null,
   };
-  _setKeyCache = new WeakMap();
 }
 _resetPerfCache();
 
+/* ★ 实时计算 Set 的缓存 key（移除 WeakMap 缓存，避免 Set 修改后命中旧 key）
+   · 小集合（<=64 元素）全量拼接，保证精确
+   · 大集合（>64）用 size + djb2 哈希，控制 key 长度 */
+function _hashStr(s) {
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+  return (h >>> 0).toString(36);
+}
 function _setKey(set, prefix) {
   if (!set) return '';
-  let k = _setKeyCache.get(set);
-  if (k !== undefined) return k;
   const arr = [];
   for (const v of set) arr.push(String(v));
   arr.sort();
-  k = prefix + '[' + arr.join(',') + ']';
-  _setKeyCache.set(set, k);
-  return k;
+  if (arr.length <= 64) return prefix + '[' + arr.join(',') + ']';
+  return prefix + '#' + arr.length + '#' + _hashStr(arr.join(','));
 }
 
 function _optsKey(o, prefix) {
@@ -490,8 +493,13 @@ function parseDate(v) {
     m = /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/.exec(s);
     if (m) { res = m[3]+'-'+pad2(m[1])+'-'+pad2(m[2]); }
     else {
-      const d = new Date(s);
-      if (!isNaN(d.getTime())) res = d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate());
+      /* ★ 新增：YYYYMMDD 纯数字日期（如 20260901） */
+      m = /^(\d{4})(\d{2})(\d{2})$/.exec(s);
+      if (m) { res = m[1]+'-'+m[2]+'-'+m[3]; }
+      else {
+        const d = new Date(s);
+        if (!isNaN(d.getTime())) res = d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate());
+      }
     }
   }
   
@@ -2286,12 +2294,14 @@ function initWeekPicker() {
       }
     });
 
-    // 7. 点击外部关闭（严格判断目标是否在 wrap 内）
+    // 7. 点击外部关闭（严格判断目标是否在 wrap 内；用 AbortController 便于将来拆卸）
+    const outsideCtrl = new AbortController();
+    wrap._abortCtrl = outsideCtrl;
     document.addEventListener('click', (e) => {
       if (!wrap.contains(e.target)) {
         list.style.display = 'none';
       }
-    });
+    }, { signal: outsideCtrl.signal });
 
     // 8. 监听原生 select 的 change 事件（同步按钮文字和高亮状态）
     sel.addEventListener('change', () => {
@@ -2313,6 +2323,7 @@ function initWeekPicker() {
   } else {
     // ★ BUG-FIX：包裹层已存在时，仍确保原生 select 隐藏，避免未来 DOM 重构后双控件并存
     sel.style.display = 'none';
+    // ★ 监听器已在首次创建时绑定，此处无需重复绑定
   }
 
   // 9. 渲染/更新选项列表

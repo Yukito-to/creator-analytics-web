@@ -243,6 +243,16 @@ main { padding: 12px 12px calc(40px + env(safe-area-inset-bottom)); }
   -webkit-overflow-scrolling: touch; background: #fff; position: relative;
 }
 
+/* ★ AHT2 外层容器：替代原内联样式，避免样式污染 */
+.aht2-outer {
+  overflow: visible;
+  max-height: none;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  position: static;
+}
+
 /* 30S 日期 × 时段明细：固定表头 + 固定首列 */
 #s30Body {
   max-height: 70vh;

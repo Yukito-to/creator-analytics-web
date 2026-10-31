@@ -382,27 +382,61 @@ function renderOverview() {
   const src = bizToSrc(biz);
   if (!S.records.length) { el.innerHTML = '<p class="muted">尚未导入数据。</p>'; return; }
 
+  /* ★ 初始化总计和月度数据容器 */
   const l1Sum = { '买手合作':0, '博主合作':0 };
-  for (const r of S.records) if (l1Sum[r.biz] != null) l1Sum[r.biz] += r.volume;
+  const m_l1Sum = { '买手合作':0, '博主合作':0 };
+  
   const empSum = { '买手合作':0, '博主合作':0 };
+  const m_empSum = { '买手合作':0, '博主合作':0 };
+  
+  const cross = { '买手合作': { '买手合作':0, '博主合作':0 }, '博主合作': { '买手合作':0, '博主合作':0 } };
+  const m_cross = { '买手合作': { '买手合作':0, '博主合作':0 }, '博主合作': { '买手合作':0, '博主合作':0 } };
+
+  /* ★ 单次遍历同时累加总计与当月数据 */
   for (const r of S.records) {
     const eb = (r.src === 'buyer') ? '买手合作' : '博主合作';
-    if (empSum[eb] != null) empSum[eb] += r.volume;
+    const isCurMonth = r.month === S.month;
+
+    // 1. 一级打点
+    if (l1Sum[r.biz] != null) {
+      l1Sum[r.biz] += r.volume;
+      if (isCurMonth) m_l1Sum[r.biz] += r.volume;
+    }
+    // 2. 员工总数据
+    if (empSum[eb] != null) {
+      empSum[eb] += r.volume;
+      if (isCurMonth) m_empSum[eb] += r.volume;
+    }
+    // 3. 交叉数据
+    if (cross[eb] && cross[eb][r.biz] != null) {
+      cross[eb][r.biz] += r.volume;
+      if (isCurMonth) m_cross[eb][r.biz] += r.volume;
+    }
   }
-  const cross = { '买手合作': { '买手合作':0, '博主合作':0 }, '博主合作': { '买手合作':0, '博主合作':0 } };
-  for (const r of S.records) {
-    const srcKey = (r.src === 'buyer') ? '买手合作' : '博主合作';
-    if (cross[srcKey] && cross[srcKey][r.biz] != null) cross[srcKey][r.biz] += r.volume;
-  }
+
+  const mLabel = S.month ? (parseInt(S.month.slice(5, 7), 10) + '月') : '本月';
+
+  /* ★ 辅助函数：生成带月度小标签的卡片 */
+  const buildCard = (title, totalVal, monthVal) => 
+    '<div class="sum-item" style="display:flex;flex-direction:column;justify-content:space-between;">' +
+      '<div class="k">' + title + '</div>' +
+      '<div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-top:4px;">' +
+        '<div class="v" style="margin-top:0;">' + Math.round(totalVal) + '</div>' +
+        '<div style="font-size:11px;color:#7B8FBF;background:#E7ECF5;padding:2px 6px;border-radius:4px;white-space:nowrap;" title="' + mLabel + '累计">' +
+          mLabel + ': <b>' + Math.round(monthVal) + '</b>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+
   const overview = '<div class="summary-grid" style="margin-bottom:16px">' +
-    '<div class="sum-item"><div class="k">① 一级打点 · 买手合作 CASE</div><div class="v">' + Math.round(l1Sum['买手合作']) + '</div></div>' +
-    '<div class="sum-item"><div class="k">① 一级打点 · 博主合作 CASE</div><div class="v">' + Math.round(l1Sum['博主合作']) + '</div></div>' +
-    '<div class="sum-item"><div class="k">② 买手员工数据 · 总 CASE</div><div class="v">' + Math.round(empSum['买手合作']) + '</div></div>' +
-    '<div class="sum-item"><div class="k">② 博主员工数据 · 总 CASE</div><div class="v">' + Math.round(empSum['博主合作']) + '</div></div>' +
-    '<div class="sum-item"><div class="k">③ 买手员工数据中 · 买手合作 CASE</div><div class="v">' + Math.round(cross['买手合作']['买手合作']) + '</div></div>' +
-    '<div class="sum-item"><div class="k">③ 买手员工数据中 · 博主合作 CASE</div><div class="v">' + Math.round(cross['买手合作']['博主合作']) + '</div></div>' +
-    '<div class="sum-item"><div class="k">③ 博主员工数据中 · 买手合作 CASE</div><div class="v">' + Math.round(cross['博主合作']['买手合作']) + '</div></div>' +
-    '<div class="sum-item"><div class="k">③ 博主员工数据中 · 博主合作 CASE</div><div class="v">' + Math.round(cross['博主合作']['博主合作']) + '</div></div>' +
+    buildCard('① 一级打点 · 买手合作 CASE', l1Sum['买手合作'], m_l1Sum['买手合作']) +
+    buildCard('① 一级打点 · 博主合作 CASE', l1Sum['博主合作'], m_l1Sum['博主合作']) +
+    buildCard('② 买手员工数据 · 总 CASE', empSum['买手合作'], m_empSum['买手合作']) +
+    buildCard('② 博主员工数据 · 总 CASE', empSum['博主合作'], m_empSum['博主合作']) +
+    buildCard('③ 买手数据 · 买手 CASE', cross['买手合作']['买手合作'], m_cross['买手合作']['买手合作']) +
+    buildCard('③ 买手数据 · 博主 CASE', cross['买手合作']['博主合作'], m_cross['买手合作']['博主合作']) +
+    buildCard('③ 博主数据 · 买手 CASE', cross['博主合作']['买手合作'], m_cross['博主合作']['买手合作']) +
+    buildCard('③ 博主数据 · 博主 CASE', cross['博主合作']['博主合作'], m_cross['博主合作']['博主合作']) +
     '</div>';
   const cols = timeCols();
   const rows = [];

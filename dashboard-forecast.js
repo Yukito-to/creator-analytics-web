@@ -573,7 +573,9 @@ function renderForecastResult() {
     for (const r of results) {
       const v = r.periods[p] || 0;
       sum += v;
-      tbody += '<td style="text-align:center">' + (r.total > 0 ? Math.round(v) : '—') + '</td>';
+      // ★ 如果总量 > 0，但该时段分配为 0，显示为 '-' 而不是 0，以缓解视觉误导
+      const disp = r.total > 0 ? (v > 0 ? v : '-') : '—';
+      tbody += '<td style="text-align:center">' + disp + '</td>';
     }
     tbody += '<td style="font-weight:600;text-align:center;background:#F4F3EF">' + Math.round(sum) + '</td>';
     tbody += '</tr>';
@@ -722,7 +724,8 @@ function exportForecastXlsx() {
     for (const r of results) {
       const v = r.periods[p] || 0;
       sum += v;
-      row.push({ v: Math.round(v), t: 'n', s: 0 });
+      // ★ 如果为0，Excel 中也留空，避免下推计算时全变成0
+      row.push({ v: v > 0 ? v : '', t: 'n', s: 0 });
     }
     row.push({ v: Math.round(sum), t: 'n', s: 3 });
     rows.push(row);

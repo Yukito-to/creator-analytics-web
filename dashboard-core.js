@@ -117,7 +117,9 @@ function _predictShare(regrObj, baseDate, targetDate, fallbackShare) {
     if (r && r.n >= 3 && isFinite(r.slope) && isFinite(r.intercept)) {
       const pred = r.slope * x + r.intercept;
       const blend = (r.r2 >= 0.5) ? 1.0 : 0.5;
-      val = Math.max(0, blend * pred + (1 - blend) * median);
+      /* ★ 新增防跌穿保护：如果该时段原本有单，回归外推最低不低于中位数的 30%，避免长期趋势向下导致占比归零 */
+      const minVal = median > 0 ? median * 0.3 : 0;
+      val = Math.max(minVal, blend * pred + (1 - blend) * median);
     } else {
       val = median;
     }
@@ -1991,7 +1993,31 @@ function generateForecast(biz, metricKey, sampleWeeks, startDate, days, dailyTot
     }
 
     const row = { date, useWeekend, typeLabel, total, periods: {}, s30Rate, specialKind, totalSource, shareSource };
-    for (const p of periods) row.periods[p] = total * (share[p] || 0);
+
+    /* ★ 使用最大余数法分配整数，避免四舍五入导致总和不匹配或极小占比直接归零 */
+    const targetTotal = Math.round(total);
+    let floorSum = 0;
+    const remainders = [];
+
+    for (const p of periods) {
+      const raw = total * (share[p] || 0);
+      const f = Math.floor(raw);
+      row.periods[p] = f;
+      floorSum += f;
+      remainders.push({ p, rem: raw - f });
+    }
+
+    let diff = targetTotal - floorSum;
+    if (diff > 0) {
+      // 按小数部分从大到小排序，将剩余的单量依次分配，尽量保证每个有占比的时段至少分到 1 单
+      remainders.sort((a, b) => b.rem - a.rem);
+      for (let i = 0; i < diff && i < remainders.length; i++) {
+        row.periods[remainders[i].p]++;
+      }
+    }
+    // 同步修正 total 为整数，保证 UI 和导出的合计完全一致
+    row.total = targetTotal;
+
     results.push(row);
   }
   return { stats, results, periods };

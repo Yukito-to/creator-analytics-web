@@ -522,6 +522,16 @@ const wkStartDate = wk => dateAdd(WK_BASE_DATE, (wk - WK_BASE_NUM) * 7);
 const wkEndDate   = wk => dateAdd(wkStartDate(wk), 6);
 const weekdayOf   = d => d ? WEEKDAY_CN[new Date(d + 'T00:00:00Z').getUTCDay()] : '';
 
+/* ★ 新增：获取当前日期的下周周一（YYYY-MM-DD） */
+function getNextMondayStr() {
+  const d = new Date();
+  const day = d.getDay(); // 0是周日，1是周一
+  // 如果今天是周日(0)，距离下周一是1天；如果今天是周一(1)，距离是7天；其他是 8 - day
+  const diff = day === 0 ? 1 : 8 - day;
+  d.setDate(d.getDate() + diff);
+  return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
+}
+
 /* ==================== UI 辅助 ==================== */
 function getCheckedValues(selector) { const el = $(selector); if (!el) return []; return Array.from(el.querySelectorAll('.chip.on')).map(ch => ch.dataset.val); }
 function ensureChipContainer(id) {
@@ -2430,12 +2440,7 @@ function initSelects() {
   /* 周次下拉：显示上一次离开时的周次，如果没有则显示最新的周次 */
   const fcStart = $('#fcStartDate');
   if (fcStart && !fcStart.value) {
-    if (S.latestDate) {
-      fcStart.value = dateAdd(S.latestDate, 1);
-    } else {
-      const d = new Date();
-      fcStart.value = d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
-    }
+    fcStart.value = getNextMondayStr();
   }
   if (typeof renderForecastConfig === 'function') renderForecastConfig();
 

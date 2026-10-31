@@ -306,14 +306,7 @@ function renderForecastConfig() {
   const biz = (bizEl && bizEl.value) || '买手合作';
   const startEl = $('#fcStartDate');
   const daysEl = $('#fcDays');
-  const startDate = startEl ? startEl.value : (
-    S.latestDate
-      ? dateAdd(S.latestDate, 1)
-      : (function () {
-          const d = new Date();
-          return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
-        })()
-  );
+  const startDate = (startEl && startEl.value) ? startEl.value : getNextMondayStr();
   const days = daysEl ? parseInt(daysEl.value, 10) : 7;
 
   if (!S.forecastInputs) S.forecastInputs = {};

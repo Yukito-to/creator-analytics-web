@@ -308,10 +308,23 @@ function monthlyReportHTML(d) {
   }
   P.push('</div></div>');
 
-  if (slaList && slaList.length) {
+  // ★ 预先过滤一次，如果有有效数据才渲染标题
+  const validSlaList = (slaList || []).filter(c => {
+    if (c.score.threshold == null && c.score.actualDisp == null) return false;
+    const cat = String(c.item.category || '').trim();
+    const isOverall = !cat || /^(整体|全部|合计|总计|平均|总体)$/.test(cat);
+    if (!isOverall && S.roster.length > 0) {
+      const srcEmps = srcEmployeeSet(d.src);
+      const matched = S.roster.filter(e => srcEmps.has(e.name) && (categoryOf(e, d.month) || '').includes(cat));
+      if (!matched.length) return false;
+    }
+    return true;
+  });
+
+  if (validSlaList.length > 0) {
     P.push('<div class="rp-section"><h3>四、SLA 达成情况</h3><div class="rpt-body">');
     P.push('<div class="table-scroll-x"><table class="rp-table"><thead><tr><th>指标</th><th>分类</th><th>权重</th><th>目标</th><th>实际</th><th>最终得分</th><th>达成状态</th></tr></thead><tbody>');
-    for (const c of slaList) {
+    for (const c of validSlaList) {
       const sc = c.score;
       const isPct = sc.isPct;
       let tDisp = '—', aDisp = '—', rateDisp = '—';
@@ -448,6 +461,19 @@ function monthlyReportToText(d) {
     L.push('| --- | --- | ---: | ---: | ---: | ---: | :---: |');
     for (const c of slaList) {
       const sc = c.score;
+      
+      /* ★ 过滤：无目标且无实际值时不展示 */
+      if (sc.threshold == null && sc.actualDisp == null) continue;
+
+      /* ★ 过滤：如果是特定分类，但花名册里根本没匹配到员工 */
+      const cat = String(c.item.category || '').trim();
+      const isOverall = !cat || /^(整体|全部|合计|总计|平均|总体)$/.test(cat);
+      if (!isOverall && S.roster.length > 0) {
+        const srcEmps = srcEmployeeSet(d.src);
+        const matched = S.roster.filter(e => srcEmps.has(e.name) && (categoryOf(e, d.month) || '').includes(cat));
+        if (!matched.length) continue;
+      }
+
       const isPct = sc.isPct;
       let tDisp = sc.threshold != null ? (isPct ? (sc.threshold * 100).toFixed(2) + '%' : sc.threshold.toFixed(2)) : '—';
       let aDisp = sc.actualDisp != null ? (isPct ? (sc.actualDisp * 100).toFixed(2) + '%' : sc.actualDisp.toFixed(2)) : '—';

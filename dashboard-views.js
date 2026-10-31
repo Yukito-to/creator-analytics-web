@@ -218,6 +218,9 @@ function refreshAll() {
   if (typeof renderTargetConfig === 'function') renderTargetConfig();
   /* ★ 出勤看板已融合到员工看板，renderPerson 内部会联动 */
   if (typeof renderReport === 'function') renderReport();
+  /* ★ 新增：刷新月报看板 */
+  if (typeof initMonthlyReportOptions === 'function') initMonthlyReportOptions();
+  if (typeof renderMonthlyReport === 'function') renderMonthlyReport();
   /* 时段预测若当前可见，也刷新（函数在 dashboard-forecast.js） */
   const fcView = document.getElementById('view-forecast');
   if (fcView && fcView.classList.contains('active') && typeof renderForecastConfig === 'function') {

@@ -30,6 +30,7 @@
   <button data-view="import" class="active">📥 导入</button>
   <button data-view="mapping">🔗 映射</button>
   <button data-view="report">📄 周报</button>
+  <button data-view="monthly">📅 月报</button>
   <button data-view="forecast">🔮 时段预测</button>
   <button data-view="overview">📊 达成</button>
   <button data-view="person">👥 数据看板</button>
@@ -253,6 +254,22 @@
     </div>
   </section>
 
+  <section id="view-monthly" class="view">
+    <div class="card">
+      <div class="card-head">
+        <h2>月报输出 <span class="help" data-tip="按自然月进行深度分析，自动对比上月。">?</span></h2>
+        <div class="head-controls">
+          <label>业务线 <select id="mrBiz"></select></label>
+          <label>月份 <select id="mrMonth"></select></label>
+        </div>
+        <div class="head-controls">
+          <button id="btnMrCopy" class="btn sm" disabled>📋 复制 Markdown</button>
+        </div>
+      </div>
+      <div id="mrBody"></div>
+    </div>
+  </section>
+
 </main>
 
 <!-- 引入 SheetJS 核心库（极速解析） -->
@@ -262,5 +279,6 @@
 <script src="dashboard-views.js"></script>
 <script src="dashboard-forecast.js"></script>
 <script src="dashboard-report.js"></script>
+<script src="dashboard-monthly.js"></script>
 </body>
 </html>

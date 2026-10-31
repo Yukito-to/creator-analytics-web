@@ -272,7 +272,8 @@ function monthlyReportHTML(d) {
     const volTrend = dvVol >= 0 ? '<span class="delta-up">↑ ' + fmtInt(dvVol) + '</span>' : '<span class="delta-down">↓ ' + fmtInt(Math.abs(dvVol)) + '</span>';
     const dvAht = x.curAhtRate != null && x.prevAhtRate != null ? x.curAhtRate - x.prevAhtRate : null;
     const ahtTrend = dvAht == null ? '—' : (dvAht > 0 ? '<span class="delta-down">↑ ' + dvAht.toFixed(2) + '</span>' : '<span class="delta-up">↓ ' + Math.abs(dvAht).toFixed(2) + '</span>');
-    P.push('<tr><td>' + esc(x.l1) + '</td><td>' + fmtInt(x.curVol) + '</td><td>' + share + '</td><td>' + fmtInt(x.prevVol) + '</td><td>' + volTrend + '</td><td>' + (x.curAhtRate || '—') + '</td><td>' + ahtTrend + '</td></tr>');
+    const curAhtDisp = x.curAhtRate != null ? x.curAhtRate.toFixed(2) : '—';
+    P.push('<tr><td>' + esc(x.l1) + '</td><td>' + fmtInt(x.curVol) + '</td><td>' + share + '</td><td>' + fmtInt(x.prevVol) + '</td><td>' + volTrend + '</td><td>' + curAhtDisp + '</td><td>' + ahtTrend + '</td></tr>');
   }
   P.push('</tbody></table></div>');
 
@@ -302,7 +303,9 @@ function monthlyReportHTML(d) {
     for (const x of ahtAttr) {
       const impCls = x.impact > 0 ? 'delta-up' : (x.impact < 0 ? 'delta-down' : 'delta-flat');
       const impStr = x.impact == null ? '—' : (x.impact > 0 ? '+' : '') + x.impact.toFixed(2);
-      P.push('<tr><td>' + esc(x.l2) + '<div class="aht2-l1">' + esc(x.l1) + '</div></td><td>' + (x.curRate || '—') + '</td><td>' + (x.prevRate || '—') + '</td><td>' + fmtInt(x.curVol) + '</td><td class="' + impCls + '">' + impStr + '</td></tr>');
+      const curRateDisp = x.curRate != null ? x.curRate.toFixed(2) : '—';
+      const prevRateDisp = x.prevRate != null ? x.prevRate.toFixed(2) : '—';
+      P.push('<tr><td>' + esc(x.l2) + '<div class="aht2-l1">' + esc(x.l1) + '</div></td><td>' + curRateDisp + '</td><td>' + prevRateDisp + '</td><td>' + fmtInt(x.curVol) + '</td><td class="' + impCls + '">' + impStr + '</td></tr>');
     }
     P.push('</tbody></table></div>');
   }
@@ -420,7 +423,8 @@ function monthlyReportToText(d) {
     const volTrend = dvVol >= 0 ? '↑ ' + fmtInt(dvVol) : '↓ ' + fmtInt(Math.abs(dvVol));
     const dvAht = x.curAhtRate != null && x.prevAhtRate != null ? x.curAhtRate - x.prevAhtRate : null;
     const ahtTrend = dvAht == null ? '—' : (dvAht > 0 ? '↑ ' + dvAht.toFixed(2) : '↓ ' + Math.abs(dvAht).toFixed(2));
-    L.push('| ' + x.l1 + ' | ' + fmtInt(x.curVol) + ' | ' + share + ' | ' + fmtInt(x.prevVol) + ' | ' + volTrend + ' | ' + (x.curAhtRate || '—') + ' | ' + ahtTrend + ' |');
+    const curAhtDisp = x.curAhtRate != null ? x.curAhtRate.toFixed(2) : '—';
+    L.push('| ' + x.l1 + ' | ' + fmtInt(x.curVol) + ' | ' + share + ' | ' + fmtInt(x.prevVol) + ' | ' + volTrend + ' | ' + curAhtDisp + ' | ' + ahtTrend + ' |');
   }
   L.push('');
 
@@ -450,7 +454,9 @@ function monthlyReportToText(d) {
     L.push('| --- | ---: | ---: | ---: | ---: |');
     for (const x of ahtAttr) {
       const impStr = x.impact == null ? '—' : (x.impact > 0 ? '+' : '') + x.impact.toFixed(2);
-      L.push('| ' + x.l2 + '（' + x.l1 + '） | ' + (x.curRate || '—') + ' | ' + (x.prevRate || '—') + ' | ' + fmtInt(x.curVol) + ' | ' + impStr + ' |');
+      const curRateDisp = x.curRate != null ? x.curRate.toFixed(2) : '—';
+      const prevRateDisp = x.prevRate != null ? x.prevRate.toFixed(2) : '—';
+      L.push('| ' + x.l2 + '（' + x.l1 + '） | ' + curRateDisp + ' | ' + prevRateDisp + ' | ' + fmtInt(x.curVol) + ' | ' + impStr + ' |');
     }
     L.push('');
   }

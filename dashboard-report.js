@@ -97,8 +97,29 @@ function renderTargetConfig() {
         delete all[biz][key];
       } else {
         const n = parseFloat(raw);
-        if (isNaN(n)) delete all[biz][key];
-        else all[biz][key] = m.pct ? n / 100 : n;
+        if (isNaN(n)) {
+          delete all[biz][key];
+        } else if (m.pct) {
+          if (n > 0 && n < 1) {
+            /* ★ 用户可能把 95% 填成 0.95，明确确认 */
+            const useSmall = confirm(
+              '⚠ 百分比指标通常填 0~100 的数值（如 95 表示 95%）。\n' +
+              '你输入的是 ' + n + '，看起来像小数。\n\n' +
+              '点「确定」按 ' + (n * 100).toFixed(2) + '% 处理；\n' +
+              '点「取消」按 ' + n.toFixed(2) + '% 处理。'
+            );
+            all[biz][key] = useSmall ? n : n / 100;
+          } else if (n < 0 || n > 100) {
+            alert('⚠ 百分比指标请输入 0~100 之间的数值（如 95 表示 95%）');
+            inp.value = fmtDisp(m, slaVal);
+            inp.dataset.src = slaVal != null ? 'sla' : 'none';
+            return;
+          } else {
+            all[biz][key] = n / 100;
+          }
+        } else {
+          all[biz][key] = n;
+        }
       }
       saveTargets(all);
       renderTargetConfig();
@@ -523,12 +544,14 @@ function s30AnalysisHTML(biz, wk, prevWk) {
       const rateX = (cur.totRate * 100).toFixed(2) + '%';
       const rateY = ((cur.totNum + missAll) / cur.totDen * 100).toFixed(2) + '%';
       const liftZ = (((cur.totNum + missAll) / cur.totDen) - cur.totRate) * 100;
-      const verdict = ((cur.totNum + missAll) / cur.totDen) >= 0.95
+      const thPctNum = (th * 100).toFixed(2);
+      const hitAfterFill = (cur.totNum + missAll) / cur.totDen;
+      const verdict = hitAfterFill >= th
         ? '✅ 回补后可达标'
-        : '❌ 回补后仍差 ' + (95 - Number(rateY.slice(0, -1))).toFixed(2) + ' pp';
+        : '❌ 回补后仍差 ' + ((th - hitAfterFill) * 100).toFixed(2) + ' pp';
       P.push('<div class="rpt-sub" style="margin-top:8px"><b>合计：</b>共 <b>' + impacts.length + '</b> 个时段，累计 Miss <b>' + missAll +
         '</b> 单；若全部回补，30S 接起率可由 <b>' + rateX + '</b> 提升至 <b>' + rateY + '</b>，提升 <b>' + liftZ.toFixed(2) +
-        ' pp</b>（目标 95%）；' + verdict + '；</div>');
+        ' pp</b>（目标 ' + thPctNum + '%）；' + verdict + '；</div>');
     }
   }
 
@@ -753,12 +776,14 @@ function s30AnalysisText(biz, wk, prevWk) {
       const rateX = (cur.totRate * 100).toFixed(2) + '%';
       const rateY = ((cur.totNum + missAll) / cur.totDen * 100).toFixed(2) + '%';
       const liftZ = (((cur.totNum + missAll) / cur.totDen) - cur.totRate) * 100;
-      const verdict = ((cur.totNum + missAll) / cur.totDen) >= 0.95
+      const thPctNum = (th * 100).toFixed(2);
+      const hitAfterFill = (cur.totNum + missAll) / cur.totDen;
+      const verdict = hitAfterFill >= th
         ? '✅ 回补后可达标'
-        : '❌ 回补后仍差 ' + (95 - Number(rateY.slice(0, -1))).toFixed(2) + ' pp';
+        : '❌ 回补后仍差 ' + ((th - hitAfterFill) * 100).toFixed(2) + ' pp';
       L.push('**合计：**共 **' + impacts.length + '** 个时段，累计 Miss **' + missAll +
         '** 单；若全部回补，30S 接起率可由 **' + rateX + '** 提升至 **' + rateY + '**，提升 **' + liftZ.toFixed(2) +
-        ' pp**（目标 95%）；' + verdict + '；');
+        ' pp**（目标 ' + thPctNum + '%）；' + verdict + '；');
       L.push('');
     }
   }
@@ -1791,6 +1816,14 @@ function bindEvents() {
     S._dataVersion = 0;
     S.personSel = new Set();
     S.teamSel = { group: new Set(), batch: new Set(), category: new Set() };
+    /* ★ BUG-FIX：重置时清空预测页每日总量输入，否则下次导入仍显示旧输入 */
+    S.forecastInputs = {};
+    S.forecastHolidays = new Set();
+    S.forecastWorkdays = new Set();
+    try {
+      localStorage.removeItem('creator_forecast_holidays');
+      localStorage.removeItem('creator_forecast_workdays');
+    } catch (_) {}
     if (typeof _resetPerfCache === 'function') _resetPerfCache();
     const ds = $('#dataStatus'); if (ds) { ds.textContent = '未导入'; ds.classList.remove('pill-on'); ds.classList.add('pill-off'); }
     const pw = $('#progressWrap'); if (pw) pw.classList.add('hidden');

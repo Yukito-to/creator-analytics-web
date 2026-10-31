@@ -995,6 +995,9 @@ function renderS30Body(biz) {
   /* ★ 最新日期展示在最上面：日期降序；同一日期内时段保持升序 */
   const list = Object.values(map).sort((a, b) => {
     if (a.date !== b.date) return a.date < b.date ? 1 : -1;
+    /* ★ 时段按数值升序：9 < 10 < 11，避免字符串比较把 10 排在 9 前 */
+    const pa = parseInt(a.period, 10), pb = parseInt(b.period, 10);
+    if (isFinite(pa) && isFinite(pb) && pa !== pb) return pa - pb;
     return String(a.period).localeCompare(String(b.period));
   });
 

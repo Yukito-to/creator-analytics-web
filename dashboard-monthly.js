@@ -112,14 +112,38 @@ function buildMonthlyReport(biz, month) {
     };
   }
 
+  /* ★ 一次遍历聚合，避免每月 30 次全量扫描 S.records */
   const dailyRows = [];
-  const [y, m] = month.split('-').map(Number);
-  const daysInMonth = new Date(y, m, 0).getDate();
-  for (let i = 1; i <= daysInMonth; i++) {
-    const d = month + '-' + pad2(i);
-    const c = calcBySrc(src, { dateSet: new Set([d]) });
-    if (c.caseVolume > 0 || c.s30Den > 0) {
-      dailyRows.push({ date: d, cur: c });
+  const dayAggMap = new Map();
+  const srcEmps4Daily = srcEmployeeSet(src);
+  for (const r of S.records) {
+    if (r.src !== src || r.month !== month) continue;
+    if (!dayAggMap.has(r.date)) dayAggMap.set(r.date, { recs: [], wts: [] });
+    dayAggMap.get(r.date).recs.push(r);
+  }
+  for (const w of S.wtRecords) {
+    if (w.month !== month) continue;
+    if (!srcEmps4Daily.has(w.name)) continue;
+    if (!dayAggMap.has(w.date)) dayAggMap.set(w.date, { recs: [], wts: [] });
+    dayAggMap.get(w.date).wts.push(w);
+  }
+  const sortedDays = Array.from(dayAggMap.keys()).sort();
+  for (const d of sortedDays) {
+    const { recs, wts } = dayAggMap.get(d);
+    const empSet = new Set(); for (const r of recs) empSet.add(r.name);
+    let attDays = 0;
+    for (const n of empSet) attDays += attOf(n, d);
+    const insp = inspectionStats({ src, dateSet: new Set([d]) });
+    const agg = aggregate(recs, wts, attDays, insp);
+    /* 30S 按一级打点聚合 */
+    const bizOfRec = recs.length ? (recs[0].src === 'buyer' ? '买手合作' : '博主合作') : '';
+    if (bizOfRec) {
+      const s30 = s30AggFor(bizOfRec, { dateSet: new Set([d]) });
+      agg.s30Num = s30.s30Num; agg.s30Den = s30.s30Den;
+      agg.s30Miss = s30.s30Miss; agg.s30Rate = s30.s30Rate;
+    }
+    if (agg.caseVolume > 0 || agg.s30Den > 0) {
+      dailyRows.push({ date: d, cur: agg });
     }
   }
 
@@ -140,7 +164,7 @@ function buildMonthlyReport(biz, month) {
     for (const it of list) {
       const key = matchMetricKey(it.metric);
       const cfg = it.months[curMonthNum];
-      const actual = key ? slaAchieve(src, key, it.category) : null;
+      const actual = key ? slaAchieve(src, key, it.category, month) : null;
       const score = calcSlaScore(key, actual, cfg);
       slaList.push({ item: it, key, cfg, actual, score });
     }

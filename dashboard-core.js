@@ -1,4 +1,4 @@
-/* ============================================================
+﻿/* ============================================================
    创作者数据分析 · 核心层
    （常量 / 状态 / 工具 / 文件解析 / 数据聚合 / 目标读取 / 时段预测算法 / 节假日API / 线性回归）
    ============================================================ */
@@ -418,6 +418,21 @@ const S = {
 };
 
 /* ==================== 性能缓存层 ==================== */
+/* ★ 缓存容量上限：单次导入内视图切换可能积累数万条 key，移动端有内存压力 */
+const _PERF_CACHE_MAX = 2000;
+function _cacheSet(map, key, value) {
+  if (map.size >= _PERF_CACHE_MAX) {
+    const toDelete = Math.floor(map.size / 2);
+    const iter = map.keys();
+    for (let i = 0; i < toDelete; i++) {
+      const k = iter.next();
+      if (k.done) break;
+      map.delete(k.value);
+    }
+  }
+  map.set(key, value);
+}
+
 let _perfCache = null;
 
 function _resetPerfCache() {
@@ -560,7 +575,7 @@ function toast(msg) {
 /* ==================== 工作表识别 ==================== */
 function identify(name) {
   const n = String(name);
-  if (/^预测量$|预测总量|日度总量表|volumeForecast/i.test(n)) return 'volumeForecast';
+  if (/预测量|预测总量|日度总量表|volumeForecast/i.test(n)) return 'volumeForecast';
   if (/花名册|名单|员工表|人员表|人员信息/.test(n)) return 'roster';
   if (/班次/.test(n)) return 'shift';
   if (/班表|排班/.test(n)) return 'schedule';
@@ -704,18 +719,7 @@ function parseCSV(text) {
   return rows;
 }
 
-// 精确处理含引号的 CSV 行
-function parseCSVEscape(line) {
-  // ★ BUG-FIX P0：cur 必须是数组（原代码初始化为字符串，cur.push 会直接抛 TypeError）
-  const cur = []; let field = '', inQ = false;
-  for (let i = 0; i < line.length; i++) {
-    const c = line[i];
-    if (inQ) { if (c === '"') { if (line[i+1] === '"') { field += '"'; i++; } else inQ = false; } else field += c; }
-    else { if (c === '"') inQ = true; else if (c === ',') { cur.push(field); field = ''; } else if (c === '\n') { cur.push(field); field = ''; } else if (c !== '\r') field += c; }
-  }
-  if (field || cur.length) { cur.push(field); }
-  return cur;
-}
+
 
 /* ==================== 各 sheet → 对象数组 ==================== */
 function rowsToObjs(kind) {
@@ -803,7 +807,7 @@ function srcEmployeeSet(src) {
   s = new Set();
   for (const r of S.records) if (r.src === src) s.add(r.name);
   for (const r of S.inspections) if (r.src === src) s.add(r.name);
-  _perfCache.srcEmps.set(src, s);
+  _cacheSet(_perfCache.srcEmps, src, s);
   return s;
 }
 function bizByL1(l1, defaultBiz) { const b = S.businessMap[l1] || ''; if (BIZ_LIST.includes(b)) return b; return defaultBiz; }
@@ -917,7 +921,19 @@ function parseDateFlexible(v, refYear, refMonth) {
 }
 
 /* ==================== SLA 表解析 ==================== */
-function normPctVal(v) { const n = num(v); if (!isFinite(n)) return null; return n > 1 ? n / 100 : n; }
+/* ★ 符号感知数值解析：SLA 表常写「≤5分钟」「≥95%」，原 num() 会返回 NaN 导致阈值静默丢失 */
+function parseSignedNumber(v) {
+  if (v == null || v === '') return NaN;
+  const s = String(v).replace(/[≤≥<>＜＞=＝\s]/g, '').replace(/,/g, '');
+  const m = /^(-?\d+(?:\.\d+)?)/.exec(s);
+  if (!m) return NaN;
+  return parseFloat(m[1]);
+}
+function normPctVal(v) {
+  const n = parseSignedNumber(v);
+  if (!isFinite(n)) return null;
+  return n > 1 ? n / 100 : n;
+}
 function parseSlaSheet(kind) {
   const sheet = S.sheets[kind];
   if (!sheet) return [];
@@ -1182,7 +1198,7 @@ function filterRecs(o) {
     if (monthSet && !monthSet.has(r.month)) return false;
     return true;
   });
-  _perfCache.filterRecs.set(key, result);
+  _cacheSet(_perfCache.filterRecs, key, result);
   return result;
 }
 function filterWt(o) {
@@ -1199,7 +1215,7 @@ function filterWt(o) {
     if (monthSet && !monthSet.has(r.month)) return false;
     return true;
   });
-  _perfCache.filterWt.set(key, result);
+  _cacheSet(_perfCache.filterWt, key, result);
   return result;
 }
 function inspectionStats(o) {
@@ -1222,7 +1238,7 @@ function inspectionStats(o) {
     if (r.pass) passCount += 1;
   }
   const result = { total, pass: passCount, fail: total - passCount };
-  _perfCache.inspectionStats.set(key, result);
+  _cacheSet(_perfCache.inspectionStats, key, result);
   return result;
 }
 function s30AggFor(biz, opts) {
@@ -1240,7 +1256,7 @@ function s30AggFor(biz, opts) {
   }
   const o = Object.assign({ bizL1: biz }, timeOpts);
   const result = aggregate(filterRecs(o), filterWt(o), 0, inspectionStats(o));
-  _perfCache.s30Agg.set(key, result);
+  _cacheSet(_perfCache.s30Agg, key, result);
   return result;
 }
 function calcBySrc(src, opts) {
@@ -1265,7 +1281,7 @@ function calcBySrc(src, opts) {
   agg.s30Den  = s30.s30Den;
   agg.s30Miss = s30.s30Miss;
   agg.s30Rate = s30.s30Rate;
-  _perfCache.calcBySrc.set(key, agg);
+  _cacheSet(_perfCache.calcBySrc, key, agg);
   return agg;
 }
 function calcBySrcAndL1(src, bizL1, opts) {
@@ -1289,7 +1305,7 @@ function calcBySrcAndL1(src, bizL1, opts) {
   agg.s30Den  = s30.s30Den;
   agg.s30Miss = s30.s30Miss;
   agg.s30Rate = s30.s30Rate;
-  _perfCache.calcBySrcAndL1.set(key, agg);
+  _cacheSet(_perfCache.calcBySrcAndL1, key, agg);
   return agg;
 }
 function calcByL1(bizL1, opts) {
@@ -1298,7 +1314,7 @@ function calcByL1(bizL1, opts) {
   if (cached) return cached;
   const o = Object.assign({ bizL1 }, opts || {});
   const agg = aggregate(filterRecs(o), filterWt(o), 0, inspectionStats(o));
-  _perfCache.calcByL1.set(key, agg);
+  _cacheSet(_perfCache.calcByL1, key, agg);
   return agg;
 }
 
@@ -1378,14 +1394,16 @@ function matchMetricKey(s) {
   for (const k of keys) if (n.includes(k)) return SLA_METRIC_ALIAS[k];
   return null;
 }
-function slaAchieve(src, metricKey, category) {
-  const monthSet = new Set([S.month]);
+function slaAchieve(src, metricKey, category, month) {
+  /* ★ 月报可切换历史月份，实际值必须按目标月份计算，不能永远用 S.month */
+  const targetMonth = month || S.month;
+  const monthSet = new Set([targetMonth]);
   const srcEmps = srcEmployeeSet(src);
   const c = String(category == null ? '' : category).trim();
   const isOverall = !c || c === '整体' || c === '全部' || c === '合计' || c === '总计' || c === '平均' || c === '总体';
   let nameSet = null;
   if (!isOverall) {
-    const names = S.roster.filter(e => srcEmps.has(e.name) && (categoryOf(e, S.month) || '').includes(c)).map(e => e.name);
+    const names = S.roster.filter(e => srcEmps.has(e.name) && (categoryOf(e, targetMonth) || '').includes(c)).map(e => e.name);
     if (!names.length) return null;
     nameSet = new Set(names);
   }
@@ -1409,7 +1427,7 @@ function calcSlaScore(metricKey, actual, monthCfg) {
     if (isPct) {
       thr = t.threshold;
     } else {
-      const raw = num(t.rawThreshold);
+      const raw = parseSignedNumber(t.rawThreshold);
       thr = (isFinite(raw) && raw !== 0) ? raw : t.threshold;
     }
     return { threshold: t.threshold, rawThreshold: t.rawThreshold, points: t.points, _thr: thr };
@@ -1419,7 +1437,9 @@ function calcSlaScore(metricKey, actual, monthCfg) {
     .sort((a, b) => better === 'down' ? a._thr - b._thr : b._thr - a._thr);
 
   if (actualDisp == null || !sortedTiers.length) {
-    return { threshold: null, points: null, achieveRate: null, finalScore: null, hitTierIndex: -1, actualDisp, weight: monthCfg.weight, isPct, belowLowest: false, tiers: sortedTiers };
+    /* ★ 目标存在时必须返回 threshold，即使实际值缺失，否则 UI 会误显示「—」 */
+    const t100Fallback = sortedTiers.find(t => { const n = Number(t.points); return n === 100 || Math.abs(n - 1) < 1e-6; }) || sortedTiers[0];
+    return { threshold: t100Fallback ? t100Fallback._thr : null, points: null, achieveRate: null, finalScore: null, hitTierIndex: -1, actualDisp, weight: monthCfg.weight, isPct, belowLowest: false, tiers: sortedTiers };
   }
 
   /* ★ 用「100 分档」作为目标档位，不再依赖 tiers[0] */
@@ -1497,7 +1517,7 @@ function slaTargets100(biz) {
       let v;
       if (m && m.pct) v = t100.threshold;
       else {
-        const raw = num(t100.rawThreshold);
+        const raw = parseSignedNumber(t100.rawThreshold);
         v = (isFinite(raw) && raw !== 0) ? raw : t100.threshold;
       }
       out[key] = v;
@@ -2070,181 +2090,6 @@ function forecastToMarkdown(biz, metricKey, sampleWeeks, forecast) {
   return lines.join('\n');
 }
 
-function buildForecastAiContext(biz, metricKey, sampleWeeks, startDate, days, dailyTotals, holidays, forecast) {
-  const { stats, results } = forecast;
-  const periodList = (forecast.periods && forecast.periods.length) ? forecast.periods : PREDICT_PERIODS;
-  const historyDetail = stats.dailyStats.slice().sort((a, b) => a.date < b.date ? -1 : 1).map(d => {
-    const row = { date: d.date, weekday: WEEKDAY_CN[new Date(d.date + 'T00:00:00Z').getUTCDay()], type: d.isWeekend ? '周末' : '工作日', total: Math.round(d.total), periods: {} };
-    for (const p of periodList) {
-      const v = d.periods[p] || 0;
-      const share = d.total > 0 ? v / d.total : 0;
-      const s30 = d.s30[p];
-      const s30Rate = (s30 && s30.den > 0) ? s30.num / s30.den : null;
-      row.periods[p] = { val: Math.round(v), share: (share * 100).toFixed(2) + '%', s30Rate: s30Rate == null ? null : (s30Rate * 100).toFixed(2) + '%' };
-    }
-    return row;
-  });
-  const avgShare = {
-    weekday: Object.fromEntries(periodList.map(p => [p, ((stats.weekday[p] || 0) * 100).toFixed(2) + '%'])),
-    weekend: Object.fromEntries(periodList.map(p => [p, ((stats.weekend[p] || 0) * 100).toFixed(2) + '%'])),
-  };
-  const avgS30 = {
-    weekday: Object.fromEntries(periodList.map(p => [p, stats.weekdayS30[p] != null ? (stats.weekdayS30[p] * 100).toFixed(2) + '%' : '—'])),
-    weekend: Object.fromEntries(periodList.map(p => [p, stats.weekendS30[p] != null ? (stats.weekendS30[p] * 100).toFixed(2) + '%' : '—'])),
-  };
-  const forecastRows = results.map(r => {
-    const wd = new Date(r.date + 'T00:00:00Z').getUTCDay();
-    return {
-      date: r.date, weekday: WEEKDAY_CN[wd], typeLabel: r.typeLabel,
-      total: Math.round(r.total), totalSource: r.totalSource,
-      periods: Object.fromEntries(periodList.map(p => [p, Math.round(r.periods[p] || 0)]))
-    };
-  });
-
-  const specialDaysInfo = {};
-  if (stats.specialDays) {
-    for (const k of ['25', '28']) {
-      const sd = stats.specialDays[k];
-      if (!sd) { specialDaysInfo[k] = null; continue; }
-      specialDaysInfo[k] = {
-        sampleCount: sd.sampleCount,
-        dates: sd.dates,
-        share: Object.fromEntries(periodList.map(p => [p, ((sd.share[p] || 0) * 100).toFixed(2) + '%'])),
-        s30: Object.fromEntries(periodList.map(p => [p, sd.s30[p] != null ? (sd.s30[p] * 100).toFixed(2) + '%' : '—'])),
-      };
-    }
-  }
-
-  const trendInfo = (function () {
-    const out = { total: null, shares: {} };
-    const tr = stats.totalRegression && stats.totalRegression.all;
-    if (tr && tr.n >= 3) {
-      out.total = {
-        slope: tr.slope, intercept: tr.intercept, r2: tr.r2, n: tr.n,
-        direction: tr.slope > 0.5 ? '上升' : (tr.slope < -0.5 ? '下降' : '平稳'),
-      };
-    }
-    if (stats.regressions) {
-      for (const type of ['weekday', 'weekend']) {
-        out.shares[type] = {};
-        const regr = stats.regressions[type];
-        for (const p of periodList) {
-          const r = regr ? regr[p] : null;
-          if (r && r.n >= 3) {
-            out.shares[type][p] = {
-              slope: r.slope, r2: r.r2, n: r.n,
-              dailyChangePct: r.slope * 100,
-            };
-          }
-        }
-      }
-    }
-    return out;
-  })();
-
-  return {
-    biz, metricKey, sampleWeeks, startDate, days,
-    sampleRange: stats.sampleRange,
-    weekdayCount: stats.weekdayCount, weekendCount: stats.weekendCount,
-    periodList, avgShare, avgS30,
-    abnormalDays: stats.abnormalDays,
-    historyDetail, forecastRows,
-    thresholds: { s30Rate: s30Threshold(biz) },
-    specialDays: specialDaysInfo,
-    trend: trendInfo,
-  };
-}
-
-function formatForecastAiContext(ctx) {
-  const L = [];
-  L.push('【基本信息】');
-  L.push('  业务线：' + ctx.biz + '（按一级打点识别）');
-  L.push('  计算维度：CASE 总量（人工服务量）');
-  L.push('  时段范围：9-23 时（共 ' + ctx.periodList.length + ' 个）');
-  L.push('  样本周期：' + ctx.sampleRange.start + ' ~ ' + ctx.sampleRange.end + '（' + ctx.sampleWeeks + ' 周）');
-  L.push('  样本天数：工作日 ' + ctx.weekdayCount + ' 天 / 周末 ' + ctx.weekendCount + ' 天');
-  L.push('  30S 接起率阈值：' + (ctx.thresholds.s30Rate * 100).toFixed(2) + '%');
-  L.push('  预测算法：时段占比采用**线性回归**（R² >= 0.5 完全用回归，否则与中位数各占 50%）');
-  L.push('');
-
-  if (ctx.trend) {
-    L.push('【趋势分析（线性回归）】');
-    if (ctx.trend.total) {
-      const t = ctx.trend.total;
-      L.push('  日度总量：斜率 = ' + t.slope.toFixed(2) + ' 单/天，R² = ' + t.r2.toFixed(3) + '，样本 ' + t.n + ' 天，方向：' + t.direction);
-    } else {
-      L.push('  日度总量：样本不足，未做回归。');
-    }
-    for (const type of ['weekday', 'weekend']) {
-      const label = type === 'weekday' ? '工作日' : '周末';
-      const keys = Object.keys(ctx.trend.shares[type] || {});
-      if (!keys.length) {
-        L.push('  ' + label + '时段占比：样本不足，使用中位数。');
-        continue;
-      }
-      const parts = [];
-      for (const p of ctx.periodList) {
-        const s = ctx.trend.shares[type][p];
-        if (!s) continue;
-        const sign = s.dailyChangePct >= 0 ? '+' : '';
-        parts.push(p + '时 ' + sign + s.dailyChangePct.toFixed(3) + 'pp/天(R²=' + s.r2.toFixed(2) + ')');
-      }
-      L.push('  ' + label + '占比趋势：' + parts.join('，'));
-    }
-    L.push('');
-  }
-
-  if (ctx.specialDays && (ctx.specialDays['25'] || ctx.specialDays['28'])) {
-    L.push('【⚠️ 业务特殊日（仅博主合作）：每月 25 日 / 28 日为集中进线日】');
-    for (const k of ['25', '28']) {
-      const sd = ctx.specialDays[k];
-      if (!sd) { L.push('  ' + k + ' 日：样本不足，未启用特殊模板。'); continue; }
-      L.push('  ' + k + ' 日：样本 ' + sd.sampleCount + ' 天（' + (sd.dates.join('、') || '—') + '），时段占比如下：');
-      L.push('    时段 | ' + ctx.periodList.join(' | '));
-      L.push('    占比 | ' + ctx.periodList.map(p => sd.share[p] || '—').join(' | '));
-      L.push('    30S  | ' + ctx.periodList.map(p => sd.s30[p] || '—').join(' | '));
-    }
-    L.push('');
-  }
-
-  L.push('【平均时段占比（中位数，作为回归的兜底参考）】');
-  L.push('  时段 | 工作日占比 | 周末占比 | 工作日30S | 周末30S');
-  for (const p of ctx.periodList) {
-    L.push('  ' + p + '时 | ' + (ctx.avgShare.weekday[p] || '—') + ' | ' + (ctx.avgShare.weekend[p] || '—') + ' | ' + (ctx.avgS30.weekday[p] || '—') + ' | ' + (ctx.avgS30.weekend[p] || '—'));
-  }
-  L.push('');
-  if (ctx.abnormalDays.length) {
-    L.push('【⚠ 疑似异常天（占比偏差>50% 或 总量偏差>40%）】');
-    L.push('  日期 | 类型 | 总量 | 同类型均值 | 总量偏差 | 最大时段占比偏差');
-    for (const d of ctx.abnormalDays) {
-      L.push('  ' + d.date + ' | ' + (d.isWeekend ? '周末' : '工作日') + ' | ' + d.total + ' | ' + d.avgTotal + ' | ' + d.totalDevPct + '% | ' + d.maxShareDev + '%（' + d.maxDevPeriod + '时）');
-    }
-    L.push('');
-  } else {
-    L.push('【⚠ 疑似异常天】未检出显著异常。');
-    L.push('');
-  }
-  L.push('【历史每日明细（日期 / 类型 / 总量 / 每时段占比 / 30S接起率）】');
-  L.push('  日期 | 类型 | 总量 | ' + ctx.periodList.map(p => p + '时占比(30S)').join(' | '));
-  for (const d of ctx.historyDetail) {
-    const cells = ctx.periodList.map(p => { const v = d.periods[p]; if (!v || v.val === 0) return '—'; return v.share + (v.s30Rate ? '(' + v.s30Rate + ')' : ''); });
-    L.push('  ' + d.date + ' | ' + d.type + ' | ' + d.total + ' | ' + cells.join(' | '));
-  }
-  L.push('');
-  L.push('【未来预测（占比来自线性回归，总量优先取用户输入）】');
-  L.push('  说明：totalSource = user 表示用户输入；regression 表示用历史日度总量回归外推');
-  L.push('  日期 | 类型 | 总量(来源) | ' + ctx.periodList.map(p => p + '时').join(' | '));
-  for (const r of ctx.forecastRows) {
-    // ★ BUG-FIX P2：统一用 FORECAST_SOURCE_LABEL 映射，避免遗漏新来源
-    const srcTag = r.totalSource === 'user'
-      ? ''
-      : (r.totalSource ? '(' + (FORECAST_SOURCE_LABEL[r.totalSource] || '自动') + ')' : '(无)');
-    const cells = ctx.periodList.map(p => r.periods[p] || 0);
-    L.push('  ' + r.date + '(' + r.weekday + ') | ' + r.typeLabel + ' | ' + r.total + srcTag + ' | ' + cells.join(' | '));
-  }
-  L.push('');
-  return L.join('\n');
-}
 
 /* ★ 业务线下拉 → 按钮组 */
 function initBizSwitchers() {

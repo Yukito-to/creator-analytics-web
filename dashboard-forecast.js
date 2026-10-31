@@ -1,5 +1,5 @@
 /* ============================================================
-   创作者数据分析 · 时段预测视图 + AI 深度分析层
+   创作者数据分析 · 时段预测视图
    ============================================================ */
 'use strict';
 
@@ -596,9 +596,9 @@ function renderForecastResult() {
       const color = tr.slope > 0.5 ? '#C75C5C' : (tr.slope < -0.5 ? '#6EA980' : '#77778A');
       noteHtml += '<div style="color:' + color + ';margin-top:4px">📈 <b>日度总量趋势：</b>斜率 ' + tr.slope.toFixed(2) + ' 单/天，R² = ' + tr.r2.toFixed(3) + '（' + dir + '）；<b>时段占比：</b>线性回归预测</div>';
     } else {
-      noteHtml += '<div style="color:#77778A;margin-top:4px">📈 <b>算法：</b>时段占比线性回归；日总量 = max(同周加权均值, P60分位) × 趋势修正 × 1.10 排班 buffer，回归仅做微调</div>';
+      noteHtml += '<div style="color:#77778A;margin-top:4px">📈 <b>算法：</b>时段占比线性回归（R²≥0.5 全用回归，否则与中位数各 50%）；日总量 = 同星期历史均值与回归按 R² 加权混合，再 ×1.10 排班 buffer</div>';
     }
-    noteHtml += '<div style="color:#77778A;font-size:11.5px;margin-top:2px">🧮 <b>总量算法：</b>锚点 = max(同周加权均值, P60分位)，趋势修正 ±35%（负趋势减半），回归权重 0.7→50%/0.6→40%/0.5→30%/0.4→15%，最终值 × 1.10 排班 buffer，clamp 至 [P10×0.85, max×1.30]；博主 25/28 日走特殊日模板 × 1.10。</div>';
+    noteHtml += '<div style="color:#77778A;font-size:11.5px;margin-top:2px">🧮 <b>总量算法：</b>锚点 = 过去 4 周同星期均值；回归权重按 R² 分档（≥0.70→70%，0.50~0.70→50%，0.30~0.50→30%，<0.30→0%）；最终值 × 1.10 排班 buffer，clamp 至 [P10×0.7, P90×1.3]；博主 25/28 日走特殊日模板 × 1.10。</div>';
     const holidayTag =
       (_cnHolidayVersion.indexOf('不可用') >= 0) ? '<span style="color:#C98383">' + _cnHolidayVersion + '</span>'
       : (_cnHolidayVersion.indexOf('异常') >= 0 || _cnHolidayVersion.indexOf('未刷新') >= 0)

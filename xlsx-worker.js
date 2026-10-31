@@ -6,8 +6,11 @@
  *  输出：progress / done / error 三类消息
  * ===================================================================== */
 
-/* ★ SheetJS 从 CDN 加载，与 index.html 主线程使用的版本保持一致。
-   若项目改为本地库（如 lib/xlsx.full.min.js），把下面这行改成对应相对路径即可。 */
+/* ★ SheetJS 从 CDN 加载，版本必须与 index.html 主线程使用的完全一致（当前锁定 0.18.5）。
+   下面代码直接读取 ws['!data']（dense 模式内部结构），这是 SheetJS 内部 API，
+   升级版本时务必先回归验证「底层读取」分支是否仍可用；
+   若升级后异常，会走 try/catch 降级到 sheet_to_json，功能不受影响但性能会下降。
+   若项目改为本地库（如 lib/xlsx.full.min.js），把 importScripts 改成对应相对路径即可。 */
 try {
     // 统一使用稳定的国内镜像 CDN
     importScripts('https://jsd.onmicrosoft.cn/npm/xlsx@0.18.5/dist/xlsx.full.min.js');

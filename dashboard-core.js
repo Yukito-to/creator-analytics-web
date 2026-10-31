@@ -1858,7 +1858,21 @@ function calcPeriodStats(biz, metricKey, sampleWeeks, refDate) {
   for (const type of ['weekday', 'weekend', 'special25', 'special28']) {
     const pts = regressionPoints[type];
     for (const p in pts) {
-      regressions[type][p] = _linearReg(pts[p]);
+      let arr = pts[p];
+      if (arr && arr.length > 0) {
+        /* ★ 新增：去除时段极低值对回归的干扰
+           计算该时段历史占比的中位数，过滤掉低于中位数 20% 的极低异常点（如断崖式故障） */
+        const yArr = arr.map(o => o.y).sort((a, b) => a - b);
+        const n = yArr.length;
+        const med = n % 2 ? yArr[(n - 1) / 2] : (yArr[n / 2 - 1] + yArr[n / 2]) / 2;
+
+        // 只有当该时段正常占比大于 0.5% 时才启动低值过滤，防止误伤本身单量就极低的边缘时段
+        if (med > 0.005) {
+          const floor = med * 0.2;
+          arr = arr.filter(o => o.y >= floor);
+        }
+      }
+      regressions[type][p] = _linearReg(arr);
     }
   }
   const totalRegression = {

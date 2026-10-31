@@ -662,6 +662,7 @@ function renderForecastResult() {
     // 3. 时段占比逻辑
     detailHtml += '<div style="font-weight:bold; color:#5C7099; margin-bottom:4px">3. 时段占比预测逻辑</div>';
     detailHtml += '<div>· 算法：统计历史各时段的占比中位数（已用 3倍MAD 过滤极端占比），结合线性回归的趋势预测，最后进行归一化。</div>';
+    detailHtml += '<div>· <b>低值清洗保护：</b>回归拟合前，系统会自动识别并剔除占比低于中位数 20% 的“时段极低值”（如系统故障、无人值班导致的断崖），防止拉低整体预测。</div>';
     detailHtml += '<div>· 示例（工作日 10 时）：中位数 X%，回归预测 Y%，按 R² 权重混合后为 Z%。</div>';
     detailHtml += '<div style="height:8px"></div>';
 

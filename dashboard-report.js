@@ -742,11 +742,9 @@ function s30AnalysisText(biz, wk, prevWk, preCur, prePrev, preEst) {
     L.push('');
     const bk = cur.fcBuckets;
     const totalMissFc = bk.over.miss + bk.near.miss + bk.under.miss;
-    L.push('| 偏差分档 | 切片数 | Miss 量 | Miss 占比 |');
-    L.push('| --- | ---: | ---: | ---: |');
-    L.push('| 超预测（>120%） | ' + bk.over.cnt + ' | ' + bk.over.miss + ' | ' + (totalMissFc > 0 ? (bk.over.miss / totalMissFc * 100).toFixed(1) + '%' : '—') + ' |');
-    L.push('| 接近预测（100% ~ 120%） | ' + bk.near.cnt + ' | ' + bk.near.miss + ' | ' + (totalMissFc > 0 ? (bk.near.miss / totalMissFc * 100).toFixed(1) + '%' : '—') + ' |');
-    L.push('| 低于预测（<100%） | ' + bk.under.cnt + ' | ' + bk.under.miss + ' | ' + (totalMissFc > 0 ? (bk.under.miss / totalMissFc * 100).toFixed(1) + '%' : '—') + ' |');
+    L.push('- 超预测（>120%）：**' + bk.over.cnt + '** 段，Miss **' + bk.over.miss + '** 单（占比 ' + (totalMissFc > 0 ? (bk.over.miss / totalMissFc * 100).toFixed(1) + '%' : '—') + '）');
+    L.push('- 接近预测（100% ~ 120%）：**' + bk.near.cnt + '** 段，Miss **' + bk.near.miss + '** 单（占比 ' + (totalMissFc > 0 ? (bk.near.miss / totalMissFc * 100).toFixed(1) + '%' : '—') + '）');
+    L.push('- 低于预测（<100%）：**' + bk.under.cnt + '** 段，Miss **' + bk.under.miss + '** 单（占比 ' + (totalMissFc > 0 ? (bk.under.miss / totalMissFc * 100).toFixed(1) + '%' : '—') + '）');
     L.push('');
     /* ★ 新增：超预测严重程度分层统计 */
     const overSlices2 = cur.fcSlices
@@ -841,27 +839,21 @@ function s30AnalysisText(biz, wk, prevWk, preCur, prePrev, preEst) {
 
   if (cur.days.length) {
     L.push('**📅 日期维度**'); L.push('');
-    L.push('| 日期 | 接起率 | Miss 量 | 预测量 | 预测偏差 | 是否达标 |');
-    L.push('| --- | ---: | ---: | ---: | ---: | :---: |');
     for (const d of cur.days) {
-      L.push('| ' + d.date.slice(5) + ' 周' + weekdayOf(d.date) + ' | ' + (d.rate != null ? (d.rate * 100).toFixed(2) + '%' : '—') +
-        ' | ' + d.miss +
-        ' | ' + (d.hasFc ? Math.round(d.forecast) : '—') +
-        ' | ' + (d.bias != null ? (d.bias * 100).toFixed(0) + '%' : '—') +
-        ' | ' + (d.hit ? '✅' : '❌') + ' |');
+      L.push('- ' + d.date.slice(5) + ' 周' + weekdayOf(d.date) + '：接起率 **' + (d.rate != null ? (d.rate * 100).toFixed(2) + '%' : '—') +
+        '**，Miss **' + d.miss + '**' +
+        (d.hasFc ? '，预测量 ' + Math.round(d.forecast) + '，偏差 ' + (d.bias != null ? (d.bias * 100).toFixed(0) + '%' : '—') : '') +
+        ' ' + (d.hit ? '✅' : '❌'));
     }
     L.push('');
   }
 
   if (cur.periods.length) {
     L.push('**⏰ 时段维度**（按 Miss 量降序 TOP5）'); L.push('');
-    L.push('| 时段 | 人工服务量 | Miss 量 | 接起率 | 预测量 | 预测偏差 |');
-    L.push('| --- | ---: | ---: | ---: | ---: | ---: |');
     const sortedP = cur.periods.slice().sort((a, b) => b.miss - a.miss).slice(0, 5);
     for (const p of sortedP) {
-      L.push('| ' + p.period + ' 时 | ' + p.den + ' | ' + p.miss + ' | ' + (p.rate * 100).toFixed(2) + '%' +
-        ' | ' + (p.hasFc ? Math.round(p.forecast) : '—') +
-        ' | ' + (p.bias != null ? (p.bias * 100).toFixed(0) + '%' : '—') + ' |');
+      L.push('- ' + p.period + ' 时：人工服务量 **' + p.den + '**，Miss **' + p.miss + '**，接起率 ' + (p.rate * 100).toFixed(2) + '%' +
+        (p.hasFc ? '，预测量 ' + Math.round(p.forecast) + '，偏差 ' + (p.bias != null ? (p.bias * 100).toFixed(0) + '%' : '—') : ''));
     }
     L.push('');
   }
@@ -1431,8 +1423,6 @@ function reportToText(d) {
 
   L.push('## 一、周报数据汇报'); L.push('');
   L.push('### 📊 核心指标'); L.push('');
-  L.push('| 指标 | 本周 | 环比 | 趋势 |');
-  L.push('| --- | ---: | ---: | :---: |');
   {
     const hasPrev = prev.caseVolume > 0;
     for (const m of METRICS) {
@@ -1455,27 +1445,23 @@ function reportToText(d) {
           trendTxt = good ? '🟢 向好' : '🔴 走弱';
         }
       }
-      L.push('| ' + m.label + ' | ' + fmtVal(v, m) + ' | ' + diffTxt + ' | ' + trendTxt + ' |');
+      L.push('- **' + m.label + '**：' + fmtVal(v, m) + '（环比 ' + diffTxt + '，' + trendTxt + '）');
     }
   }
   L.push('');
   if (dayRows && dayRows.length) {
     L.push('### 📅 本周每日趋势'); L.push('');
-    L.push('| 日期 | CASE | CPD | AHT | 解决率 | 满意度 |');
-    L.push('| --- | ---: | ---: | ---: | ---: | ---: |');
     for (const x of dayRows) {
       const c = x.cur;
-      L.push('| ' + x.day.slice(5) + ' 周' + weekdayOf(x.day) + ' | ' + fmtInt(c.caseVolume) + ' | ' + fmtVal(c.cpd, METRIC_MAP.cpd) + ' | ' + fmtVal(c.aht, METRIC_MAP.aht) + ' | ' + fmtVal(c.solveRate, METRIC_MAP.solveRate) + ' | ' + fmtVal(c.satisfaction, METRIC_MAP.satisfaction) + ' |');
+      L.push('- ' + x.day.slice(5) + ' 周' + weekdayOf(x.day) + '：CASE **' + fmtInt(c.caseVolume) + '**，CPD ' + fmtVal(c.cpd, METRIC_MAP.cpd) + '，AHT ' + fmtVal(c.aht, METRIC_MAP.aht) + '，解决率 ' + fmtVal(c.solveRate, METRIC_MAP.solveRate) + '，满意度 ' + fmtVal(c.satisfaction, METRIC_MAP.satisfaction));
     }
     L.push('');
   }
   if (groups && groups.length) {
     L.push('### 👥 团队表现'); L.push('');
-    L.push('| 组别 | 人数 | CASE | CPD | AHT | 并发 | 解决率 | 满意度 | 质检合格率 |');
-    L.push('| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |');
     for (const g of groups) {
       const c = g.cur;
-      L.push('| ' + g.name + ' | ' + g.count + ' | ' + fmtInt(c.caseVolume) + ' | ' + fmtVal(c.cpd, METRIC_MAP.cpd) + ' | ' + fmtVal(c.aht, METRIC_MAP.aht) + ' | ' + fmtVal(c.concurrency, METRIC_MAP.concurrency) + ' | ' + fmtVal(c.solveRate, METRIC_MAP.solveRate) + ' | ' + fmtVal(c.satisfaction, METRIC_MAP.satisfaction) + ' | ' + fmtVal(c.qualityPassRate, METRIC_MAP.qualityPassRate) + ' |');
+      L.push('- **' + g.name + '**（' + g.count + '人）：CASE **' + fmtInt(c.caseVolume) + '**，CPD ' + fmtVal(c.cpd, METRIC_MAP.cpd) + '，AHT ' + fmtVal(c.aht, METRIC_MAP.aht) + '，并发 ' + fmtVal(c.concurrency, METRIC_MAP.concurrency) + '，解决率 ' + fmtVal(c.solveRate, METRIC_MAP.solveRate) + '，满意度 ' + fmtVal(c.satisfaction, METRIC_MAP.satisfaction) + '，质检合格率 ' + fmtVal(c.qualityPassRate, METRIC_MAP.qualityPassRate));
     }
     L.push('');
   }
@@ -1544,8 +1530,6 @@ function reportToText(d) {
   L.push('## 二、人效部分'); L.push('');
 
   L.push('### 📈 核心人效指标'); L.push('');
-  L.push('| 指标 | 本周 | 周度WoW | 月度目标 | 月度达成 |');
-  L.push('| :--- | :--- | :--- | :--- | :--- |');
 
   // ① CPD
   {
@@ -1559,7 +1543,8 @@ function reportToText(d) {
       const mr = cm / cpdTgt;
       achieveStr += ' (' + pct2(mr) + ') ' + (cm >= cpdTgt ? '🟢' : '🔴');
     }
-    L.push('| **CPD** | ' + trimNum(c) + ' | ' + wowStr + ' | ' + tgtStr + ' | ' + achieveStr + ' |');
+    L.push('**①、CPD：** ' + trimNum(c) + '，| 周度WoW：' + wowStr + ' | ' + monthLabel + '目标：' + tgtStr + '，' + monthLabel + '达成：' + achieveStr + '；');
+    L.push('');
   }
 
   L.push('### 📊 接线量与分类表现'); L.push('');
@@ -1586,11 +1571,9 @@ function reportToText(d) {
   L.push('');
 
   L.push('**👥 分类表现（CPD / 并发）**'); L.push('');
-  L.push('| 分类 | CPD (环比) | 并发 (环比) |');
-  L.push('| :--- | :--- | :--- |');
   for (const cat of ['老人','次月','首月']) {
     const b = byCat[cat];
-    if (!b) { L.push('| ' + cat + ' | — | — |'); continue; }
+    if (!b) { L.push('- ' + cat + '：—'); continue; }
     const cc = b.weekCur.cpd, pc = b.weekPrev.cpd;
     const ddC = (cc != null && pc != null) ? cc - pc : null;
     const arrowC = (ddC == null || Math.abs(ddC) < 1e-9) ? '' : (ddC > 0 ? '↑' : '↓');
@@ -1601,7 +1584,7 @@ function reportToText(d) {
     const arrowN = (ddN == null || Math.abs(ddN) < 1e-9) ? '' : (ddN > 0 ? '↑' : '↓');
     const conStr = num2(cn) + ' (' + arrowN + num2(Math.abs(ddN || 0)) + ')';
 
-    L.push('| ' + cat + ' | ' + cpdStr + ' | ' + conStr + ' |');
+    L.push('- ' + cat + '：CPD ' + cpdStr + '，并发 ' + conStr);
   }
   L.push('');
 
@@ -1610,7 +1593,8 @@ function reportToText(d) {
     const a = cur.aht, ap = prev.aht, am = mCur.aht;
     const dd = (a != null && ap != null) ? a - ap : null;
     const wowStr = (dd == null) ? '—' : (dd > 0 ? '🔺 +' : '🔻 ') + dd.toFixed(2);
-    L.push('| **AHT** | ' + trimNum(a) + ' | ' + wowStr + ' | — | ' + trimNum(am) + ' |');
+    L.push('**②、AHT：** ' + trimNum(a) + '，| 周度WoW：' + wowStr + ' | ' + monthLabel + '达成：' + trimNum(am) + '；');
+    L.push('');
   }
 
   // ③ 并发
@@ -1618,7 +1602,8 @@ function reportToText(d) {
     const c = cur.concurrency, cp = prev.concurrency, cm = mCur.concurrency;
     const dd = (c != null && cp != null) ? c - cp : null;
     const wowStr = (dd == null) ? '—' : (dd > 0 ? '🔺 +' : '🔻 ') + dd.toFixed(2);
-    L.push('| **并发** | ' + trimNum(c) + ' | ' + wowStr + ' | — | ' + trimNum(cm) + ' |');
+    L.push('**③、并发：** ' + trimNum(c) + '，| 周度WoW：' + wowStr + ' | ' + monthLabel + '达成：' + trimNum(cm) + '；');
+    L.push('');
   }
 
   // ④ 30s接起率
@@ -1633,7 +1618,8 @@ function reportToText(d) {
       const mr = rm * 100 / s30Tgt;
       achieveStr += ' (' + mr.toFixed(2) + '%) ' + (mr >= 100 ? '🟢' : '🔴');
     }
-    L.push('| **30s接起率** | ' + (r != null ? (r * 100).toFixed(2) + '%' : '—') + ' | ' + wowStr + ' | ≥ ' + tgtStr + ' | ' + achieveStr + ' |');
+    L.push('**④、30s接起率：** ' + (r != null ? (r * 100).toFixed(2) + '%' : '—') + '，| 周度WoW：' + wowStr + ' | ' + monthLabel + '目标：≥ ' + tgtStr + '，' + monthLabel + '达成：' + achieveStr + '；');
+    L.push('');
   }
 
   // 工时利用率
@@ -1641,9 +1627,9 @@ function reportToText(d) {
     const u = cur.utilization, up = prev.utilization;
     const du = (u != null && up != null) ? u - up : null;
     const wowStr = (du == null) ? '—' : (du > 0 ? '🔺 +' : '🔻 ') + (Math.abs(du) * 100).toFixed(2) + '%';
-    L.push('| **工时利用率** | ' + (u != null ? (u * 100).toFixed(2) + '%' : '—') + ' | ' + wowStr + ' | — | — |');
+    L.push('**本周工时利用率：** ' + (u != null ? (u * 100).toFixed(2) + '%' : '—') + '，| 周度WoW：' + wowStr + '；');
+    L.push('');
   }
-  L.push('');
 
   {
     const aNow = cur.aht, aPrev = prev.aht;
@@ -1658,9 +1644,6 @@ function reportToText(d) {
     if (top3.length) {
       const tag = ahtRose ? '负贡献' : (ahtFell ? '正贡献' : '影响值');
       L.push('**🔍 二级打点 AHT 归因 TOP3（' + tag + '）**'); L.push('');
-      L.push('| 二级打点 | AHT达成 | 周度WoW | 咨询量趋势 | 原因 | ' + tag + ' |');
-      L.push('| :--- | :--- | :--- | :--- | :--- | :--- |');
-
       for (const o of top3) {
         const key = 'aht2r|' + wk + '|' + o.l1 + '|' + o.l2;
         const reason = reasons[key] || '—';
@@ -1670,9 +1653,8 @@ function reportToText(d) {
         const impStr = imp == null ? '—' : trimNum(Math.abs(imp), 2);
         const wowStr = (da == null) ? '—' : dStr(da);
         const volStr = fmtInt(o.volPrev) + ' → ' + fmtInt(o.volNow) + ' (' + (dv2 > 0 ? '+' : '') + fmtInt(dv2) + ')';
-        const nameStr = '**【' + o.l2 + '】**<br><span style="font-size:10px;color:#999">' + o.l1 + '</span>';
-
-        L.push('| ' + nameStr + ' | ' + trimNum(o.ahtNow) + ' | ' + wowStr + ' | ' + volStr + ' | ' + reason + ' | ' + impStr + ' |');
+        
+        L.push('- **【' + o.l2 + '】**（' + o.l1 + '）：AHT达成 ' + trimNum(o.ahtNow) + '，周度WoW ' + wowStr + '，咨询量 ' + volStr + '，原因：' + reason + '，' + tag + '：' + impStr);
       }
       L.push('');
     }

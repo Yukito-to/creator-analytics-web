@@ -500,6 +500,12 @@ function bizToSrc(biz) { return biz === '博主合作' ? 'blogger' : 'buyer'; }
 
 /* ==================== 日期工具 ==================== */
 const _dateCache = new Map();   /* ★ 极速缓存：避免几十万行重复执行正则 */
+/* ★ 性能优化：增加 wk/month/biz 缓存 */
+const _wkCache = new Map();
+const _monthCache = new Map();
+const _bizByL1Cache = new Map();
+const _bizByL1L2Cache = new Map();
+
 function parseDate(v) {
   if (v === '' || v == null) return '';
   if (v instanceof Date) return v.getFullYear()+'-'+pad2(v.getMonth()+1)+'-'+pad2(v.getDate());
@@ -528,8 +534,24 @@ function parseDate(v) {
   _dateCache.set(s, res);
   return res;
 }
-const monthOf = d => d ? d.slice(0,7) : '';
-const wkOf = d => { if (!d) return 0; const t = Date.parse(d + 'T00:00:00Z'); if (isNaN(t)) return 0; return WK_BASE_NUM + Math.floor(Math.floor((t - WK_BASE_UTC) / 86400000) / 7); };
+const monthOf = d => {
+  if (!d) return '';
+  let m = _monthCache.get(d);
+  if (m !== undefined) return m;
+  m = d.slice(0, 7);
+  _monthCache.set(d, m);
+  return m;
+};
+
+const wkOf = d => {
+  if (!d) return 0;
+  let wk = _wkCache.get(d);
+  if (wk !== undefined) return wk;
+  const t = Date.parse(d + 'T00:00:00Z');
+  wk = isNaN(t) ? 0 : WK_BASE_NUM + Math.floor(Math.floor((t - WK_BASE_UTC) / 86400000) / 7);
+  _wkCache.set(d, wk);
+  return wk;
+};
 const dateAdd = (d, delta) => {
   const dd = Number(delta);
   if (!isFinite(dd)) return '';
@@ -687,12 +709,28 @@ async function handleFile(file) {
 function parseCSV(text) {
   if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
 
-  /* ★ 极速路径：整个文本不含引号 → 按行 split 后按逗号切分 */
+  /* ★ 极速路径：整个文本不含引号 → 单次遍历提取行，极大降低内存开销 */
   if (text.indexOf('"') < 0) {
     const rows = [];
-    for (const line of text.split(/\r?\n/)) {
-      if (!line.trim()) continue;
-      rows.push(line.split(','));
+    let start = 0;
+    const len = text.length;
+    for (let i = 0; i < len; i++) {
+      const c = text.charCodeAt(i);
+      if (c === 10 || c === 13) { // \n 或 \r
+        if (i > start) {
+          const line = text.slice(start, i);
+          if (line.trim()) rows.push(line.split(','));
+        }
+        // 处理 \r\n 情况
+        if (c === 13 && i + 1 < len && text.charCodeAt(i + 1) === 10) {
+          i++;
+        }
+        start = i + 1;
+      }
+    }
+    if (start < len) {
+      const line = text.slice(start);
+      if (line.trim()) rows.push(line.split(','));
     }
     return rows;
   }
@@ -724,23 +762,34 @@ function parseCSV(text) {
 
 
 /* ==================== 各 sheet → 对象数组 ==================== */
-function rowsToObjs(kind) {
+function* rowsToObjs(kind) {
   const sheet = S.sheets[kind];
-  if (!sheet) return [];
+  if (!sheet) return;
   const headers = S.headers[kind] || [];
   const map = S.mapping[kind] || {};
-  const idx = {};
-  for (const k in map) idx[k] = map[k] ? headers.indexOf(map[k]) : -1;
-  const out = [];
-  for (let i = 1; i < sheet.rows.length; i++) {
-    const r = sheet.rows[i];
+  
+  const idxList = [];
+  for (const k in map) {
+    if (map[k]) {
+      const c = headers.indexOf(map[k]);
+      if (c !== -1) idxList.push({ key: k, idx: c });
+    }
+  }
+  
+  const rows = sheet.rows;
+  const len = rows.length;
+  for (let i = 1; i < len; i++) {
+    const r = rows[i];
     if (!r || !r.length) continue;
     const o = {};
-    for (const k in idx) o[k] = idx[k] >= 0 && r[idx[k]] !== undefined ? r[idx[k]] : '';
+    for (let j = 0; j < idxList.length; j++) {
+      const item = idxList[j];
+      const val = r[item.idx];
+      o[item.key] = val !== undefined ? val : '';
+    }
     if (!String(o.name||'').trim() && !String(o.date||'').trim() && !String(o.l1||'').trim() && !String(o.id||'').trim() && !String(o.metric||'').trim()) continue;
-    out.push(o);
+    yield o;
   }
-  return out;
 }
 
 /* ==================== 花名册解析 ==================== */
@@ -812,13 +861,33 @@ function srcEmployeeSet(src) {
   _cacheSet(_perfCache.srcEmps, src, s);
   return s;
 }
-function bizByL1(l1, defaultBiz) { const b = S.businessMap[l1] || ''; if (BIZ_LIST.includes(b)) return b; return defaultBiz; }
+function bizByL1(l1, defaultBiz) {
+  const k = l1 + '|' + defaultBiz;
+  let cached = _bizByL1Cache.get(k);
+  if (cached !== undefined) return cached;
+  const b = S.businessMap[l1] || '';
+  const res = BIZ_LIST.includes(b) ? b : defaultBiz;
+  _bizByL1Cache.set(k, res);
+  return res;
+}
+
 function bizByL1L2(l1, l2, defaultBiz) {
+  const k = (l1 || '') + '|' + (l2 || '') + '|' + defaultBiz;
+  let cached = _bizByL1L2Cache.get(k);
+  if (cached !== undefined) return cached;
+  
   const key = (l1 || '') + '|' + (l2 || '');
   const b2 = S.business2Map[key] || '';
-  if (b2) return { biz: b2, l1: l1, l2: l2 };
-  if (defaultBiz === '买手合作') return { biz: '买手合作', l1: '买手合作', l2: '其他' };
-  return { biz: '博主合作', l1: '博主合作', l2: '博主其他' };
+  let res;
+  if (b2) {
+    res = { biz: b2, l1: l1, l2: l2 };
+  } else if (defaultBiz === '买手合作') {
+    res = { biz: '买手合作', l1: '买手合作', l2: '其他' };
+  } else {
+    res = { biz: '博主合作', l1: '博主合作', l2: '博主其他' };
+  }
+  _bizByL1L2Cache.set(k, res);
+  return res;
 }
 function normPeriod(p) {
   const s = String(p == null ? '' : p).trim();
@@ -994,6 +1063,10 @@ function buildAll() {
      否则重新导入文件后视图仍显示旧数据、或残留旧员工选择 */
   _resetPerfCache();
   _dateCache.clear(); /* ★ 导入新文件时清空日期解析缓存 */
+  _wkCache.clear();
+  _monthCache.clear();
+  _bizByL1Cache.clear();
+  _bizByL1L2Cache.clear();
   S._dataVersion = (S._dataVersion || 0) + 1;
   S.s30Dates = new Set();
   S.s30MonthOpen = new Set();

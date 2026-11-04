@@ -70,28 +70,27 @@ self.onmessage = function (e) {
       /* ★ 极限提速：在 dense 模式下，直接读取二维单元格数组 ws['!data'] */
       const rawData = ws['!data'] || [];
       
-      // 1. 预扫描最大列数，避免动态扩容
-      let maxCols = 0;
-      for (let r = 0; r < rawData.length; r++) {
-        if (rawData[r] && rawData[r].length > maxCols) maxCols = rawData[r].length;
-      }
+      /* ★ 性能优化：预分配大数组，去除多余的 maxCols 预扫描。
+         利用主线程 rowsToObjs 对 undefined 的兼容处理，直接保留稀疏数组特性，大幅减小 postMessage 体积。 */
+      const totalRows = rawData.length;
+      rows = new Array(totalRows);
       
-      // 2. 快速构建纯值二维数组（不跳过任何行）
-      for (let r = 0; r < rawData.length; r++) {
+      for (let r = 0; r < totalRows; r++) {
         const rowCells = rawData[r];
-        if (!rowCells) { rows.push([]); continue; }
+        if (!rowCells) { rows[r] = []; continue; }
         
-        const rowArr = new Array(maxCols);
-        for (let c = 0; c < maxCols; c++) {
+        const len = rowCells.length;
+        const rowArr = new Array(len);
+        for (let c = 0; c < len; c++) {
           const cell = rowCells[c];
-          if (!cell) { 
-            rowArr[c] = ''; 
-          } else {
-            // 提取原始值 v，如果没有则退回格式化文本 w
+          if (cell) {
+            // 优先取原始值 v，退回格式化文本 w
             rowArr[c] = cell.v !== undefined ? cell.v : (cell.w !== undefined ? cell.w : '');
+          } else {
+            rowArr[c] = '';
           }
         }
-        rows.push(rowArr);
+        rows[r] = rowArr;
       }
     } catch (err) {
       // 极端异常情况降级回 sheet_to_json

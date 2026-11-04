@@ -795,7 +795,8 @@ function s30AnalysisText(biz, wk, prevWk, preCur, prePrev, preEst) {
       let seq = 1;
       for (const [date, dayImpacts] of groupedImpacts) {
         for (const x of dayImpacts) {
-          L.push(circledNum(seq++) + x.date.slice(5) + ' ' + x.period + ' 时 · 预测 ' + Math.round(x.forecast) +
+          /* ★ 加上 `  - ` 列表符，防止在富文本编辑器中粘连换行 */
+          L.push('  - ' + circledNum(seq++) + ' ' + x.date.slice(5) + ' ' + x.period + ' 时 · 预测 ' + Math.round(x.forecast) +
             ' / 实际 ' + Math.round(x.den) + '（偏差 ' + (x.bias * 100).toFixed(0) +
             '%）· Miss ' + x.miss + '，周度影响值：' + (x.weekImpact * 100).toFixed(2) + '%；');
         }
@@ -817,7 +818,7 @@ function s30AnalysisText(biz, wk, prevWk, preCur, prePrev, preEst) {
            const dM = parseInt(date.slice(5, 7), 10);
            const dD = parseInt(date.slice(8, 10), 10);
            
-           L.push('🔴 **' + dM + '月' + dD + '日  ' + periodStr + ' · 预测 ' + Math.round(sumForecast) + ' / 实际 ' + Math.round(sumDen) +
+           L.push('  - 🔴 **' + dM + '月' + dD + '日  ' + periodStr + ' · 预测 ' + Math.round(sumForecast) + ' / 实际 ' + Math.round(sumDen) +
              '（综合偏差 ' + (sumBias * 100).toFixed(0) + '%）· 累计 Miss ' + sumMiss + '，当日汇总影响值：' + (sumWeekImpact * 100).toFixed(2) + '%；**');
         }
       }
@@ -1543,92 +1544,46 @@ function reportToText(d) {
       const mr = cm / cpdTgt;
       achieveStr += ' (' + pct2(mr) + ') ' + (cm >= cpdTgt ? '🟢' : '🔴');
     }
-    L.push('**①、CPD：** ' + trimNum(c) + '，| 周度WoW：' + wowStr + ' | ' + monthLabel + '目标：' + tgtStr + '，' + monthLabel + '达成：' + achieveStr + '；');
-    L.push('');
+    L.push('- **①、CPD：** ' + trimNum(c) + '，| 周度WoW：' + wowStr + ' | ' + monthLabel + '目标：' + tgtStr + '，' + monthLabel + '达成：' + achieveStr + '；');
   }
 
-  L.push('### 📊 接线量与分类表现'); L.push('');
+  // 接线量
   {
     const bizShort = (biz === '博主合作') ? '博主' : '买手';
     const dv = cur.caseVolume - prev.caseVolume;
-    L.push('- 本周总接线量：**' + fmtInt(cur.caseVolume) + '**（' + fmtInt(prev.caseVolume) + ' → ' + fmtInt(cur.caseVolume) + '，' + dArrow(dv) + fmtInt(Math.abs(dv)) + '）');
+    L.push('  - 本周' + bizShort + '接线量：**' + fmtInt(cur.caseVolume) + '**（' + fmtInt(prev.caseVolume) + ' → ' + fmtInt(cur.caseVolume) + '，' + dArrow(dv) + fmtInt(Math.abs(dv)) + '）');
 
     const cBuyerN = calcBySrcAndL1(src, '买手合作', { wkSet: new Set([wk]) });
     const cBuyerP = calcBySrcAndL1(src, '买手合作', { wkSet: new Set([prevWk]) });
     const dvB = cBuyerN.caseVolume - cBuyerP.caseVolume;
-    L.push('  - 其中买手合作：' + fmtInt(cBuyerN.caseVolume) + '（' + dArrow(dvB) + fmtInt(Math.abs(dvB)) + '）');
+    L.push('  - 其中买手合作接线量：' + fmtInt(cBuyerN.caseVolume) + '（' + fmtInt(cBuyerP.caseVolume) + '→' + fmtInt(cBuyerN.caseVolume) + '，' + dArrow(dvB) + fmtInt(Math.abs(dvB)) + '）');
 
     const cBlogN = calcBySrcAndL1(src, '博主合作', { wkSet: new Set([wk]) });
     const cBlogP = calcBySrcAndL1(src, '博主合作', { wkSet: new Set([prevWk]) });
     const dvBl = cBlogN.caseVolume - cBlogP.caseVolume;
-    L.push('  - 其中博主合作：' + fmtInt(cBlogN.caseVolume) + '（' + dArrow(dvBl) + fmtInt(Math.abs(dvBl)) + '）');
+    L.push('  - 其中博主合作接线量：' + fmtInt(cBlogN.caseVolume) + '（' + fmtInt(cBlogP.caseVolume) + '→' + fmtInt(cBlogN.caseVolume) + '，' + dArrow(dvBl) + fmtInt(Math.abs(dvBl)) + '）');
 
     const schWk = Math.round(schedule.week * 100) / 100;
     const schPrev = Math.round(schedule.prev * 100) / 100;
     const dmp = Math.round((schWk - schPrev) * 100) / 100;
-    L.push('- 本周排班人力：**' + trimNum(schWk, 2) + '**（' + trimNum(schPrev, 2) + ' → ' + trimNum(schWk, 2) + '，' + dArrow(dmp) + trimNum(Math.abs(dmp), 2) + '）');
+    L.push('  - 本周' + bizShort + '排班人力：' + trimNum(schWk, 2) + '（' + trimNum(schPrev, 2) + '→' + trimNum(schWk, 2) + '，' + dArrow(dmp) + trimNum(Math.abs(dmp), 2) + '）');
   }
-  L.push('');
 
-  L.push('**👥 分类表现（CPD / 并发）**'); L.push('');
   for (const cat of ['老人','次月','首月']) {
     const b = byCat[cat];
-    if (!b) { L.push('- ' + cat + '：—'); continue; }
+    if (!b) continue;
     const cc = b.weekCur.cpd, pc = b.weekPrev.cpd;
-    const ddC = (cc != null && pc != null) ? cc - pc : null;
-    const arrowC = (ddC == null || Math.abs(ddC) < 1e-9) ? '' : (ddC > 0 ? '↑' : '↓');
-    const cpdStr = num2(cc) + ' (' + arrowC + num2(Math.abs(ddC || 0)) + ')';
-
-    const cn = b.weekCur.concurrency, pn = b.weekPrev.concurrency;
-    const ddN = (cn != null && pn != null) ? cn - pn : null;
-    const arrowN = (ddN == null || Math.abs(ddN) < 1e-9) ? '' : (ddN > 0 ? '↑' : '↓');
-    const conStr = num2(cn) + ' (' + arrowN + num2(Math.abs(ddN || 0)) + ')';
-
-    L.push('- ' + cat + '：CPD ' + cpdStr + '，并发 ' + conStr);
+    const dd = (cc != null && pc != null) ? cc - pc : null;
+    const arrow = (dd == null || Math.abs(dd) < 1e-9) ? '' : (dd > 0 ? '↑' : '↓');
+    L.push('  - ' + cat + 'CPD：' + num2(cc) + '（' + num2(pc) + '→' + num2(cc) + '，' + arrow + num2(Math.abs(dd || 0)) + '）');
   }
   L.push('');
 
-  // ② AHT
   {
     const a = cur.aht, ap = prev.aht, am = mCur.aht;
     const dd = (a != null && ap != null) ? a - ap : null;
     const wowStr = (dd == null) ? '—' : (dd > 0 ? '🔺 +' : '🔻 ') + dd.toFixed(2);
-    L.push('**②、AHT：** ' + trimNum(a) + '，| 周度WoW：' + wowStr + ' | ' + monthLabel + '达成：' + trimNum(am) + '；');
-    L.push('');
-  }
-
-  // ③ 并发
-  {
-    const c = cur.concurrency, cp = prev.concurrency, cm = mCur.concurrency;
-    const dd = (c != null && cp != null) ? c - cp : null;
-    const wowStr = (dd == null) ? '—' : (dd > 0 ? '🔺 +' : '🔻 ') + dd.toFixed(2);
-    L.push('**③、并发：** ' + trimNum(c) + '，| 周度WoW：' + wowStr + ' | ' + monthLabel + '达成：' + trimNum(cm) + '；');
-    L.push('');
-  }
-
-  // ④ 30s接起率
-  {
-    const r = s30.week.cur.s30Rate, rp = s30.week.prev.s30Rate, rm = s30.month.cur.s30Rate;
-    const dd = (r != null && rp != null) ? r - rp : null;
-    const wowStr = (dd == null) ? '—' : (dd > 0 ? '🔺 +' : '🔻 ') + (Math.abs(dd) * 100).toFixed(2) + '%';
-    const s30Tgt = s30TargetPct(biz);
-    const tgtStr = (s30Tgt != null) ? trimNum(s30Tgt * 100, 2) + '%' : '—';
-    let achieveStr = rm != null ? (rm * 100).toFixed(2) + '%' : '—';
-    if (s30Tgt != null && s30Tgt > 0 && rm != null) {
-      const mr = rm * 100 / s30Tgt;
-      achieveStr += ' (' + mr.toFixed(2) + '%) ' + (mr >= 100 ? '🟢' : '🔴');
-    }
-    L.push('**④、30s接起率：** ' + (r != null ? (r * 100).toFixed(2) + '%' : '—') + '，| 周度WoW：' + wowStr + ' | ' + monthLabel + '目标：≥ ' + tgtStr + '，' + monthLabel + '达成：' + achieveStr + '；');
-    L.push('');
-  }
-
-  // 工时利用率
-  {
-    const u = cur.utilization, up = prev.utilization;
-    const du = (u != null && up != null) ? u - up : null;
-    const wowStr = (du == null) ? '—' : (du > 0 ? '🔺 +' : '🔻 ') + (Math.abs(du) * 100).toFixed(2) + '%';
-    L.push('**本周工时利用率：** ' + (u != null ? (u * 100).toFixed(2) + '%' : '—') + '，| 周度WoW：' + wowStr + '；');
-    L.push('');
+    L.push('- **②、AHT：** ' + trimNum(a) + '，| 周度WoW：' + wowStr + ' | ' + monthLabel + '达成：' + trimNum(am) + '；');
   }
 
   {
@@ -1643,7 +1598,7 @@ function reportToText(d) {
 
     if (top3.length) {
       const tag = ahtRose ? '负贡献' : (ahtFell ? '正贡献' : '影响值');
-      L.push('**🔍 二级打点 AHT 归因 TOP3（' + tag + '）**'); L.push('');
+      L.push('  - **二级AHT（' + tag + '）**');
       for (const o of top3) {
         const key = 'aht2r|' + wk + '|' + o.l1 + '|' + o.l2;
         const reason = reasons[key] || '—';
@@ -1653,47 +1608,83 @@ function reportToText(d) {
         const impStr = imp == null ? '—' : trimNum(Math.abs(imp), 2);
         const wowStr = (da == null) ? '—' : dStr(da);
         const volStr = fmtInt(o.volPrev) + ' → ' + fmtInt(o.volNow) + ' (' + (dv2 > 0 ? '+' : '') + fmtInt(dv2) + ')';
-        
-        L.push('- **【' + o.l2 + '】**（' + o.l1 + '）：AHT达成 ' + trimNum(o.ahtNow) + '，周度WoW ' + wowStr + '，咨询量 ' + volStr + '，原因：' + reason + '，' + tag + '：' + impStr);
+
+        L.push('    - **【' + o.l2 + '】**（' + o.l1 + '）：AHT达成 ' + trimNum(o.ahtNow) + '，周度WoW ' + wowStr + '，咨询量 ' + volStr + '，原因：' + reason + '，' + tag + '：' + impStr);
       }
-      L.push('');
     }
   }
   L.push('');
 
-  /* 以上表格已覆盖 30s接起率与工时利用率，此处不再重复输出旧格式 */
+  {
+    const c = cur.concurrency, cp = prev.concurrency, cm = mCur.concurrency;
+    const dd = (c != null && cp != null) ? c - cp : null;
+    const wowStr = (dd == null) ? '—' : (dd > 0 ? '🔺 +' : '🔻 ') + dd.toFixed(2);
+    L.push('- **③、并发：** ' + trimNum(c) + '，| 周度WoW：' + wowStr + ' | ' + monthLabel + '达成：' + trimNum(cm) + '；');
+  }
+
+  for (const cat of ['老人','次月','首月']) {
+    const b = byCat[cat];
+    if (!b) continue;
+    const cc = b.weekCur.concurrency, pc = b.weekPrev.concurrency;
+    const dd = (cc != null && pc != null) ? cc - pc : null;
+    const arrow = (dd == null || Math.abs(dd) < 1e-9) ? '' : (dd > 0 ? '↑' : '↓');
+    L.push('  - ' + cat + '并发：' + num2(cc) + '（' + num2(pc) + '→' + num2(cc) + '，' + arrow + num2(Math.abs(dd || 0)) + '）');
+  }
+  L.push('');
+
+  {
+    const r = s30.week.cur.s30Rate, rp = s30.week.prev.s30Rate, rm = s30.month.cur.s30Rate;
+    const dd = (r != null && rp != null) ? r - rp : null;
+    const wowStr = (dd == null) ? '—' : (dd > 0 ? '🔺 +' : '🔻 ') + (Math.abs(dd) * 100).toFixed(2) + '%';
+    const s30Tgt = s30TargetPct(biz);
+    const tgtStr = (s30Tgt != null) ? trimNum(s30Tgt * 100, 2) + '%' : '—';
+    let achieveStr = rm != null ? (rm * 100).toFixed(2) + '%' : '—';
+    if (s30Tgt != null && s30Tgt > 0 && rm != null) {
+      const mr = rm * 100 / s30Tgt;
+      achieveStr += ' (' + mr.toFixed(2) + '%) ' + (mr >= 100 ? '🟢' : '🔴');
+    }
+    L.push('- **④、30s接起率：** ' + (r != null ? (r * 100).toFixed(2) + '%' : '—') + '，| 周度WoW：' + wowStr + ' | ' + monthLabel + '目标：≥ ' + tgtStr + '，' + monthLabel + '达成：' + achieveStr + '；');
+  }
+  L.push('');
+
+  {
+    const u = cur.utilization, up = prev.utilization;
+    const du = (u != null && up != null) ? u - up : null;
+    const wowStr = (du == null) ? '—' : (du > 0 ? '🔺 +' : '🔻 ') + (Math.abs(du) * 100).toFixed(2) + '%';
+    L.push('- **本周工时利用率：** ' + (u != null ? (u * 100).toFixed(2) + '%' : '—') + '，| 周度WoW：' + wowStr + '；');
+  }
   L.push('');
 
   L.push('## 三、质量部分'); L.push('');
-  L.push(metricLineText('① 解决率：', cur.solveRate, prev.solveRate, mCur.solveRate, METRIC_MAP.solveRate, tgt, monthLabel));
+  L.push('- ' + metricLineText('① 解决率：', cur.solveRate, prev.solveRate, mCur.solveRate, METRIC_MAP.solveRate, tgt, monthLabel));
   for (const cat of ['首月','次月','老人']) {
     const b = byCat[cat];
-    if (!b) { L.push(cat + '解决率：—'); continue; }
-    L.push(catLineText(cat + '解决率', b.weekCur.solveRate, b.weekPrev.solveRate, METRIC_MAP.solveRate));
+    if (!b) { L.push('  - ' + cat + '解决率：—'); continue; }
+    L.push('  - ' + catLineText(cat + '解决率', b.weekCur.solveRate, b.weekPrev.solveRate, METRIC_MAP.solveRate));
   }
   L.push('');
-  L.push(metricLineText('② 满意度：', cur.satisfaction, prev.satisfaction, mCur.satisfaction, METRIC_MAP.satisfaction, tgt, monthLabel));
+  L.push('- ' + metricLineText('② 满意度：', cur.satisfaction, prev.satisfaction, mCur.satisfaction, METRIC_MAP.satisfaction, tgt, monthLabel));
   for (const cat of ['首月','次月','老人']) {
     const b = byCat[cat];
-    if (!b) { L.push(cat + '满意度：—'); continue; }
-    L.push(catLineText(cat + '满意度', b.weekCur.satisfaction, b.weekPrev.satisfaction, METRIC_MAP.satisfaction));
+    if (!b) { L.push('  - ' + cat + '满意度：—'); continue; }
+    L.push('  - ' + catLineText(cat + '满意度', b.weekCur.satisfaction, b.weekPrev.satisfaction, METRIC_MAP.satisfaction));
   }
   L.push('');
-  L.push(metricLineText('③ 质检合格率：', cur.qualityPassRate, prev.qualityPassRate, mCur.qualityPassRate, METRIC_MAP.qualityPassRate, tgt, monthLabel));
+  L.push('- ' + metricLineText('③ 质检合格率：', cur.qualityPassRate, prev.qualityPassRate, mCur.qualityPassRate, METRIC_MAP.qualityPassRate, tgt, monthLabel));
   {
     const inspNow  = inspectionStats({ src, wkSet: new Set([wk]) });
     const inspPrev = inspectionStats({ src, wkSet: new Set([prevWk]) });
     const dTotal = inspNow.total - inspPrev.total;
     const dPass  = inspNow.pass - inspPrev.pass;
     const dFail  = inspNow.fail - inspPrev.fail;
-    L.push('本周抽检量：' + fmtInt(inspNow.total) + '，（' + fmtInt(inspPrev.total) + '→' + fmtInt(inspNow.total) + '，' + dArrow(dTotal) + fmtInt(Math.abs(dTotal)) + '）');
-    L.push('合格量：' + fmtInt(inspNow.pass) + '，（' + fmtInt(inspPrev.pass) + '→' + fmtInt(inspNow.pass) + '，' + dArrow(dPass) + fmtInt(Math.abs(dPass)) + '）');
-    L.push('不合格量：' + fmtInt(inspNow.fail) + '，（' + fmtInt(inspPrev.fail) + '→' + fmtInt(inspNow.fail) + '，' + dArrow(dFail) + fmtInt(Math.abs(dFail)) + '）');
+    L.push('  - 本周抽检量：' + fmtInt(inspNow.total) + '，（' + fmtInt(inspPrev.total) + '→' + fmtInt(inspNow.total) + '，' + dArrow(dTotal) + fmtInt(Math.abs(dTotal)) + '）');
+    L.push('  - 合格量：' + fmtInt(inspNow.pass) + '，（' + fmtInt(inspPrev.pass) + '→' + fmtInt(inspNow.pass) + '，' + dArrow(dPass) + fmtInt(Math.abs(dPass)) + '）');
+    L.push('  - 不合格量：' + fmtInt(inspNow.fail) + '，（' + fmtInt(inspPrev.fail) + '→' + fmtInt(inspNow.fail) + '，' + dArrow(dFail) + fmtInt(Math.abs(dFail)) + '）');
   }
   for (const cat of ['首月','次月','老人']) {
     const b = byCat[cat];
-    if (!b) { L.push(cat + '质检合格率：—'); continue; }
-    L.push(catLineText(cat + '质检合格率', b.weekCur.qualityPassRate, b.weekPrev.qualityPassRate, METRIC_MAP.qualityPassRate));
+    if (!b) { L.push('  - ' + cat + '质检合格率：—'); continue; }
+    L.push('  - ' + catLineText(cat + '质检合格率', b.weekCur.qualityPassRate, b.weekPrev.qualityPassRate, METRIC_MAP.qualityPassRate));
   }
   L.push('');
   return L.join('\n');

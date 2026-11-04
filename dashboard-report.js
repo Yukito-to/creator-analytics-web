@@ -424,7 +424,8 @@ function formatPeriods(periods) {
     }
   }
   result.push(start === prev ? `${start}` : `${start}-${prev}`);
-  return result.join('、') + '时';
+  /* ★ 每个时段都加上“时”，提升可读性，如：10-16时、18时、20-21时、23时 */
+  return result.join('时、') + '时';
 }
 
 function s30AnalysisHTML(biz, wk, prevWk) {
@@ -516,11 +517,11 @@ function s30AnalysisHTML(biz, wk, prevWk) {
         // 1. 先输出当天的所有明细
         for (const x of dayImpacts) {
           P.push('<div class="rpt-sub">' + circledNum(seq++) + esc(x.date.slice(5)) + ' ' + esc(x.period) + ' 时 · 预测 ' +
-            Math.round(x.forecast) + ' / 实际 ' + Math.round(x.den) + '（偏差 ' + (x.bias * 100).toFixed(0) +
-            '%）· Miss ' + x.miss + '，周度影响值：' + (x.weekImpact * 100).toFixed(2) + '%；</div>');
+            Math.round(x.forecast) + ' 单 / 实际 ' + Math.round(x.den) + ' 单（偏差 ' + (x.bias * 100).toFixed(0) +
+            '%）· Miss ' + x.miss + ' 单，周度影响值：' + (x.weekImpact * 100).toFixed(2) + '%；</div>');
         }
 
-        // 2. 如果当天有 >= 2 个时段，追加红点汇总行
+        // 2. 如果当天有 >= 2 个时段，追加醒目汇总块
         if (dayImpacts.length >= 2) {
           let sumForecast = 0, sumDen = 0, sumNum = 0, sumMiss = 0;
           const pList = [];
@@ -534,9 +535,12 @@ function s30AnalysisHTML(biz, wk, prevWk) {
           const sumBias = sumForecast > 0 ? sumDen / sumForecast : 0;
           const sumWeekImpact = ((cur.totNum + sumMiss) / cur.totDen) - cur.totRate;
           const periodStr = formatPeriods(pList);
-          P.push('<div class="rpt-sub" style="color:#D9363E;font-weight:600;margin-top:4px;">' +
-            '🔴 ' + esc(date.slice(5)) + ' ' + esc(periodStr) + ' · 预测 ' + Math.round(sumForecast) + ' / 实际 ' + Math.round(sumDen) +
-            '（综合偏差 ' + (sumBias * 100).toFixed(0) + '%）· 累计 Miss ' + sumMiss + '，当日汇总影响值：' + (sumWeekImpact * 100).toFixed(2) + '%；</div>');
+          
+          P.push('<div style="margin-top:8px; padding:10px 12px; background:#FDF0F0; border-left:3px solid #D9363E; border-radius:4px; font-size:12.5px; line-height:1.8; color:#333;">' +
+            '<div style="font-weight:700; color:#D9363E; margin-bottom:4px;">🔴 ' + esc(date.slice(5)) + ' 汇总（时段：' + esc(periodStr) + '）</div>' +
+            '预测量：<b>' + Math.round(sumForecast) + '</b> 单，实际量：<b>' + Math.round(sumDen) + '</b> 单，综合偏差：<b>+' + (sumBias * 100).toFixed(0) + '%</b>；<br>' +
+            '累计 Miss：<b>' + sumMiss + '</b> 单，当日汇总影响值：<b>' + (sumWeekImpact * 100).toFixed(2) + '%</b>' +
+            '</div>');
         }
       }
 
@@ -751,8 +755,8 @@ function s30AnalysisText(biz, wk, prevWk) {
       for (const [date, dayImpacts] of groupedImpacts) {
         for (const x of dayImpacts) {
           L.push(circledNum(seq++) + x.date.slice(5) + ' ' + x.period + ' 时 · 预测 ' + Math.round(x.forecast) +
-            ' / 实际 ' + Math.round(x.den) + '（偏差 ' + (x.bias * 100).toFixed(0) +
-            '%）· Miss ' + x.miss + '，周度影响值：' + (x.weekImpact * 100).toFixed(2) + '%；');
+            ' 单 / 实际 ' + Math.round(x.den) + ' 单（偏差 ' + (x.bias * 100).toFixed(0) +
+            '%）· Miss ' + x.miss + ' 单，周度影响值：' + (x.weekImpact * 100).toFixed(2) + '%；');
         }
         if (dayImpacts.length >= 2) {
           let sumForecast = 0, sumDen = 0, sumNum = 0, sumMiss = 0;
@@ -767,8 +771,11 @@ function s30AnalysisText(biz, wk, prevWk) {
           const sumBias = sumForecast > 0 ? sumDen / sumForecast : 0;
           const sumWeekImpact = ((cur.totNum + sumMiss) / cur.totDen) - cur.totRate;
           const periodStr = formatPeriods(pList);
-          L.push('🔴 **' + date.slice(5) + ' ' + periodStr + ' · 预测 ' + Math.round(sumForecast) + ' / 实际 ' + Math.round(sumDen) +
-            '（综合偏差 ' + (sumBias * 100).toFixed(0) + '%）· 累计 Miss ' + sumMiss + '，当日汇总影响值：' + (sumWeekImpact * 100).toFixed(2) + '%；**');
+          
+          L.push('> 🔴 **' + date.slice(5) + ' 汇总（时段：' + periodStr + '）**');
+          L.push('> - 预测量：**' + Math.round(sumForecast) + '** 单 / 实际量：**' + Math.round(sumDen) + '** 单（综合偏差：**+' + (sumBias * 100).toFixed(0) + '%**）');
+          L.push('> - 累计 Miss：**' + sumMiss + '** 单 / 当日汇总影响值：**' + (sumWeekImpact * 100).toFixed(2) + '%**');
+          L.push('');
         }
       }
 

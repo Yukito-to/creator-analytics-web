@@ -70,12 +70,27 @@ self.onmessage = function (e) {
       /* ★ 极限提速：在 dense 模式下，直接读取二维单元格数组 ws['!data'] */
       const rawData = ws['!data'] || [];
       
-      /* ★ 性能优化：预分配大数组，去除多余的 maxCols 预扫描。
-         利用主线程 rowsToObjs 对 undefined 的兼容处理，直接保留稀疏数组特性，大幅减小 postMessage 体积。 */
-      const totalRows = rawData.length;
-      rows = new Array(totalRows);
+      /* ★ 性能优化：截断尾部“幽灵空行”。
+         Excel 用户常因按 Ctrl+End 导致存在百万行无数据的空行。
+         向下扫描最后 100 行找有数据的一行，大幅降低 postMessage 传输和主线程遍历开销。 */
+      let actualRows = rawData.length;
+      let checkLimit = Math.max(0, actualRows - 100);
       
-      for (let r = 0; r < totalRows; r++) {
+      for (let r = actualRows - 1; r >= checkLimit; r--) {
+        const rowCells = rawData[r];
+        if (!rowCells) continue;
+        let hasVal = false;
+        for (let c = 0; c < rowCells.length; c++) {
+          const cell = rowCells[c];
+          if (cell && (cell.v !== undefined ? cell.v !== '' && cell.v != null : cell.w !== undefined && cell.w !== '')) {
+            hasVal = true; break;
+          }
+        }
+        if (hasVal) { actualRows = r + 1; break; }
+      }
+
+      rows = new Array(actualRows);
+      for (let r = 0; r < actualRows; r++) {
         const rowCells = rawData[r];
         if (!rowCells) { rows[r] = []; continue; }
         
@@ -84,7 +99,6 @@ self.onmessage = function (e) {
         for (let c = 0; c < len; c++) {
           const cell = rowCells[c];
           if (cell) {
-            // 优先取原始值 v，退回格式化文本 w
             rowArr[c] = cell.v !== undefined ? cell.v : (cell.w !== undefined ? cell.w : '');
           } else {
             rowArr[c] = '';
@@ -93,7 +107,6 @@ self.onmessage = function (e) {
         rows[r] = rowArr;
       }
     } catch (err) {
-      // 极端异常情况降级回 sheet_to_json
       console.warn('底层读取失败，降级使用 sheet_to_json', err);
       rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
     }

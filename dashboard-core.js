@@ -486,7 +486,17 @@ function _optsKey(o, prefix) {
 }
 
 /* ==================== 格式化工具 ==================== */
-const num = v => { if (v===''||v==null) return 0; const n = typeof v === 'number' ? v : parseFloat(String(v).replace(/,/g,'')); return isNaN(n)?0:n; };
+const num = v => { 
+  if (v === '' || v == null) return 0; 
+  if (typeof v === 'number') return isNaN(v) ? 0 : v;
+  const s = String(v);
+  if (s.indexOf(',') === -1) {
+    const n = parseFloat(s);
+    return isNaN(n) ? 0 : n;
+  }
+  const n = parseFloat(s.replace(/,/g, ''));
+  return isNaN(n) ? 0 : n;
+};
 const fmtVal = (n,m) => { if (n==null||!isFinite(n)) return '—'; if (m.pct) return (n*100).toFixed(m.digits)+'%'; return n.toFixed(m.digits); };
 const fmtInt = v => (v==null||!isFinite(v)) ? '—' : String(Math.round(v));
 const pct2 = v => (v==null||!isFinite(v)) ? '—' : (v*100).toFixed(2)+'%';
@@ -500,6 +510,7 @@ function bizToSrc(biz) { return biz === '博主合作' ? 'blogger' : 'buyer'; }
 
 /* ==================== 日期工具 ==================== */
 const _dateCache = new Map();   /* ★ 极速缓存：避免几十万行重复执行正则 */
+const _numDateCache = new Map(); /* ★ 纯数字日期缓存 */
 /* ★ 性能优化：增加 wk/month/biz 缓存 */
 const _wkCache = new Map();
 const _monthCache = new Map();
@@ -509,7 +520,14 @@ const _bizByL1L2Cache = new Map();
 function parseDate(v) {
   if (v === '' || v == null) return '';
   if (v instanceof Date) return v.getFullYear()+'-'+pad2(v.getMonth()+1)+'-'+pad2(v.getDate());
-  if (typeof v === 'number') { const d = new Date(Date.UTC(1899,11,30) + Math.round(v*86400000)); return d.getUTCFullYear()+'-'+pad2(d.getUTCMonth()+1)+'-'+pad2(d.getUTCDate()); }
+  if (typeof v === 'number') { 
+    const cache = _numDateCache.get(v);
+    if (cache !== undefined) return cache;
+    const d = new Date(Date.UTC(1899,11,30) + Math.round(v*86400000)); 
+    const res = d.getUTCFullYear()+'-'+pad2(d.getUTCMonth()+1)+'-'+pad2(d.getUTCDate());
+    _numDateCache.set(v, res);
+    return res;
+  }
   
   const s = String(v).trim();
   if (_dateCache.has(s)) return _dateCache.get(s);
@@ -531,6 +549,7 @@ function parseDate(v) {
     }
   }
   
+  if (_dateCache.size > 50000) _dateCache.clear(); // 限制容量防内存泄漏
   _dateCache.set(s, res);
   return res;
 }
@@ -762,36 +781,6 @@ function parseCSV(text) {
 
 
 /* ==================== 各 sheet → 对象数组 ==================== */
-function* rowsToObjs(kind) {
-  const sheet = S.sheets[kind];
-  if (!sheet) return;
-  const headers = S.headers[kind] || [];
-  const map = S.mapping[kind] || {};
-  
-  const idxList = [];
-  for (const k in map) {
-    if (map[k]) {
-      const c = headers.indexOf(map[k]);
-      if (c !== -1) idxList.push({ key: k, idx: c });
-    }
-  }
-  
-  const rows = sheet.rows;
-  const len = rows.length;
-  for (let i = 1; i < len; i++) {
-    const r = rows[i];
-    if (!r || !r.length) continue;
-    const o = {};
-    for (let j = 0; j < idxList.length; j++) {
-      const item = idxList[j];
-      const val = r[item.idx];
-      o[item.key] = val !== undefined ? val : '';
-    }
-    if (!String(o.name||'').trim() && !String(o.date||'').trim() && !String(o.l1||'').trim() && !String(o.id||'').trim() && !String(o.metric||'').trim()) continue;
-    yield o;
-  }
-}
-
 /* ==================== 花名册解析 ==================== */
 function parseRoster() {
   S.roster = [];
@@ -1063,6 +1052,7 @@ function buildAll() {
      否则重新导入文件后视图仍显示旧数据、或残留旧员工选择 */
   _resetPerfCache();
   _dateCache.clear(); /* ★ 导入新文件时清空日期解析缓存 */
+  _numDateCache.clear();
   _wkCache.clear();
   _monthCache.clear();
   _bizByL1Cache.clear();
@@ -1084,8 +1074,32 @@ function buildAll() {
   S.forecastInputs = {};   /* ★ 修复：重新导入文件时清空手动输入缓存，避免旧值拦截自动读取 */
   S.unknownShifts = new Set();   /* ★ BUG-FIX：重新导入时清空未知班次集合，避免旧文件残留 */
 
-  if (S.sheets.business) { for (const o of rowsToObjs('business')) { const l1 = String(o.l1||'').trim(); const biz = String(o.biz||'').trim(); if (l1 && biz && !S.businessMap[l1]) S.businessMap[l1] = biz; } }
-  if (S.sheets.business2) { for (const o of rowsToObjs('business2')) { const l1 = String(o.l1||'').trim(); const l2 = String(o.l2||'').trim(); const biz = String(o.biz||'').trim(); if (l1 && l2 && biz) { const key = l1 + '|' + l2; if (!S.business2Map[key]) S.business2Map[key] = biz; } } }
+  if (S.sheets.business) {
+    const rows = S.sheets.business.rows; const len = rows.length;
+    const headers = S.headers.business || []; const map = S.mapping.business || {};
+    const l1i = map.l1 ? headers.indexOf(map.l1) : -1; const bizi = map.biz ? headers.indexOf(map.biz) : -1;
+    for (let i = 1; i < len; i++) {
+      const r = rows[i]; if (!r) continue;
+      const l1v = r[l1i], bizv = r[bizi];
+      if (l1v != null && bizv != null) {
+        const l1 = String(l1v).trim(), biz = String(bizv).trim();
+        if (l1 && biz && !S.businessMap[l1]) S.businessMap[l1] = biz;
+      }
+    }
+  }
+  if (S.sheets.business2) {
+    const rows = S.sheets.business2.rows; const len = rows.length;
+    const headers = S.headers.business2 || []; const map = S.mapping.business2 || {};
+    const l1i = map.l1 ? headers.indexOf(map.l1) : -1; const l2i = map.l2 ? headers.indexOf(map.l2) : -1; const bizi = map.biz ? headers.indexOf(map.biz) : -1;
+    for (let i = 1; i < len; i++) {
+      const r = rows[i]; if (!r) continue;
+      const l1v = r[l1i], l2v = r[l2i], bizv = r[bizi];
+      if (l1v != null && l2v != null && bizv != null) {
+        const l1 = String(l1v).trim(), l2 = String(l2v).trim(), biz = String(bizv).trim();
+        if (l1 && l2 && biz) { const key = l1+'|'+l2; if (!S.business2Map[key]) S.business2Map[key] = biz; }
+      }
+    }
+  }
   if (S.sheets.shift) {
     const rows = S.sheets.shift.rows;
     if (rows && rows.length > 0) {
@@ -1133,18 +1147,44 @@ function buildAll() {
   for (const mod of ['buyer','blogger']) {
     if (!S.sheets[mod]) continue;
     const defaultBiz = (mod === 'buyer') ? '买手合作' : '博主合作';
-    for (const o of rowsToObjs(mod)) {
-      const name = String(o.name||'').trim();
+    const rows = S.sheets[mod].rows;
+    const len = rows.length;
+    const headers = S.headers[mod] || [];
+    const map = S.mapping[mod] || {};
+    const idxList = [];
+    for (const k in map) {
+      if (map[k]) {
+        const c = headers.indexOf(map[k]);
+        if (c !== -1) idxList.push({ key: k, idx: c });
+      }
+    }
+    const idxLen = idxList.length;
+
+    for (let i = 1; i < len; i++) {
+      const r = rows[i];
+      if (!r || !r.length) continue;
+
+      const o = {};
+      for (let j = 0; j < idxLen; j++) {
+        const item = idxList[j];
+        const val = r[item.idx];
+        o[item.key] = val !== undefined && val !== null ? val : '';
+      }
+
+      const name = o.name != null ? String(o.name).trim() : '';
       const date = parseDate(o.date);
       if (!name || !date) continue;
-      const l1Raw = String(o.l1||'').trim();
-      const l2Raw = String(o.l2||'').trim();
+      
+      const l1Raw = o.l1 != null ? String(o.l1).trim() : '';
+      const l2Raw = o.l2 != null ? String(o.l2).trim() : '';
       const biz = bizByL1(l1Raw, defaultBiz);
       const m2 = bizByL1L2(l1Raw, l2Raw, defaultBiz);
+      const period = o.period != null ? String(o.period).trim() : '';
+
       S.records.push({
         src: mod, biz, biz2: m2.biz, name, date,
         wk: wkOf(date), month: monthOf(date),
-        period: String(o.period||'').trim(),
+        period: period,
         l1: m2.l1, l2: m2.l2, l1Raw, l2Raw,
         volume: num(o.volume), s30Num: num(o.s30Num), s30Den: num(o.s30Den),
         aht: num(o.aht), solved: num(o.solved), solveEval: num(o.solveEval),
@@ -1157,21 +1197,70 @@ function buildAll() {
     if (!S.sheets[mod]) continue;
     const src = (mod === 'inspectionBuyer') ? 'buyer' : 'blogger';
     const defaultBiz = (mod === 'inspectionBuyer') ? '买手合作' : '博主合作';
-    for (const o of rowsToObjs(mod)) {
-      const name = String(o.name||'').trim();
+    const rows = S.sheets[mod].rows;
+    const len = rows.length;
+    const headers = S.headers[mod] || [];
+    const map = S.mapping[mod] || {};
+    const idxList = [];
+    for (const k in map) {
+      if (map[k]) {
+        const c = headers.indexOf(map[k]);
+        if (c !== -1) idxList.push({ key: k, idx: c });
+      }
+    }
+    const idxLen = idxList.length;
+
+    for (let i = 1; i < len; i++) {
+      const r = rows[i];
+      if (!r || !r.length) continue;
+      
+      const o = {};
+      for (let j = 0; j < idxLen; j++) {
+        const item = idxList[j];
+        const val = r[item.idx];
+        o[item.key] = val !== undefined && val !== null ? val : '';
+      }
+
+      const name = o.name != null ? String(o.name).trim() : '';
       const date = parseDate(o.date);
-      const id = String(o.id||'').trim();
+      const id = o.id != null ? String(o.id).trim() : '';
       if (!date || !id) continue;
-      const l1 = String(o.l1||'').trim();
+      
+      const l1 = o.l1 != null ? String(o.l1).trim() : '';
       const biz = bizByL1(l1, defaultBiz);
+      
       S.inspections.push({ src, biz, name, date, id, l1, wk: wkOf(date), month: monthOf(date), pass: isPassValue(o.pass) });
     }
   }
   if (S.sheets.worktime) {
-    for (const o of rowsToObjs('worktime')) {
-      const name = String(o.name||'').trim();
+    const rows = S.sheets.worktime.rows;
+    const len = rows.length;
+    const headers = S.headers.worktime || [];
+    const map = S.mapping.worktime || {};
+    const idxList = [];
+    for (const k in map) {
+      if (map[k]) {
+        const c = headers.indexOf(map[k]);
+        if (c !== -1) idxList.push({ key: k, idx: c });
+      }
+    }
+    const idxLen = idxList.length;
+
+    for (let i = 1; i < len; i++) {
+      const r = rows[i];
+      if (!r || !r.length) continue;
+      
+      const o = {};
+      for (let j = 0; j < idxLen; j++) {
+        const item = idxList[j];
+        const val = r[item.idx];
+        o[item.key] = val !== undefined && val !== null ? val : '';
+      }
+
+      const name = o.name != null ? String(o.name).trim() : '';
       const date = parseDate(o.date);
       if (!name || !date) continue;
+      
       S.wtRecords.push({
         name, date, wk: wkOf(date), month: monthOf(date), biz: empBiz(name),
         online: num(o.online), after: num(o.after), official: num(o.official),

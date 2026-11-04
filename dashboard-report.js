@@ -531,42 +531,37 @@ function s30AnalysisHTML(biz, wk, prevWk) {
         groupedImpacts.get(x.date).push(x);
       }
 
-      let tableHtml = '<div class="table-scroll-x" style="margin-top:8px"><table class="rp-table" style="width:100%;font-size:11.5px;">';
-      tableHtml += '<thead><tr><th>日期</th><th>时段</th><th>预测</th><th>实际</th><th>偏差</th><th>Miss</th><th>周度影响值</th></tr></thead><tbody>';
+      let seq = 1;
 
       for (const [date, dayImpacts] of groupedImpacts) {
-        // 输出当日明细
+        // 1. 先输出当天的所有明细
         for (const x of dayImpacts) {
-          const biasColor = x.bias > 2 ? '#D9363E' : (x.bias > 1.5 ? '#E8A33E' : '#F5A623');
-          const biasLabel = x.bias > 2 ? '严重' : (x.bias > 1.5 ? '中度' : '轻度');
-          tableHtml += '<tr>' +
-            '<td>' + esc(x.date.slice(5)) + '</td>' +
-            '<td>' + esc(x.period) + '时</td>' +
-            '<td>' + Math.round(x.forecast) + '</td>' +
-            '<td>' + Math.round(x.den) + '</td>' +
-            '<td style="color:' + biasColor + ';font-weight:600">+' + (x.bias * 100).toFixed(0) + '% <span style="font-size:10px">(' + biasLabel + ')</span></td>' +
-            '<td>' + x.miss + '</td>' +
-            '<td>' + (x.weekImpact * 100).toFixed(2) + '%</td>' +
-          '</tr>';
+          P.push('<div class="rpt-sub">' + circledNum(seq++) + esc(x.date.slice(5)) + ' ' + esc(x.period) + ' 时 · 预测 ' +
+            Math.round(x.forecast) + ' / 实际 ' + Math.round(x.den) + '（偏差 ' + (x.bias * 100).toFixed(0) +
+            '%）· Miss ' + x.miss + '，周度影响值：' + (x.weekImpact * 100).toFixed(2) + '%；</div>');
         }
 
-        // 当日汇总行
+        // 2. 如果当天有 >= 2 个时段，追加按指定模板生成的汇总行
         if (dayImpacts.length >= 2) {
-          let sumForecast = 0, sumDen = 0, sumMiss = 0;
+          let sumForecast = 0, sumDen = 0, sumNum = 0, sumMiss = 0;
           const pList = [];
-          for (const x of dayImpacts) { sumForecast += x.forecast; sumDen += x.den; sumMiss += x.miss; pList.push(x.period); }
+          for (const x of dayImpacts) {
+            sumForecast += x.forecast;
+            sumDen += x.den;
+            sumNum += x.num;
+            sumMiss += x.miss;
+            pList.push(x.period);
+          }
           const sumBias = sumForecast > 0 ? sumDen / sumForecast : 0;
           const sumWeekImpact = ((cur.totNum + sumMiss) / cur.totDen) - cur.totRate;
           const periodStr = formatPeriods(pList);
           
-          tableHtml += '<tr style="background:#FDF0F0; border-top:1px solid #F5C2C2; font-weight:600; color:#D9363E;">' +
-            '<td colspan="2" style="text-align:left;padding-left:12px">🔴 当日汇总<br><span style="font-size:10px;font-weight:normal">(' + esc(periodStr) + ')</span></td>' +
-            '<td>' + Math.round(sumForecast) + '</td>' +
-            '<td>' + Math.round(sumDen) + '</td>' +
-            '<td>+' + (sumBias * 100).toFixed(0) + '%</td>' +
-            '<td>' + sumMiss + '</td>' +
-            '<td>' + (sumWeekImpact * 100).toFixed(2) + '%</td>' +
-          '</tr>';
+          const dM = parseInt(date.slice(5, 7), 10);
+          const dD = parseInt(date.slice(8, 10), 10);
+          
+          P.push('<div class="rpt-sub" style="color:#D9363E;font-weight:600;margin-top:6px;">' +
+            '🔴 ' + dM + '月' + dD + '日  ' + esc(periodStr) + ' · 预测 ' + Math.round(sumForecast) + ' / 实际 ' + Math.round(sumDen) +
+            '（综合偏差 ' + (sumBias * 100).toFixed(0) + '%）· 累计 Miss ' + sumMiss + '，当日汇总影响值：' + (sumWeekImpact * 100).toFixed(2) + '%；</div>');
         }
       }
 
@@ -574,24 +569,20 @@ function s30AnalysisHTML(biz, wk, prevWk) {
       const rateX = (cur.totRate * 100).toFixed(2) + '%';
       const rateY = ((cur.totNum + missAll) / cur.totDen * 100).toFixed(2) + '%';
       const liftZ = (((cur.totNum + missAll) / cur.totDen) - cur.totRate) * 100;
-      const thPctNum = (th * 100).toFixed(2);
       const hitAfterFill = (cur.totNum + missAll) / cur.totDen;
-      const verdict = hitAfterFill >= th
-        ? '✅ 回补后可达标'
-        : '❌ 回补后仍差 ' + ((th - hitAfterFill) * 100).toFixed(2) + ' pp';
 
-      tableHtml += '<tr style="background:#F8F7F4; font-weight:700; border-top:2px solid #D5D2CB;">' +
-        '<td colspan="5" style="text-align:right">合计：</td>' +
-        '<td style="color:#B33">' + missAll + '</td>' +
-        '<td>' + liftZ.toFixed(2) + ' pp</td>' +
-      '</tr>';
-      tableHtml += '</tbody></table></div>';
+
+
+      const verdict2 = hitAfterFill >= cur.th 
+        ? '✅ 回补后可达标' 
+        : '❌ 回补后仍差 ' + ((cur.th - hitAfterFill) * 100).toFixed(2) + ' pp';
       
-      tableHtml += '<div class="rpt-sub" style="margin-top:8px;padding:8px 12px;background:#F0F7F2;border-radius:6px;">' +
-        '若全部回补，30S 接起率可由 <b>' + rateX + '</b> 提升至 <b>' + rateY + '</b>（目标 ' + (th * 100).toFixed(2) + '%）；<b style="color:' + (hitAfterFill >= th ? '#6EA980' : '#D9363E') + '">' + verdict + '</b>' +
-      '</div>';
 
-      P.push(tableHtml);
+        '若全部回补，30S 接起率可由 <b>' + rateX + '</b> 提升至 <b>' + rateY + '</b>（目标 ' + (th * 100).toFixed(2) + '%）；<b style="color:' + (hitAfterFill >= th ? '#6EA980' : '#D9363E') + '">' + verdict + '</b>' +
+
+      P.push('<div class="rpt-sub" style="margin-top:8px"><b>合计：</b>共 <b>' + impacts.length + '</b> 个时段，累计 Miss <b>' + missAll +
+        '</b> 单；若全部回补，30S 接起率可由 <b>' + rateX + '</b> 提升至 <b>' + rateY + '</b>，提升 <b>' + liftZ.toFixed(2) +
+        ' pp</b>（目标 ' + (cur.th * 100).toFixed(2) + '%）；' + verdict2 + '；</div>');
     }
   }
 
@@ -792,23 +783,33 @@ function s30AnalysisText(biz, wk, prevWk) {
         groupedImpacts.get(x.date).push(x);
       }
 
-      L.push('| 日期 | 时段 | 预测 | 实际 | 偏差 | Miss | 周度影响值 |');
-      L.push('| :--- | :--- | :--- | :--- | :--- | :--- | :--- |');
-      
+      let seq = 1;
       for (const [date, dayImpacts] of groupedImpacts) {
         for (const x of dayImpacts) {
-          const biasLabel = x.bias > 2 ? '严重' : (x.bias > 1.5 ? '中度' : '轻度');
-          L.push('| ' + x.date.slice(5) + ' | ' + x.period + '时 | ' + Math.round(x.forecast) + ' | ' + Math.round(x.den) + ' | +' + (x.bias * 100).toFixed(0) + '% (' + biasLabel + ') | ' + x.miss + ' | ' + (x.weekImpact * 100).toFixed(2) + '% |');
+          L.push(circledNum(seq++) + x.date.slice(5) + ' ' + x.period + ' 时 · 预测 ' + Math.round(x.forecast) +
+            ' / 实际 ' + Math.round(x.den) + '（偏差 ' + (x.bias * 100).toFixed(0) +
+            '%）· Miss ' + x.miss + '，周度影响值：' + (x.weekImpact * 100).toFixed(2) + '%；');
         }
         
         if (dayImpacts.length >= 2) {
-           let sumForecast = 0, sumDen = 0, sumMiss = 0;
+           let sumForecast = 0, sumDen = 0, sumNum = 0, sumMiss = 0;
            const pList = [];
-           for (const x of dayImpacts) { sumForecast += x.forecast; sumDen += x.den; sumMiss += x.miss; pList.push(x.period); }
+           for (const x of dayImpacts) {
+             sumForecast += x.forecast;
+             sumDen += x.den;
+             sumNum += x.num;
+             sumMiss += x.miss;
+             pList.push(x.period);
+           }
            const sumBias = sumForecast > 0 ? sumDen / sumForecast : 0;
            const sumWeekImpact = ((cur.totNum + sumMiss) / cur.totDen) - cur.totRate;
            const periodStr = formatPeriods(pList);
-           L.push('| **🔴 ' + date.slice(5) + ' 汇总** | **' + periodStr + '** | **' + Math.round(sumForecast) + '** | **' + Math.round(sumDen) + '** | **+' + (sumBias * 100).toFixed(0) + '%** | **' + sumMiss + '** | **' + (sumWeekImpact * 100).toFixed(2) + '%** |');
+           
+           const dM = parseInt(date.slice(5, 7), 10);
+           const dD = parseInt(date.slice(8, 10), 10);
+           
+           L.push('🔴 **' + dM + '月' + dD + '日  ' + periodStr + ' · 预测 ' + Math.round(sumForecast) + ' / 实际 ' + Math.round(sumDen) +
+             '（综合偏差 ' + (sumBias * 100).toFixed(0) + '%）· 累计 Miss ' + sumMiss + '，当日汇总影响值：' + (sumWeekImpact * 100).toFixed(2) + '%；**');
         }
       }
 
@@ -816,14 +817,13 @@ function s30AnalysisText(biz, wk, prevWk) {
       const rateX = (cur.totRate * 100).toFixed(2) + '%';
       const rateY = ((cur.totNum + missAll) / cur.totDen * 100).toFixed(2) + '%';
       const liftZ = (((cur.totNum + missAll) / cur.totDen) - cur.totRate) * 100;
-      const thPctNum = (th * 100).toFixed(2);
       const hitAfterFill = (cur.totNum + missAll) / cur.totDen;
-      const verdict = hitAfterFill >= th
-        ? '✅ 回补后可达标'
-        : '❌ 回补后仍差 ' + ((th - hitAfterFill) * 100).toFixed(2) + ' pp';
+      const verdict2 = hitAfterFill >= cur.th 
+        ? '✅ 回补后可达标' 
+        : '❌ 回补后仍差 ' + ((cur.th - hitAfterFill) * 100).toFixed(2) + ' pp';
       
       L.push('');
-      L.push('**合计：**共 **' + impacts.length + '** 个时段，累计 Miss **' + missAll + '** 单；若全部回补，30S 接起率可由 **' + rateX + '** 提升至 **' + rateY + '**（提升 **' + liftZ.toFixed(2) + ' pp**，目标 ' + thPctNum + '%）；**' + verdict + '**');
+      L.push('**合计：**共 **' + impacts.length + '** 个时段，累计 Miss **' + missAll + '** 单；若全部回补，30S 接起率可由 **' + rateX + '** 提升至 **' + rateY + '**，提升 **' + liftZ.toFixed(2) + ' pp**（目标 ' + (cur.th * 100).toFixed(2) + '%）；**' + verdict2 + '**');
       L.push('');
     }
   }

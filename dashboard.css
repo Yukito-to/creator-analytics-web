@@ -102,7 +102,7 @@ body {
 .tabs {
   display: flex; gap: 6px; padding: 8px 12px;
   background: var(--bg);
-  position: sticky; top: calc(52px + env(safe-area-inset-top)); z-index: 90;
+  position: sticky; top: calc(var(--tabs-top, 52px) + env(safe-area-inset-top)); z-index: 90;
   overflow-x: auto; -webkit-overflow-scrolling: touch;
   flex-wrap: nowrap; scrollbar-width: none;
   border-bottom: 1px solid var(--border);

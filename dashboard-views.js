@@ -1263,13 +1263,18 @@ function renderSLA() {
     return matched.length > 0;                  /* 有匹配员工才保留 */
   });
 
+  /* ★ P2-FIX：maxPossible 只累加"已计分项"的满分，与 totalScore 口径严格一致。
+     避免"目标已读到但实际值算不出"的项拉低达成率。 */
   let totalScore = 0, totalWeight = 0, scored = 0, maxPossible = 0;
   for (const c of computed) {
-    if (c.score.finalScore != null) { totalScore += c.score.finalScore; scored++; }
     if (c.score.weight != null) totalWeight += c.score.weight;
-    if (c.cfg.tiers.length && c.cfg.weight != null) {
-      const maxPts = Math.max.apply(null, c.cfg.tiers.map(t => t.points));
-      maxPossible += maxPts * c.cfg.weight;
+    if (c.score.finalScore != null) {
+      totalScore += c.score.finalScore;
+      scored++;
+      if (c.cfg.tiers.length && c.cfg.weight != null) {
+        const maxPts = Math.max.apply(null, c.cfg.tiers.map(t => t.points));
+        maxPossible += maxPts * c.cfg.weight;
+      }
     }
   }
 
@@ -1280,7 +1285,7 @@ function renderSLA() {
           '<div class="d">满分 ' + maxPossible.toFixed(2) + '</div></div>' +
         '<div class="rp-kpi" style="border-left-color:#7CAE8B"><div class="k">达成率</div><div class="v">' +
           (maxPossible > 0 ? (totalScore / maxPossible * 100).toFixed(1) + '%' : '—') + '</div>' +
-          '<div class="d">得分 / 满分</div></div>' +
+          '<div class="d">已计分项得分 / 已计分项满分</div></div>' +
         '<div class="rp-kpi"><div class="k">权重合计</div><div class="v">' + (totalWeight * 100).toFixed(2) + '%</div>' +
           '<div class="d">' + scored + ' / ' + computed.length + ' 项已计分</div></div>' +
       '</div>'

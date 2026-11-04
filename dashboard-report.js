@@ -428,8 +428,9 @@ function formatPeriods(periods) {
   return result.join('时、') + '时';
 }
 
-function s30AnalysisHTML(biz, wk, prevWk) {
-  const cur = s30AnalysisData(biz, wk);
+function s30AnalysisHTML(biz, wk, prevWk, preCur, prePrev, preEst) {
+  /* ★ P1-FIX：优先使用调用方传入的预计算结果，避免重复扫描 */
+  const cur = preCur || s30AnalysisData(biz, wk);
   if (!cur) return '';
   const th = cur.th;
   const thPct = (th * 100).toFixed(2);
@@ -626,7 +627,8 @@ function s30AnalysisHTML(biz, wk, prevWk) {
     }
   }
 
-  const prev = s30AnalysisData(biz, prevWk);
+  /* ★ P1-FIX：使用预计算结果 */
+  const prev = prePrev || s30AnalysisData(biz, prevWk);
   if (prev && prev.totDen > 0) {
     const dRate = cur.totRate - prev.totRate;
     const dMiss = (cur.totDen - cur.totNum) - (prev.totDen - prev.totNum);
@@ -682,7 +684,7 @@ function s30AnalysisHTML(biz, wk, prevWk) {
       sg.push(s);
     }
     /* ★ 第 5 条：月度缺口 + 假定后续接起率 100% 推算达成日期 */
-    const est = s30EstimateAchieveDate(biz, wk);
+    const est = (preEst !== undefined) ? preEst : s30EstimateAchieveDate(biz, wk);
     if (est) {
       const dM = parseInt(est.targetDate.slice(5, 7), 10);
       const dD = parseInt(est.targetDate.slice(8, 10), 10);
@@ -691,8 +693,18 @@ function s30AnalysisHTML(biz, wk, prevWk) {
         '%」测算，月度需至少多接起 <b>' + est.gapMonth + ' 单</b>才能达标；' +
         '按月度日均进线量 <b>' + fmtInt(est.avgDaily) + '</b> 单、假定后续接起率 <b>100%</b>（理论最快）测算，' +
         '预计 <b>' + dM + '月' + dD + '日</b>（还需 <b>' + est.needDays +
-        '</b> 天）月度累计接起率可达成目标 <b>' + (est.targetRate * 100).toFixed(2) + '%</b>。'
+        '</b> 天）月度累计接起率可达成目标 <b>' + (est.targetRate * 100).toFixed(2) + '%</b>。' +
+        '（注：推算基准为数据最新日期，非"今天"。）'
       );
+    } else {
+      /* ★ P2-FIX：无法推算时给用户明确提示，避免"建议消失了"的困惑 */
+      const m30chk = calcByL1(biz, { monthSet: new Set([S.month]) });
+      if (m30chk && m30chk.s30Den > 0 && m30chk.s30Rate < s30Threshold(biz)) {
+        sg.push(
+          '按当前数据，无法在合理时间范围（≤3650 天）内推算月度达成日期。' +
+          '可能原因：月度日均进线量过小、月度数据天数不足，或缺口过大。建议补充历史数据或人工评估目标合理性。'
+        );
+      }
     }
     sg.forEach((s, i) => P.push('<div class="rpt-sub">' + (i + 1) + '. ' + s + '</div>'));
   }
@@ -700,8 +712,9 @@ function s30AnalysisHTML(biz, wk, prevWk) {
   return P.join('');
 }
 
-function s30AnalysisText(biz, wk, prevWk) {
-  const cur = s30AnalysisData(biz, wk);
+function s30AnalysisText(biz, wk, prevWk, preCur, prePrev, preEst) {
+  /* ★ P1-FIX：优先使用预计算结果 */
+  const cur = preCur || s30AnalysisData(biz, wk);
   if (!cur) return [];
   const th = cur.th;
   const thPct = (th * 100).toFixed(2);
@@ -855,7 +868,7 @@ function s30AnalysisText(biz, wk, prevWk) {
     L.push('');
   }
 
-  const prev = s30AnalysisData(biz, prevWk);
+  const prev = prePrev || s30AnalysisData(biz, prevWk);
   if (prev && prev.totDen > 0) {
     const dRate = cur.totRate - prev.totRate;
     const dMiss = (cur.totDen - cur.totNum) - (prev.totDen - prev.totNum);
@@ -908,7 +921,7 @@ function s30AnalysisText(biz, wk, prevWk) {
       sg.push(s);
     }
     /* ★ 第 5 条：月度缺口 + 假定后续接起率 100% 推算达成日期 */
-    const est = s30EstimateAchieveDate(biz, wk);
+    const est = (preEst !== undefined) ? preEst : s30EstimateAchieveDate(biz, wk);
     if (est) {
       const dM = parseInt(est.targetDate.slice(5, 7), 10);
       const dD = parseInt(est.targetDate.slice(8, 10), 10);
@@ -917,8 +930,18 @@ function s30AnalysisText(biz, wk, prevWk) {
         '%」测算，月度需至少多接起 **' + est.gapMonth + ' 单**才能达标；' +
         '按月度日均进线量 **' + fmtInt(est.avgDaily) + '** 单、假定后续接起率 **100%**（理论最快）测算，' +
         '预计 **' + dM + '月' + dD + '日**（还需 **' + est.needDays +
-        '** 天）月度累计接起率可达成目标 **' + (est.targetRate * 100).toFixed(2) + '%**。'
+        '** 天）月度累计接起率可达成目标 **' + (est.targetRate * 100).toFixed(2) + '%**。' +
+        '（注：推算基准为数据最新日期，非"今天"。）'
       );
+    } else {
+      /* ★ P2-FIX：无法推算时提示 */
+      const m30chk = calcByL1(biz, { monthSet: new Set([S.month]) });
+      if (m30chk && m30chk.s30Den > 0 && m30chk.s30Rate < s30Threshold(biz)) {
+        sg.push(
+          '按当前数据，无法在合理时间范围（≤3650 天）内推算月度达成日期。' +
+          '可能原因：月度日均进线量过小、月度数据天数不足，或缺口过大。建议补充历史数据或人工评估目标合理性。'
+        );
+      }
     }
     sg.forEach((s, i) => L.push((i + 1) + '. ' + s));
     L.push('');
@@ -1046,6 +1069,12 @@ function buildReport(biz, wk) {
     };
   }).filter(x => x.cur.caseVolume > 0);
   const att = attendanceByWeek(allEmps, wk);
+  /* ★ P1-FIX：预计算 30S 分析，避免 renderReport（reportHTML）+ copyReport（reportToText）
+     各算一次造成重复全量扫描。同时缓存月度达成推算，供两处复用。 */
+  const s30AnaCur  = (typeof s30AnalysisData === 'function') ? s30AnalysisData(biz, wk)     : null;
+  const s30AnaPrev = (typeof s30AnalysisData === 'function') ? s30AnalysisData(biz, prevWk) : null;
+  const s30Est     = (typeof s30EstimateAchieveDate === 'function') ? s30EstimateAchieveDate(biz, wk) : null;
+
   return {
     biz, src, wk, prevWk, month, monthLabel,
     week:  { cur: weekCur,  prev: weekPrev },
@@ -1059,6 +1088,8 @@ function buildReport(biz, wk) {
     dayRows, groups, emps: empRows, att,
     cur: weekCur, prev: weekPrev,
     s30Cur: s30wCur, s30Prev: s30wPrev,
+    _s30Ana:   { cur: s30AnaCur, prev: s30AnaPrev },   // ★ P1-FIX
+    _s30Est:   s30Est,                                  // ★ P1-FIX
   };
 }
 
@@ -1174,7 +1205,7 @@ function reportHTML(d) {
       '<div class="rp-kpi"><div class="k">30S Miss 量</div><div class="v">' + fmtInt(s30.week.cur.s30Miss) + '</div></div>' +
       '<div class="rp-kpi"><div class="k">达标阈值</div><div class="v">≥ ' + (th * 100).toFixed(2) + '%</div></div>' +
     '</div>');
-    P.push(s30AnalysisHTML(biz, wk, prevWk));
+    P.push(s30AnalysisHTML(biz, wk, prevWk, d._s30Ana && d._s30Ana.cur, d._s30Ana && d._s30Ana.prev, d._s30Est));
   }
 
   if (att && att.sum > 0) {
@@ -1487,7 +1518,7 @@ function reportToText(d) {
     L.push('- 30S Miss 量：' + fmtInt(s30.week.cur.s30Miss));
     L.push('- 达标阈值：≥ ' + (th * 100).toFixed(2) + '%');
     L.push('');
-    const anal = s30AnalysisText(biz, wk, prevWk);
+    const anal = s30AnalysisText(biz, wk, prevWk, d._s30Ana && d._s30Ana.cur, d._s30Ana && d._s30Ana.prev, d._s30Est);
     if (anal.length) { for (const ln of anal) L.push(ln); }
     L.push('');
   }
@@ -1791,173 +1822,6 @@ function downloadReportMd() {
   } catch (err) {
     console.error(err);
     toast('❌ 下载失败：' + err.message);
-  }
-}
-
-/* ============================================================
-   App 装配入口：事件绑定 / 初始化启动 / 全局 Tooltip
-   （原 dashboard-ai.js 的入口部分）
-   ============================================================ */
-
-function init() {
-  ['peMetric', 'tmMetric'].forEach(id => {
-    if (typeof ensureChipContainer === 'function') ensureChipContainer(id);
-  });
-  bindEvents();
-  renderTargetConfig();
-  switchView('import');
-}
-if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
-else init();
-
-/* ★ 移动端 Tooltip：点击 ? 号时弹出解释 */
-document.addEventListener('click', function(e) {
-  const helpEl = e.target.closest('.help');
-  if (helpEl && helpEl.getAttribute('data-tip')) {
-    // 阻止事件冒泡，避免触发表格排序或折叠
-    e.stopPropagation();
-    const tipText = helpEl.getAttribute('data-tip');
-    // 复用 core 里的 toast 函数（如果没有找到 toast，则用 alert 兜底）
-    if (typeof toast === 'function') {
-      toast(tipText);
-    } else {
-      alert(tipText);
-    }
-  }
-});
-
-/* ★ 事件绑定主函数 */
-function bindEvents() {
-  const on = (sel, evt, fn) => { const el = $(sel); if (el) el.addEventListener(evt, fn); };
-  on('#tabs', 'click', e => {
-    const b = e.target.closest('button');
-    if (!b) return;
-    switchView(b.dataset.view);
-    if (b.dataset.view === 'report') renderTargetConfig();
-    if (b.dataset.view === 'sla') renderSLA();
-    if (b.dataset.view === 'forecast') { renderForecastConfig(); renderForecastResult(); }
-  });
-  const dz = $('#dropZone'), fi = $('#fileInput');
-  if (dz && fi) {
-    dz.addEventListener('click', () => fi.click());
-    fi.addEventListener('change', () => { if (fi.files && fi.files[0]) handleFile(fi.files[0]); fi.value = ''; });
-    dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('over'); });
-    dz.addEventListener('dragleave', () => dz.classList.remove('over'));
-    dz.addEventListener('drop', e => { e.preventDefault(); dz.classList.remove('over'); if (e.dataTransfer.files && e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]); });
-  } else console.error('[bindEvents] 未找到 #dropZone 或 #fileInput');
-  on('#hideLeft', 'change', e => { S.hidden = e.target.checked; renderRoster(); refreshAll(); });
-  on('#btnReset', 'click', () => {
-    if (!confirm('确定要清除已导入数据吗？（花名册离职记忆、出勤调整记录会保留）')) return;
-    S.sheets = {}; S.headers = {}; S.mapping = {};
-    S.roster = []; S.records = []; S.wtRecords = []; S.inspections = [];
-    S.slaBuyer = []; S.slaBlogger = [];
-    S.businessMap = {}; S.business2Map = {}; S.shiftMap = {}; S.schedule = {};
-    S.forecastBuyer = {}; S.forecastBlogger = {};
-    S.volumeForecast = {};
-    S.scheduleDates = []; S.month = ''; S.latestDate = ''; S.latestWK = 0;
-    S.expandedRows = new Set();
-    /* ★ 重置派生状态，确保下次导入走全解析路径 */
-    S._lastFileName = '';
-    S._dataVersion = 0;
-    S.personSel = new Set();
-    S.teamSel = { group: new Set(), batch: new Set(), category: new Set() };
-    /* ★ BUG-FIX：重置时清空预测页每日总量输入，否则下次导入仍显示旧输入 */
-    S.forecastInputs = {};
-    S.forecastHolidays = new Set();
-    S.forecastWorkdays = new Set();
-    try {
-      localStorage.removeItem('creator_forecast_holidays');
-      localStorage.removeItem('creator_forecast_workdays');
-    } catch (_) {}
-    if (typeof _resetPerfCache === 'function') _resetPerfCache();
-    const ds = $('#dataStatus'); if (ds) { ds.textContent = '未导入'; ds.classList.remove('pill-on'); ds.classList.add('pill-off'); }
-    const pw = $('#progressWrap'); if (pw) pw.classList.add('hidden');
-    const is = $('#importSummary'); if (is) is.innerHTML = '';
-    const mb = $('#mappingBody'); if (mb) mb.innerHTML = '';
-    const rt = $('#rosterTable'); if (rt) rt.innerHTML = '';
-    const ov = $('#ovBody'); if (ov) ov.innerHTML = '';
-    const pb = $('#peBody'); if (pb) pb.innerHTML = '';
-    const pn = $('#peNames'); if (pn) pn.innerHTML = '';
-    const tb = $('#tmBody'); if (tb) tb.innerHTML = '';
-    const td = $('#tmDims'); if (td) td.innerHTML = '';
-    const s3 = $('#s30Top'); if (s3) s3.innerHTML = '';
-    const s3d = $('#s30Dates'); if (s3d) s3d.innerHTML = '';
-    const s3b = $('#s30Body'); if (s3b) s3b.innerHTML = '';
-    const a2 = $('#a2Body'); if (a2) a2.innerHTML = '';
-    const sl = $('#slaBody'); if (sl) sl.innerHTML = '';
-    const atCal = $('#peAttCalendar'); if (atCal) { atCal.innerHTML = ''; atCal.classList.add('hidden'); }
-    const fc = $('#fcResult'); if (fc) fc.innerHTML = '';
-    const fn = $('#fcNotes'); if (fn) fn.innerHTML = '';
-    const ftip = $('#fcAutoTip'); if (ftip) { ftip.style.display = 'none'; ftip.innerHTML = ''; }
-    const rb = $('#rpBody'); if (rb) rb.innerHTML = '';
-    const rc = $('#btnRpCopy'); if (rc) rc.disabled = true;
-    const rm = $('#btnRpMd'); if (rm) rm.disabled = true;
-  });
-  on('#rosterSearch', 'input', renderRoster);
-  on('#ovBiz', 'change', renderOverview);
-  on('#peBiz', 'change', () => {
-    S.personSel.clear();
-    S.expandedRows = new Set();
-    const all = $('#peAll');
-    if (all) all.checked = false;
-    refreshPersonOptions();
-    renderPerson();
-  });
-  on('#peAll', 'change', e => {
-    const bizEl = $('#peBiz');
-    const biz = (bizEl && bizEl.value) || '买手合作';
-    const src = bizToSrc(biz);
-    if (e.target.checked) {
-      S.personSel.clear();
-      const srcEmps = srcEmployeeSet(src);
-      let emps = S.roster.filter(x => employeeVisible(x) && srcEmps.has(x.name) && /一线/.test(x.attr||''));
-      if (!emps.length) emps = S.roster.filter(x => employeeVisible(x) && srcEmps.has(x.name));
-      emps.forEach(x => S.personSel.add(x.name));
-    } else S.personSel.clear();
-    renderPerson();
-  });
-  on('#peToggle', 'click', () => { const el = $('#peNames'); if (el) el.classList.toggle('collapsed'); });
-  on('#tmBiz', 'change', () => {
-    S.teamSel = { group:new Set(), batch:new Set(), category:new Set() };
-    S.expandedRows = new Set();
-    refreshTeamOptions();
-    renderTeam();
-  });
-  on('#a2Biz', 'change', renderAHT2);
-  on('#slaBiz', 'change', renderSLA);
-  on('#s30Biz', 'change', () => {
-    S.expandedRows = new Set();
-    renderS30();
-  });
-  on('#rpBiz', 'change', () => { renderTargetConfig(); renderReport(); });
-  on('#rpWK', 'change', renderReport);
-  on('#btnRpCopy', 'click', copyReport);
-  on('#btnRpMd', 'click', downloadReportMd);
-
-  on('#fcBiz', 'change', () => { renderForecastConfig(); renderForecastResult(); });
-  on('#fcStartDate', 'change', () => { renderForecastConfig(); renderForecastResult(); });
-  on('#fcDays', 'change', () => { renderForecastConfig(); renderForecastResult(); });
-  on('#fcSampleWeeks', 'change', renderForecastConfig);
-  on('#btnFcRun', 'click', renderForecastResult);
-  on('#btnFcCopy', 'click', copyForecastMd);
-  on('#btnFcClear', 'click', clearForecastInputs);
-
-  const peTabs = $('#peSubTabs');
-  if (peTabs && !peTabs._bound) {
-    peTabs._bound = true;
-    peTabs.addEventListener('click', e => {
-      const btn = e.target.closest('.sub-tab');
-      if (!btn) return;
-      const sub = btn.dataset.sub;
-      peTabs.querySelectorAll('.sub-tab').forEach(b => b.classList.toggle('active', b === btn));
-      const wrap = document.getElementById('view-person');
-      if (!wrap) return;
-      wrap.querySelectorAll('.sub-view').forEach(v => v.classList.remove('active'));
-      const target = document.getElementById('peSub-' + sub);
-      if (target) target.classList.add('active');
-      if (sub === 'team' && typeof renderTeam === 'function') renderTeam();
-      if (sub === 'emp'  && typeof renderPerson === 'function') renderPerson();
-    });
   }
 }
 

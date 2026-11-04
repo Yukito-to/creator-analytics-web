@@ -392,11 +392,12 @@ function renderForecastConfig() {
       && !userHoliday;
 
     const typeLabel = isBloggerSpecial ? ('博主' + dom + '日') : dateTypeLabel(date);
-    const typeColor = typeLabel === '节假日' ? '#E8A33E'
-                    : typeLabel === '调休上班' ? '#C75C5C'
-                    : typeLabel === '周末' ? '#C4B0CE'
+    /* ★ P2-FIX：dateTypeLabel 现在返回 "周末(手动休)" 等带后缀的标签，改用 indexOf 前缀匹配 */
+    const typeColor = typeLabel.indexOf('节假日') === 0 ? '#E8A33E'
+                    : typeLabel.indexOf('调休上班') === 0 ? '#C75C5C'
+                    : typeLabel.indexOf('周末') === 0 ? '#C4B0CE'
                     : typeLabel.indexOf('博主') === 0 ? '#C75C5C'
-                    : typeLabel.indexOf('自定义') === 0 ? '#7B8FBF'
+                    : (typeLabel.indexOf('自定义') === 0 || typeLabel.indexOf('工作日') === 0) ? '#7B8FBF'
                     : '#77778A';
 
     const isWeekendRow = shouldUseWeekendPattern(date) || isBloggerSpecial;
@@ -458,7 +459,8 @@ function renderForecastConfig() {
     });
   });
 
-  try { renderForecastResult(); } catch (e) { console.warn('[renderForecastResult]', e); }
+  /* ★ P1-FIX：去掉自动调用 renderForecastResult。
+     改为由 bindEvents 统一显式调用一次，避免 change 事件触发双重计算。 */
 }
 
 /* ==================== 收集每日总量 ==================== */
@@ -546,11 +548,12 @@ function renderForecastResult() {
   thead += '<tr>';
   for (const r of results) {
     const label = r.typeLabel || '';
-    const color = label === '节假日' ? '#E8A33E'
-                : label === '调休上班' ? '#C75C5C'
-                : label === '周末' ? '#C4B0CE'
+    /* ★ P2-FIX：同 renderForecastConfig，改用前缀匹配 */
+    const color = label.indexOf('节假日') === 0 ? '#E8A33E'
+                : label.indexOf('调休上班') === 0 ? '#C75C5C'
+                : label.indexOf('周末') === 0 ? '#C4B0CE'
                 : label.indexOf('博主') === 0 ? '#C75C5C'
-                : label.indexOf('自定义') === 0 ? '#7B8FBF'
+                : (label.indexOf('自定义') === 0 || label.indexOf('工作日') === 0) ? '#7B8FBF'
                 : '#77778A';
     const srcTag = FORECAST_SOURCE_LABEL[r.totalSource] || '—';   // ★ BUG-FIX P2：统一来源标签
     thead += '<th style="text-align:center;vertical-align:middle;color:' + color + ';font-weight:500;font-size:11px;padding-top:4px;padding-bottom:5px">' + label +

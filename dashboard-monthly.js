@@ -584,12 +584,21 @@ function initMonthlyReportOptions() {
   const monthEl = $('#mrMonth');
   if (!bizEl || !monthEl) return;
 
+  /* ★ P0-FIX：用 AbortController 撤销旧监听，避免 _mrBound 短路导致后续数据导入后监听丢失 */
+  if (bizEl._mrCtrl)   bizEl._mrCtrl.abort();
+  if (monthEl._mrCtrl) monthEl._mrCtrl.abort();
+  bizEl._mrCtrl   = new AbortController();
+  monthEl._mrCtrl = new AbortController();
+
   const curBiz = bizEl.value;
   bizEl.innerHTML = BIZ_LIST.map(b => '<option>' + b + '</option>').join('');
   if (BIZ_LIST.includes(curBiz)) bizEl.value = curBiz;
 
+  /* ★ P2-FIX：合并三源（records + wtRecords + inspections）的月份 */
   const monthsSet = new Set();
-  for (const r of S.records) if (r.month) monthsSet.add(r.month);
+  for (const r of S.records)     if (r.month) monthsSet.add(r.month);
+  for (const r of S.wtRecords)   if (r.month) monthsSet.add(r.month);
+  for (const r of S.inspections) if (r.month) monthsSet.add(r.month);
   const months = Array.from(monthsSet).sort().reverse();
 
   const curMonth = monthEl.value;
@@ -597,18 +606,13 @@ function initMonthlyReportOptions() {
   if (months.includes(curMonth)) monthEl.value = curMonth;
   else if (months.length) monthEl.value = months[0];
 
-  if (!bizEl._mrBound) {
-    bizEl._mrBound = true;
-    bizEl.addEventListener('change', renderMonthlyReport);
-  }
-  if (!monthEl._mrBound) {
-    monthEl._mrBound = true;
-    monthEl.addEventListener('change', renderMonthlyReport);
-  }
+  bizEl.addEventListener('change', renderMonthlyReport,   { signal: bizEl._mrCtrl.signal });
+  monthEl.addEventListener('change', renderMonthlyReport, { signal: monthEl._mrCtrl.signal });
 
   const copyBtn = $('#btnMrCopy');
-  if (copyBtn && !copyBtn._mrBound) {
-    copyBtn._mrBound = true;
+  if (copyBtn) {
+    if (copyBtn._mrCtrl) copyBtn._mrCtrl.abort();
+    copyBtn._mrCtrl = new AbortController();
     copyBtn.addEventListener('click', async () => {
       try {
         const biz = bizEl.value;
@@ -622,6 +626,6 @@ function initMonthlyReportOptions() {
       } catch (err) {
         toast('❌ 复制失败：' + err.message);
       }
-    });
+    }, { signal: copyBtn._mrCtrl.signal });
   }
 }

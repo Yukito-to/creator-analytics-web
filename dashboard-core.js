@@ -8,7 +8,7 @@
 const $  = s => document.querySelector(s);
 const $$ = s => Array.from(document.querySelectorAll(s));
 const pad2 = n => String(n).padStart(2, '0');
-const esc  = s => String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+const esc  = s => String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 /* ==================== 常量 ==================== */
@@ -379,13 +379,14 @@ function dateTypeLabel(date) {
   const userHoliday = S.forecastHolidays && S.forecastHolidays.has(date);
   const userWorkday = S.forecastWorkdays && S.forecastWorkdays.has(date);
   if (userHoliday) {
-    if (auto === 'weekend') return '周末';
-    if (auto === 'holiday') return '节假日';
+    /* ★ P2-FIX：手动勾选后明确标注"手动休"，避免用户误以为勾选未生效 */
+    if (auto === 'weekend') return '周末(手动休)';
+    if (auto === 'holiday') return '节假日(手动休)';
     return '自定义休';
   }
   if (userWorkday) {
     if (auto === 'workday') return '调休上班';
-    if (auto === 'holiday' || auto === 'weekend') return '自定义班';
+    if (auto === 'holiday' || auto === 'weekend') return '工作日(手动班)';
     return '工作日';
   }
   if (auto === 'holiday') return '节假日';
@@ -414,21 +415,23 @@ const S = {
   forecastHolidays:new Set(),
   forecastWorkdays:new Set(),
   _dataVersion: 0,
-  _lastFileName: ''   // ★ BUG-FIX P1：用于判断二次导入是否同一文件
+  _lastFileName: '',   // ★ BUG-FIX P1：用于判断二次导入是否同一文件
+  _allSheetNames: []   // ★ P0-FIX：记录本次所有 sheet 名（含未识别），供二次导入复用
 };
 
 /* ==================== 性能缓存层 ==================== */
 /* ★ 缓存容量上限：单次导入内视图切换可能积累数万条 key，移动端有内存压力 */
 const _PERF_CACHE_MAX = 2000;
 function _cacheSet(map, key, value) {
+  /* ★ P2-FIX：LRU 淘汰。key 已存在时先删再插刷新位置；满时只淘汰最旧一个，避免误删热点 key */
+  if (map.has(key)) {
+    map.delete(key);
+    map.set(key, value);
+    return;
+  }
   if (map.size >= _PERF_CACHE_MAX) {
-    const toDelete = Math.floor(map.size / 2);
-    const iter = map.keys();
-    for (let i = 0; i < toDelete; i++) {
-      const k = iter.next();
-      if (k.done) break;
-      map.delete(k.value);
-    }
+    const firstKey = map.keys().next().value;
+    if (firstKey !== undefined) map.delete(firstKey);
   }
   map.set(key, value);
 }
@@ -447,6 +450,8 @@ function _resetPerfCache() {
     s30Agg: new Map(),
     timeCols: null,
   };
+  /* ★ P1-FIX：清空按员工分组的索引，buildAll 末尾会重建 */
+  S._idx = null;
 }
 _resetPerfCache();
 
@@ -463,8 +468,8 @@ function _setKey(set, prefix) {
   const arr = [];
   for (const v of set) arr.push(String(v));
   arr.sort();
-  if (arr.length <= 64) return prefix + '[' + arr.join(',') + ']';
-  return prefix + '#' + arr.length + '#' + _hashStr(arr.join(','));
+  /* ★ P0-FIX：去掉 32 位哈希，改为全量拼接。2000 key × 300 字 ≈ 600KB，可接受；彻底消除碰撞风险 */
+  return prefix + '[' + arr.join(',') + ']';
 }
 
 function _optsKey(o, prefix) {
@@ -635,20 +640,17 @@ async function handleFile(file) {
          - 但若文件名与上次不同（用户换了文件），必须全解析，避免新 sheet 被跳过
          - 若用户点「重置」后 S.sheets = {}，也会重新触发全解析。 */
       const neededSheets = (function () {
-        // ★ BUG-FIX P1：仅同一文件的二次导入才走局部解析，换文件必全解析
+        /* ★ P0-FIX：用完整的 sheet 名列表（含未识别 sheet），
+           避免二次导入同名文件时漏掉用户在 Excel 中新增的 sheet */
         if (!S._lastFileName || S._lastFileName !== file.name) return null;
-        const keys = Object.keys(S.sheets || {});
-        if (!keys.length) return null;
-        const names = [];
-        for (const k of keys) {
-          const sh = S.sheets[k];
-          if (sh && sh.name) names.push(sh.name);
-        }
-        return names.length ? names : null;
+        const names = S._allSheetNames;
+        return (names && names.length) ? names : null;
       })();
       sheets = await XlsxParser.parseWorkbook(buf, (p, t) => setProgress(p * 0.85, t), neededSheets);  // ★ BUG-FIX P0：必须 await
     }
     S._lastFileName = file.name;   // ★ BUG-FIX P1：记录本次文件名，供下次判断是否同文件
+    /* ★ P0-FIX：记录完整 sheet 名（含未识别 sheet），供同文件二次导入使用 */
+    S._allSheetNames = sheets.map(s => s.name || '');
 
     setProgress(88, '识别工作表类型…');
     S.sheets = {}; S.headers = {}; S.mapping = {};
@@ -1146,6 +1148,29 @@ function buildAll() {
   const _aliveNames = new Set(S.roster.map(e => e.name));
   if (S.personSel) for (const n of Array.from(S.personSel)) if (!_aliveNames.has(n)) S.personSel.delete(n);
   if (S.attOverride) for (const n of Object.keys(S.attOverride)) if (!_aliveNames.has(n)) delete S.attOverride[n];
+
+  /* ★ P1-FIX：构建按员工分组的索引，供 filterRecs / filterWt / inspectionStats 快速路径使用。
+     在 10 万行 + 百人团队场景下，单员工查询从 O(N) 降到 O(该员工行数)，提速 ~100×。 */
+  S._idx = {
+    recByName:  new Map(),
+    wtByName:   new Map(),
+    inspByName: new Map(),
+  };
+  for (const r of S.records) {
+    let arr = S._idx.recByName.get(r.name);
+    if (!arr) { arr = []; S._idx.recByName.set(r.name, arr); }
+    arr.push(r);
+  }
+  for (const r of S.wtRecords) {
+    let arr = S._idx.wtByName.get(r.name);
+    if (!arr) { arr = []; S._idx.wtByName.set(r.name, arr); }
+    arr.push(r);
+  }
+  for (const r of S.inspections) {
+    let arr = S._idx.inspByName.get(r.name);
+    if (!arr) { arr = []; S._idx.inspByName.set(r.name, arr); }
+    arr.push(r);
+  }
 }
 
 function attOf(name, date) {
@@ -1189,7 +1214,17 @@ function filterRecs(o) {
   const cached = _perfCache.filterRecs.get(key);
   if (cached) return cached;
   const { nameSet, dateSet, wkSet, monthSet, bizL1, src } = o || {};
-  const result = S.records.filter(r => {
+
+  /* ★ P1-FIX：单员工快速路径，从索引取子集 O(K) 而非全量 O(N) */
+  let baseRecs;
+  if (nameSet && nameSet.size === 1 && S._idx) {
+    const name = nameSet.values().next().value;
+    baseRecs = S._idx.recByName.get(name) || [];
+  } else {
+    baseRecs = S.records;
+  }
+
+  const result = baseRecs.filter(r => {
     if (bizL1 && r.biz !== bizL1) return false;
     if (src && r.src !== src) return false;
     if (nameSet && !nameSet.has(r.name)) return false;
@@ -1206,7 +1241,17 @@ function filterWt(o) {
   const cached = _perfCache.filterWt.get(key);
   if (cached) return cached;
   const { nameSet, dateSet, wkSet, monthSet, bizL1, srcEmps } = o || {};
-  const result = S.wtRecords.filter(r => {
+
+  /* ★ P1-FIX：单员工快速路径 */
+  let baseWts;
+  if (nameSet && nameSet.size === 1 && S._idx) {
+    const name = nameSet.values().next().value;
+    baseWts = S._idx.wtByName.get(name) || [];
+  } else {
+    baseWts = S.wtRecords;
+  }
+
+  const result = baseWts.filter(r => {
     if (bizL1 && r.biz !== bizL1) return false;
     if (srcEmps && !srcEmps.has(r.name)) return false;
     if (nameSet && !nameSet.has(r.name)) return false;
@@ -1223,9 +1268,19 @@ function inspectionStats(o) {
   const cached = _perfCache.inspectionStats.get(key);
   if (cached) return cached;
   const { nameSet, dateSet, wkSet, monthSet, bizL1, src } = o || {};
+
+  /* ★ P1-FIX：单员工快速路径 */
+  let baseInsps;
+  if (nameSet && nameSet.size === 1 && S._idx) {
+    const name = nameSet.values().next().value;
+    baseInsps = S._idx.inspByName.get(name) || [];
+  } else {
+    baseInsps = S.inspections;
+  }
+
   const seen = new Set();
   let total = 0, passCount = 0;
-  for (const r of S.inspections) {
+  for (const r of baseInsps) {
     if (bizL1 && r.biz !== bizL1) continue;
     if (src && r.src !== src) continue;
     if (nameSet && !nameSet.has(r.name)) continue;
@@ -1335,15 +1390,20 @@ function timeCols() {
     for (let i = 1; i <= 7 && last7.length + fallback.length < 7; i++) { const d = dateAdd(latest, -i); if (d && !dateSet.has(d)) fallback.push(d); }
     last7 = Array.from(new Set([...last7, ...fallback])).sort().slice(-7);
   }
-  /* ★ 双月独立推算：当前月 + 上个月，各自独立成列 */
+  /* ★ P2-FIX：动态收集所有数据月份（records + wtRecords + inspections 三源），
+     取最近 2 个月（含 S.month）。数据只有 1 个月时显示 1 个月，不会凭空造出"上个月"。 */
   let months = [];
-  if (S.month) {
-    const y = parseInt(S.month.slice(0, 4), 10);
-    const m = parseInt(S.month.slice(5, 7), 10);
-    const prevM = m === 1 ? 12 : m - 1;
-    const prevY = m === 1 ? y - 1 : y;
-    const prevMonth = prevY + '-' + pad2(prevM);
-    months = [prevMonth, S.month];
+  const monthSet = new Set();
+  for (const r of S.records)     if (r.month) monthSet.add(r.month);
+  for (const r of S.wtRecords)   if (r.month) monthSet.add(r.month);
+  for (const r of S.inspections) if (r.month) monthSet.add(r.month);
+  const allMonths = Array.from(monthSet).sort();
+  if (S.month && allMonths.includes(S.month)) {
+    const idx = allMonths.indexOf(S.month);
+    const start = Math.max(0, idx - 1);
+    months = allMonths.slice(start, idx + 1);
+  } else {
+    months = allMonths.slice(-2);
   }
   
   // 生成独立的月份标签：['9月', '10月']
@@ -1535,9 +1595,10 @@ function s30TargetFromSLA(biz) {
   return t.s30Rate != null ? t.s30Rate : null;
 }
 function s30Threshold(biz) {
-  const v = s30TargetFromSLA(biz);
-  if (v != null) return v;
-  return S30_THRESHOLD[biz] != null ? S30_THRESHOLD[biz] : 0.97;
+  /* ★ P0-FIX：统一走 s30TargetPct（含手动覆盖），与 UI 显示口径严格一致，
+     避免"显示 95% 但按 SLA 值判定"的分叉。s30TargetPct 已在本函数后声明，
+     function 声明会提升，安全。 */
+  return s30TargetPct(biz);
 }
 function s30TargetPct(biz) {
   const t = getTargets(biz);
@@ -2038,11 +2099,16 @@ function generateForecast(biz, metricKey, sampleWeeks, startDate, days, dailyTot
     }
 
     let diff = targetTotal - floorSum;
-    if (diff > 0) {
-      // 按小数部分从大到小排序，将剩余的单量依次分配，尽量保证每个有占比的时段至少分到 1 单
+    if (diff > 0 && remainders.length > 0) {
+      // 按小数部分从大到小排序，将剩余单量依次分配
       remainders.sort((a, b) => b.rem - a.rem);
-      for (let i = 0; i < diff && i < remainders.length; i++) {
-        row.periods[remainders[i].p]++;
+      /* ★ P3-FIX：即使 diff > remainders.length（share 总和不严格为 1 时的极端情况），
+         也用循环回绕保证全部分配完，不会丢单 */
+      let i = 0;
+      while (diff > 0) {
+        row.periods[remainders[i % remainders.length].p]++;
+        diff--;
+        i++;
       }
     }
     // 同步修正 total 为整数，保证 UI 和导出的合计完全一致

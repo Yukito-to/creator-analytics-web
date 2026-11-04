@@ -579,8 +579,6 @@ function s30AnalysisHTML(biz, wk, prevWk, preCur, prePrev, preEst) {
         : '❌ 回补后仍差 ' + ((cur.th - hitAfterFill) * 100).toFixed(2) + ' pp';
       
 
-        '若全部回补，30S 接起率可由 <b>' + rateX + '</b> 提升至 <b>' + rateY + '</b>（目标 ' + (th * 100).toFixed(2) + '%）；<b style="color:' + (hitAfterFill >= th ? '#6EA980' : '#D9363E') + '">' + verdict + '</b>' +
-
       P.push('<div class="rpt-sub" style="margin-top:8px"><b>合计：</b>共 <b>' + impacts.length + '</b> 个时段，累计 Miss <b>' + missAll +
         '</b> 单；若全部回补，30S 接起率可由 <b>' + rateX + '</b> 提升至 <b>' + rateY + '</b>，提升 <b>' + liftZ.toFixed(2) +
         ' pp</b>（目标 ' + (cur.th * 100).toFixed(2) + '%）；' + verdict2 + '；</div>');
